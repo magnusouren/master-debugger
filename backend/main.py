@@ -100,22 +100,34 @@ async def run_server(config: "SystemConfig") -> None:
         config: System configuration.
     """
     from backend.api.server import Server
+    import signal
     
     server = Server(config)
     
     print("Starting servers...")
     
+    # Set up signal handlers for graceful shutdown
+    loop = asyncio.get_running_loop()
+    shutdown_event = asyncio.Event()
+    
+    def signal_handler():
+        print("\nShutdown signal received...")
+        shutdown_event.set()
+    
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, signal_handler)
+    
     # Keep the server running until interrupted
     try:
         await server.start()
-        # Keep running indefinitely
-        while True:
-            await asyncio.sleep(1)
+        # Wait for shutdown signal
+        await shutdown_event.wait()
     except asyncio.CancelledError:
         print("Server shutdown requested")
     finally:
+        print("Stopping servers...")
         await server.stop()
-    await server.run_async()
+        print("Servers stopped gracefully")
 
 
 def main() -> int:
