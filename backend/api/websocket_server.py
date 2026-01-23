@@ -200,13 +200,13 @@ class WebSocketServer:
             "connected_at": asyncio.get_event_loop().time(),
         }
         
-        print(f"  Client connected: {client_id}")
+        print(f"[WebSocket] Client connected: {client_id}")
         
         try:
             async for message in websocket:
                 await self._process_message(message, client_id)
         except Exception as e:
-            print(f"  Client error: {e}")
+            print(f"[WebSocket] Client error: {e}")
         finally:
             await self._handle_disconnection(client_id)
     
@@ -217,7 +217,7 @@ class WebSocketServer:
         Args:
             client_id: ID of disconnected client.
         """
-        print(f"  Client disconnected: {client_id}")
+        print(f"[WebSocket] Client disconnected: {client_id}")
         if client_id in self._client_info:
             websocket = self._client_info[client_id].get("websocket")
             if websocket in self._clients:
@@ -256,7 +256,7 @@ class WebSocketServer:
             # Log context updates
             if message.type == MessageType.CONTEXT_UPDATE:
                 # payload: ContextUpdate = message.payload  # Explicitly typing payload as ContextUpdate
-                print(f"  [WebSocket] Processing context update from client {client_id}: ")
+                print(f"[WebSocket] Processing context update from client {client_id}: ")
 
             handler = self._message_handlers.get(message.type)
             if handler:

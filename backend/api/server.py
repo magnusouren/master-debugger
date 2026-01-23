@@ -50,8 +50,8 @@ class Server:
     
     async def start(self) -> None:
         """Start all server components."""
-        print(f"  Starting WebSocket server on ws://{self._config.controller.websocket_host}:{self._config.controller.websocket_port}")
-        print(f"  Starting REST API server on http://{self._config.controller.api_host}:{self._config.controller.api_port}")
+        print(f"[Server] Starting WebSocket server on ws://{self._config.controller.websocket_host}:{self._config.controller.websocket_port}")
+        print(f"[Server] Starting REST API server on http://{self._config.controller.api_host}:{self._config.controller.api_port}")
         
         # Wire up the components
         self._wire_components()
@@ -64,18 +64,18 @@ class Server:
         await self._controller.initialize()
         
         self._is_running = True
-        print("  All servers started successfully")
+        print("[Server] All servers started successfully! \n")
     
     async def stop(self) -> None:
         """Stop all server components gracefully."""
-        print("Stopping servers...")
+        print("[Server] Stopping servers...")
         self._is_running = False
         
         await self._controller.shutdown()
         await self._websocket_server.stop()
         await self._rest_api.stop()
         
-        print("All servers stopped")
+        print("[Server] All servers stopped")
     
     def run(self) -> None:
         """
@@ -151,8 +151,8 @@ class Server:
     
     def _setup_websocket_handlers(self) -> None:
         async def on_context_update(message: WebSocketMessage, client_id: str) -> None:
-            print(f"  [Server] Received context update from client {client_id}")
-            
+            print(f"[Server] Received context update from client {client_id}")
+
             # Convert payload into your internal CodeContext type
             ctx = CodeContext.from_dict(message.payload) 
             await self._controller.handle_context_update(ctx)
