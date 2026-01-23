@@ -84,14 +84,14 @@ class RuntimeController:
         Returns:
             True if initialization successful.
         """
-        print("  Initializing runtime controller...")
+        print("[Runtime Controller] Initializing runtime controller...")
         self._status = SystemStatus.READY
         self._stats["session_start"] = asyncio.get_event_loop().time()
         return True
     
     async def shutdown(self) -> None:
         """Shutdown all system components gracefully."""
-        print("  Shutting down runtime controller...")
+        print("[Runtime Controller] Shutting down runtime controller...")
         self._status = SystemStatus.DISCONNECTED
     
     def configure(self, config: SystemConfig) -> None:
@@ -179,24 +179,16 @@ class RuntimeController:
         self._current_code_context = context
         self._stats["samples_processed"] += 1
         
-        print(f"  [Runtime Controller] Context update file: {context.file_path}, "
+        print(f"[Runtime Controller] Context update file: {context.file_path}, "
               f"cursor: L{context.cursor_position.line if context.cursor_position else '?'}")
         
         # Check if feedback should be generated
         if self.should_generate_feedback():
             feedback = await self.trigger_feedback_generation()
             if feedback:
-                print(f"    → Generated {len(feedback.items)} feedback items")
+                print(f"[Runtime Controller] → Generated {len(feedback.items)} feedback item(s)")
                 self._stats["feedback_generated"] += 1
-    
-    async def request_context(self) -> None:
-        msg = WebSocketMessage(
-            type=MessageType.CONTEXT_REQUEST,
-            timestamp=int(datetime.utcnow().timestamp() * 1000),
-            payload={},
-            message_id=None,
-        )
-        await self._emit(msg)
+
         
     async def send_feedback(self, feedback: FeedbackResponse) -> bool:
         msg = WebSocketMessage(
@@ -239,7 +231,9 @@ class RuntimeController:
         Returns:
             True if feedback should be generated.
         """
-        pass  # TODO: Implement feedback decision logic
+        # TODO: Implement feedback condition checking
+
+        return True 
     
     async def trigger_feedback_generation(self) -> Optional[FeedbackResponse]:
         """
@@ -248,7 +242,13 @@ class RuntimeController:
         Returns:
             Generated feedback or None.
         """
-        pass  # TODO: Implement feedback triggering
+
+        return await self._feedback_layer.generate_feedback_cached(
+            context=self._current_code_context,
+            user_state=self._current_user_state,
+            feedback_types=None, # TODO - decide if different types needed
+        )
+
     
     def get_feedback_cooldown_remaining(self) -> float:
         """
