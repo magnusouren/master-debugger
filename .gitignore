@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+.env
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+.mypy_cache/
+.pytest_cache/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# VS Code Extension
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/*.vsix
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (keep example, ignore actual)
+backend/config.yaml
+
+# Data
+*.csv
+*.json
+!package.json
+!tsconfig.json
+data/

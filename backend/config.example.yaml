@@ -1,0 +1,66 @@
+# Eye Tracking Debugger Configuration
+# Copy this file to config.yaml and customize as needed
+
+# Signal Processing Layer
+signal_processing:
+  input_sampling_rate_hz: 60.0
+  window_length_seconds: 1.0
+  window_overlap_ratio: 0.5
+  output_frequency_hz: 5.0
+  enabled_metrics:
+    - fixation_duration
+    - saccade_amplitude
+    - pupil_diameter
+    - blink_rate
+    - gaze_dispersion
+  min_valid_sample_ratio: 0.5
+  interpolate_missing: true
+  max_gap_to_interpolate_ms: 100.0
+
+# Forecasting Tool (proactive mode only)
+forecasting:
+  enabled: false
+  prediction_horizon_seconds: 2.0
+  update_rate_hz: 5.0
+  model_path: null
+  model_type: lstm
+  history_window_seconds: 5.0
+  min_confidence_threshold: 0.5
+
+# Reactive Tool
+reactive_tool:
+  window_size_seconds: 3.0
+  model_type: rule_based  # rule_based, ml_classifier, sequence_model
+  model_path: null
+  thresholds:
+    high_load: 0.7
+    medium_load: 0.4
+    low_load: 0.2
+  score_smoothing_factor: 0.3
+  min_confidence_for_action: 0.6
+
+# Feedback Layer
+feedback_layer:
+  llm_provider: null  # openai, anthropic, local
+  llm_model: null
+  llm_api_key: null
+  max_feedback_items: 3
+  max_message_length: 200
+  enable_cache: true
+  cache_ttl_seconds: 300.0
+  max_generations_per_minute: 10
+
+# Runtime Controller
+controller:
+  operation_mode: reactive  # reactive, proactive
+  feedback_cooldown_seconds: 5.0
+  min_score_for_feedback: 0.6
+  websocket_host: localhost
+  websocket_port: 8765
+  api_host: localhost
+  api_port: 8080
+  log_level: INFO
+  log_to_file: true
+  log_file_path: logs/eye_tracking_debugger.log
+  experiment_id: null
+  participant_id: null

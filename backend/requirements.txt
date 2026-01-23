@@ -1,0 +1,38 @@
+# Eye Tracking Debugger Backend Dependencies
+# Python 3.11 recommended for tobii-research compatibility
+
+# Tobii Eye Tracking SDK
+# NOTE: tobii-research must be installed manually from Tobii Pro SDK:
+# 1. Download from: https://developer.tobii.com/product-integration/tobii-pro-sdk/
+# 2. Install the Python wheel for your platform:
+#    pip install tobii_research-X.X.X-py3-none-PLATFORM.whl
+# Uncomment after manual installation:
+# tobii-research>=1.10.0
+
+# WebSocket server
+websockets>=12.0
+
+# HTTP server
+aiohttp>=3.9.0
+
+# Data handling
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Configuration
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Logging
+structlog>=23.0.0
+
+# Type checking (dev)
+# mypy>=1.7.0
+
+# ML libraries (for future model implementations)
+# scikit-learn>=1.3.0
+# torch>=2.0.0
+
+# LLM integration (optional, for feedback generation)
+# openai>=1.0.0
+# anthropic>=0.7.0
