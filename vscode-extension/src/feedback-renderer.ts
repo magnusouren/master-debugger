@@ -86,7 +86,7 @@ export class FeedbackRenderer {
      */
     recordInteraction(
         feedbackId: string,
-        interactionType: FeedbackInteraction["interactionType"]
+        interactionType: FeedbackInteraction["interaction_type"]
     ): void {
         // TODO: Implement interaction recording
     }

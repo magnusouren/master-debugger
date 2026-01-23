@@ -326,13 +326,13 @@ export class WebSocketClient {
     ): WebSocketMessage {
         return {
             type,
-            timestamp: Date.now() / 1000,
+            timestamp: Date.now(),
             payload,
-            messageId: this.generateMessageId(),
+            message_id: this.generateMessageId(),
         };
     }
 
     private generateMessageId(): string {
-        return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     }
 }
