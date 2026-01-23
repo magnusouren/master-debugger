@@ -19,6 +19,7 @@ from enum import Enum
 import asyncio
 
 
+from backend.api.serialization import json_safe
 from backend.layers.signal_processing import SignalProcessingLayer
 from backend.layers.forecasting_tool import ForecastingTool
 from backend.layers.reactive_tool import ReactiveTool
@@ -207,7 +208,7 @@ class RuntimeController:
         msg = WebSocketMessage(
             type=MessageType.FEEDBACK_DELIVERY,
             timestamp=datetime.utcnow().timestamp(),
-            payload=asdict(feedback),
+            payload=json_safe(feedback),   # not asdict(feedback)
             message_id=None,
         )
         await self._emit(msg)

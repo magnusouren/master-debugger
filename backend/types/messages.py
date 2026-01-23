@@ -48,7 +48,12 @@ class WebSocketMessage:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert message to dictionary for JSON serialization."""
-        pass  # TODO: Implement
+        return {
+            "type": self.type.value,
+            "timestamp": self.timestamp,
+            "payload": self.payload,
+            "message_id": self.message_id
+        }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WebSocketMessage":

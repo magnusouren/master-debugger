@@ -10,6 +10,7 @@ import asyncio
 import json
 from dataclasses import asdict
 
+from backend.api.serialization import json_safe
 from backend.types.messages import FeedbackMessage, MessageType, SystemStatusMessage, WebSocketMessage
 
 
@@ -138,43 +139,23 @@ class WebSocketServer:
         pass  # TODO: Implement targeted sending
     
     async def broadcast(self, message: WebSocketMessage) -> int:
-        """
-        Broadcast a message to all connected clients.
-        
-        Args:
-            message: Message to broadcast.
-            
-        Returns:
-            Number of clients message was sent to.
-        """
         sent = 0
         try:
-            # Convert message to JSON
-            if hasattr(message, 'to_dict'):
-                data = message.to_dict()
-            else:
-                data = {
-                    "type": message.type.value,
-                    "timestamp": message.timestamp,
-                    "payload": message.payload,
-                    "message_id": message.message_id
-                }
-            
-            text = json.dumps(data)
-            
-            # Send to all clients
+            text = self._serialize_message(message)
+
             for client in list(self._clients):
                 try:
                     await client.send(text)
                     sent += 1
                 except Exception as e:
-                    print(f"[WebSocket] Failed to send to client: {e}")
-                    
+                    print(f"  [WebSocket] Failed to send to client: {e}")
+                    self._clients.discard(client)
+
         except Exception as e:
-            print(f"[WebSocket] Broadcast error: {e}")
-            
+            print(f"[WebSocket] Broadcast error: {type(e).__name__}: {e}")
+
         return sent
-    
+        
     async def send_feedback(self, feedback: FeedbackMessage) -> bool:
         """
         Send feedback to VS Code extension.
@@ -311,22 +292,19 @@ class WebSocketServer:
                 type=MessageType(data.get("type")),
                 timestamp=data.get("timestamp", 0),
                 payload=data.get("payload", {}),
-                message_id=data.get("messageId"),
+                message_id=data.get("message_id"),
             )
         except (json.JSONDecodeError, ValueError):
             return None
     
     def _serialize_message(self, message: WebSocketMessage) -> str:
-        """
-        Serialize a message to JSON string.
-        
-        Args:
-            message: Message to serialize.
-            
-        Returns:
-            JSON string.
-        """
-        pass  # TODO: Implement message serialization
+        data = {
+            "type": message.type.value,
+            "timestamp": message.timestamp,
+            "payload": message.payload,
+            "message_id": message.message_id,
+        }
+        return json.dumps(json_safe(data))
     
     def _generate_client_id(self) -> str:
         """

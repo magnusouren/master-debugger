@@ -254,7 +254,7 @@ export class WebSocketClient {
             if (message.type === MessageType.PONG) {
                 return;
             }
-            
+
             this.dispatchMessage(message);
         }
     }

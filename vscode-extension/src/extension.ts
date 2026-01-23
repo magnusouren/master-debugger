@@ -263,7 +263,6 @@ function sendContextUpdate(): void {
     const context = contextCollector?.collectContext();
     if (context) {
         console.log(`Sending context update for: ${context.file_path}`);
-        console.log(context);
         wsClient.sendContextUpdate(context);
     }
 }
@@ -284,7 +283,8 @@ function updateConfiguration(): void {
 // --- Message Handlers ---
 
 function handleFeedbackDelivery(message: { payload: Record<string, unknown> }): void {
-    // TODO: Implement feedback delivery handling
+    console.log("Received feedback delivery message");
+
     const payload = message.payload as unknown as FeedbackDeliveryPayload;
     feedbackRenderer?.renderFeedback(payload.items);
 }

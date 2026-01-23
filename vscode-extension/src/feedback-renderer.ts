@@ -37,6 +37,8 @@ export class FeedbackRenderer {
      */
     renderFeedback(items: FeedbackItem[]): void {
         // TODO: Implement feedback rendering
+
+        console.log("FEEDBACK ITEMS:", items);
     }
 
     /**
