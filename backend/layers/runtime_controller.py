@@ -188,16 +188,30 @@ class RuntimeController:
             if feedback:
                 print(f"[Runtime Controller] → Generated {len(feedback.items)} feedback item(s)")
                 self._stats["feedback_generated"] += 1
+                # Send feedback back to VS Code
+                await self.send_feedback(feedback)
 
         
     async def send_feedback(self, feedback: FeedbackResponse) -> bool:
+        """
+        Send feedback to VS Code for display.
+        
+        Args:
+            feedback: Feedback to send.
+            
+        Returns:
+            True if sent successfully.
+        """
+        from dataclasses import asdict
+        
         msg = WebSocketMessage(
             type=MessageType.FEEDBACK_DELIVERY,
-            timestamp=int(datetime.utcnow().timestamp() * 1000),
-            payload=feedback.to_dict(),   # TODO - implement
+            timestamp=datetime.utcnow().timestamp(),
+            payload=asdict(feedback),
             message_id=None,
         )
         await self._emit(msg)
+        print(f"[RuntimeController] Sent feedback with {len(feedback.items)} items")
         return True
     
     async def handle_feedback_interaction(
@@ -220,7 +234,23 @@ class RuntimeController:
         Args:
             callback: Function to call with messages.
         """
-        pass  # TODO: Implement callback registration
+        self._websocket_callbacks.append(callback)
+        
+    async def _emit(self, message: WebSocketMessage) -> None:
+        """
+        Emit a message through registered websocket callbacks.
+        
+        Args:
+            message: Message to emit.
+        """
+        for callback in self._websocket_callbacks:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(message)
+                else:
+                    callback(message)
+            except Exception as e:
+                print(f"  [RuntimeController] Callback failed: {e}")
     
     # --- Feedback Control ---
     
@@ -365,14 +395,3 @@ class RuntimeController:
     def _update_statistics(self) -> None:
         """Update internal statistics."""
         pass  # TODO: Implement statistics update
-
-    async def _emit(self, msg: WebSocketMessage) -> None:
-        """
-        Emit a WebSocket message via registered callbacks.
-        
-        :param self: Description
-        :param msg: WebSocket message to emit.
-        :type msg: WebSocketMessage 
-        """
-        for cb in self._websocket_callbacks:
-            await cb(msg)

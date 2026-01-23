@@ -147,7 +147,33 @@ class WebSocketServer:
         Returns:
             Number of clients message was sent to.
         """
-        pass  # TODO: Implement broadcasting
+        sent = 0
+        try:
+            # Convert message to JSON
+            if hasattr(message, 'to_dict'):
+                data = message.to_dict()
+            else:
+                data = {
+                    "type": message.type.value,
+                    "timestamp": message.timestamp,
+                    "payload": message.payload,
+                    "message_id": message.message_id
+                }
+            
+            text = json.dumps(data)
+            
+            # Send to all clients
+            for client in list(self._clients):
+                try:
+                    await client.send(text)
+                    sent += 1
+                except Exception as e:
+                    print(f"[WebSocket] Failed to send to client: {e}")
+                    
+        except Exception as e:
+            print(f"[WebSocket] Broadcast error: {e}")
+            
+        return sent
     
     async def send_feedback(self, feedback: FeedbackMessage) -> bool:
         """
