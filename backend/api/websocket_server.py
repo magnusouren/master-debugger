@@ -10,14 +10,8 @@ import asyncio
 import json
 from dataclasses import asdict
 
-from backend.types import (
-    WebSocketMessage,
-    MessageType,
-    ContextUpdate,
-    FeedbackMessage,
-    SystemStatusMessage,
-    FeedbackInteraction,
-)
+from backend.types.messages import FeedbackMessage, MessageType, SystemStatusMessage, WebSocketMessage
+
 
 
 # Type alias for message handlers
@@ -61,7 +55,8 @@ class WebSocketServer:
         )
         self._is_running = True
         self._loop = asyncio.get_event_loop()
-    
+
+
     async def stop(self) -> None:
         """Stop the WebSocket server and disconnect all clients."""
         self._is_running = False
@@ -110,7 +105,9 @@ class WebSocketServer:
             message_type: Type of message to handle.
             handler: Async function to handle the message.
         """
-        pass  # TODO: Implement handler registration
+
+        self._message_handlers[message_type] = handler
+
     
     def unregister_handler(self, message_type: MessageType) -> None:
         """
@@ -119,7 +116,9 @@ class WebSocketServer:
         Args:
             message_type: Type of message to unregister.
         """
-        pass  # TODO: Implement handler removal
+
+        if message_type in self._message_handlers:
+            del self._message_handlers[message_type]
     
     async def send_to_client(
         self,
@@ -256,17 +255,19 @@ class WebSocketServer:
         if message:
             # Log context updates
             if message.type == MessageType.CONTEXT_UPDATE:
-                payload = message.payload
-                print(f"  [Context Update] file: {payload.get('file_path', 'unknown')}, "
-                      f"cursor: L{payload.get('cursor_position', {}).get('line', '?')}, char: "
-                      f"{payload.get('cursor_position', {}).get('character', '?')}, "
-                      f"visible: L{payload.get('visible_range', {}).get('start', {}).get('line', '?')}-"
-                      f"L{payload.get('visible_range', {}).get('end', {}).get('line', '?')}")
-            
+                # payload: ContextUpdate = message.payload  # Explicitly typing payload as ContextUpdate
+                print(f"  [WebSocket] Processing context update from client {client_id}: ")
+
             handler = self._message_handlers.get(message.type)
             if handler:
-                await handler(message, client_id)
-    
+                try:
+                    await handler(message, client_id)
+                except Exception as e:
+                    print(
+                        f"[WebSocket] Handler error for {message.type}: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                
     def _parse_message(self, raw_message: str) -> Optional[WebSocketMessage]:
         """
         Parse a raw message into a WebSocketMessage.

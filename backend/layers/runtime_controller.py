@@ -13,28 +13,22 @@ Responsibilities:
 - Configuring layers for reactive and proactive modes
 - Logging and experiment control
 """
-from typing import Optional, Dict, Any, List, Callable
+from typing import Awaitable, Optional, Dict, Any, List, Callable
 from datetime import datetime
 from enum import Enum
 import asyncio
 
-from backend.types import (
-    WindowFeatures,
-    PredictedFeatures,
-    UserStateEstimate,
-    CodeContext,
-    FeedbackResponse,
-    FeedbackInteraction,
-    SystemConfig,
-    ControllerConfig,
-    OperationMode,
-    SystemStatus,
-    WebSocketMessage,
-)
+
 from backend.layers.signal_processing import SignalProcessingLayer
 from backend.layers.forecasting_tool import ForecastingTool
 from backend.layers.reactive_tool import ReactiveTool
 from backend.layers.feedback_layer import FeedbackLayer
+from backend.types.code_context import CodeContext
+from backend.types.config import OperationMode, SystemConfig
+from backend.types.eye_tracking import PredictedFeatures, WindowFeatures
+from backend.types.feedback import FeedbackInteraction, FeedbackResponse
+from backend.types.messages import MessageType, SystemStatus, WebSocketMessage
+from backend.types.user_state import UserStateEstimate
 
 
 class RuntimeController:
@@ -74,7 +68,7 @@ class RuntimeController:
         }
         
         # Callbacks for external communication
-        self._websocket_callbacks: List[Callable[[WebSocketMessage], None]] = []
+        self._websocket_callbacks: List[Callable[[WebSocketMessage], Awaitable[None]]] = []
         
         # Event loop reference
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -177,32 +171,42 @@ class RuntimeController:
     async def handle_context_update(self, context: CodeContext) -> None:
         """
         Handle code context update from VS Code.
+        First step in the data flow pipeline in the Control Layer.
         
         Args:
             context: Updated code context.
         """
-        pass  # TODO: Implement context update handling
-    
-    async def request_context(self) -> Optional[CodeContext]:
-        """
-        Request current code context from VS Code.
+        self._current_code_context = context
+        self._stats["samples_processed"] += 1
         
-        Returns:
-            Code context or None if unavailable.
-        """
-        pass  # TODO: Implement context request
+        print(f"  [Runtime Controller] Context update file: {context.file_path}, "
+              f"cursor: L{context.cursor_position.line if context.cursor_position else '?'}")
+        
+        # Check if feedback should be generated
+        if self.should_generate_feedback():
+            feedback = await self.trigger_feedback_generation()
+            if feedback:
+                print(f"    → Generated {len(feedback.items)} feedback items")
+                self._stats["feedback_generated"] += 1
     
+    async def request_context(self) -> None:
+        msg = WebSocketMessage(
+            type=MessageType.CONTEXT_REQUEST,
+            timestamp=int(datetime.utcnow().timestamp() * 1000),
+            payload={},
+            message_id=None,
+        )
+        await self._emit(msg)
+        
     async def send_feedback(self, feedback: FeedbackResponse) -> bool:
-        """
-        Send feedback to VS Code for display.
-        
-        Args:
-            feedback: Feedback to send.
-            
-        Returns:
-            True if sent successfully.
-        """
-        pass  # TODO: Implement feedback sending
+        msg = WebSocketMessage(
+            type=MessageType.FEEDBACK_DELIVERY,
+            timestamp=int(datetime.utcnow().timestamp() * 1000),
+            payload=feedback.to_dict(),   # TODO - implement
+            message_id=None,
+        )
+        await self._emit(msg)
+        return True
     
     async def handle_feedback_interaction(
         self, interaction: FeedbackInteraction
@@ -361,3 +365,14 @@ class RuntimeController:
     def _update_statistics(self) -> None:
         """Update internal statistics."""
         pass  # TODO: Implement statistics update
+
+    async def _emit(self, msg: WebSocketMessage) -> None:
+        """
+        Emit a WebSocket message via registered callbacks.
+        
+        :param self: Description
+        :param msg: WebSocket message to emit.
+        :type msg: WebSocketMessage 
+        """
+        for cb in self._websocket_callbacks:
+            await cb(msg)

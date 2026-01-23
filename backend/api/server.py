@@ -12,6 +12,9 @@ from backend.types import SystemConfig
 from backend.layers import RuntimeController
 from backend.api.websocket_server import WebSocketServer
 from backend.api.rest_api import RestAPI
+from backend.types.code_context import CodeContext
+from backend.types.feedback import FeedbackInteraction
+from backend.types.messages import MessageType, WebSocketMessage
 
 
 class Server:
@@ -41,12 +44,18 @@ class Server:
         
         self._is_running: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+
     
     async def start(self) -> None:
         """Start all server components."""
         print(f"  Starting WebSocket server on ws://{self._config.controller.websocket_host}:{self._config.controller.websocket_port}")
         print(f"  Starting REST API server on http://{self._config.controller.api_host}:{self._config.controller.api_port}")
         
+        # Wire up the components
+        self._wire_components()
+
         # Start WebSocket and REST API servers
         await self._websocket_server.start()
         await self._rest_api.start()
@@ -123,16 +132,33 @@ class Server:
         pass  # TODO: Implement signal handlers
     
     def _wire_components(self) -> None:
-        """Wire up communication between components."""
-        pass  # TODO: Implement component wiring
+    # Controller -> WebSocket (outbound)
+        async def send_outbound(msg: WebSocketMessage) -> None:
+            # broadcast by default; you can add targeting later
+            await self._websocket_server.broadcast(msg)
+
+        self._controller.register_websocket_callback(send_outbound)
+
+        # WebSocket -> Controller (inbound)
+        self._setup_websocket_handlers()
+
+        # REST routes -> Controller (inbound)
+        self._setup_api_routes()
     
     def _setup_api_routes(self) -> None:
         """Set up REST API routes with controller handlers."""
         pass  # TODO: Implement route setup
     
     def _setup_websocket_handlers(self) -> None:
-        """Set up WebSocket message handlers."""
-        pass  # TODO: Implement WebSocket handler setup
+        async def on_context_update(message: WebSocketMessage, client_id: str) -> None:
+            print(f"  [Server] Received context update from client {client_id}")
+            
+            # Convert payload into your internal CodeContext type
+            ctx = CodeContext.from_dict(message.payload) 
+            await self._controller.handle_context_update(ctx)
+
+        # Register the handler for context updates
+        self._websocket_server.register_handler(MessageType.CONTEXT_UPDATE, on_context_update)
     
     async def _shutdown_handler(self, sig: signal.Signals) -> None:
         """
