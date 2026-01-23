@@ -26,6 +26,7 @@ class CodeRange:
     """A range in a text document."""
     start: CodePosition
     end: CodePosition
+    content: Optional[str] = None  # Optional content of the range
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CodeRange":
@@ -50,12 +51,14 @@ class CodeContext:
     Sent to the backend for feedback generation.
     """
     # File information
-    file_path: str
-    file_content: str
+    file_path: str  # Absolute path to the file
     language_id: str  # e.g., "python", "typescript"
     
     # Cursor and selection
     cursor_position: CodePosition
+    
+    # Optional fields (must come after required fields)
+    file_content: Optional[str] = None  # Optional full content of the file
     selection: Optional[CodeRange] = None
     
     # Visible range in editor

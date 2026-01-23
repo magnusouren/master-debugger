@@ -254,6 +254,15 @@ class WebSocketServer:
         """
         message = self._parse_message(raw_message)
         if message:
+            # Log context updates
+            if message.type == MessageType.CONTEXT_UPDATE:
+                payload = message.payload
+                print(f"  [Context Update] file: {payload.get('file_path', 'unknown')}, "
+                      f"cursor: L{payload.get('cursor_position', {}).get('line', '?')}, char: "
+                      f"{payload.get('cursor_position', {}).get('character', '?')}, "
+                      f"visible: L{payload.get('visible_range', {}).get('start', {}).get('line', '?')}-"
+                      f"L{payload.get('visible_range', {}).get('end', {}).get('line', '?')}")
+            
             handler = self._message_handlers.get(message.type)
             if handler:
                 await handler(message, client_id)
