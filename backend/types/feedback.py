@@ -28,7 +28,7 @@ class FeedbackPriority(Enum):
 @dataclass
 class FeedbackMetadata:
     """Metadata for a feedback item."""
-    generated_at: float  # Timestamp
+    generated_at: float = 0.0  # Timestamp
     generation_time_ms: float = 0.0  # How long it took to generate
     model_used: Optional[str] = None  # LLM or method used
     cached: bool = False
