@@ -12,6 +12,7 @@ and can be cached to reduce latency.
 
 Output is structured to support editor rendering and highlighting.
 """
+import asyncio
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import hashlib
@@ -69,41 +70,61 @@ class FeedbackLayer:
         """Shutdown the LLM client and release resources."""
         pass  # TODO: Implement LLM shutdown
     
-    def generate_feedback(
+    async def generate_feedback(
         self,
         context: CodeContext,
         user_state: Optional[UserStateEstimate] = None,
         feedback_types: Optional[List[FeedbackType]] = None,
     ) -> FeedbackResponse:
-        """
-        Generate feedback based on code context.
+        time_start = datetime.now().timestamp()
+
+        print("[FeedbackLayer] Generating feedback...")
+
+        # Simulate doing some work (LLM/network/etc.)
+        await asyncio.sleep(0.1)
+
+        time_end = datetime.now().timestamp()
+        feedback = FeedbackResponse(
+            items=[
+                FeedbackItem(
+                    title="Sample Feedback",
+                    message="This is a sample feedback item.",
+                )
+            ],
+            request_id="FOO123",
+            total_generation_time_ms= (time_end - time_start) * 1000,
+            success=True,
+        )
+     
         
-        Args:
-            context: Code context from VS Code.
-            user_state: Optional user state for context.
-            feedback_types: Optional filter for feedback types.
-            
-        Returns:
-            Response containing generated feedback items.
-        """
-        pass  # TODO: Implement feedback generation
+        self._generation_count += 1
+        self._last_generation_time = datetime.now().timestamp()
+
+        print(f"[FeedbackLayer] Generated {len(feedback.items)} feedback item(s) in {feedback.total_generation_time_ms:.2f} ms")
+
+        return feedback
+
     
-    def generate_feedback_cached(
+    async def generate_feedback_cached(
         self,
         context: CodeContext,
         user_state: Optional[UserStateEstimate] = None,
+        feedback_types: Optional[List[FeedbackType]] = None,
     ) -> FeedbackResponse:
-        """
-        Generate feedback with caching.
-        
-        Args:
-            context: Code context from VS Code.
-            user_state: Optional user state for context.
-            
-        Returns:
-            Response containing feedback (from cache or newly generated).
-        """
-        pass  # TODO: Implement cached feedback generation
+        print("[FeedbackLayer] Generating feedback (with caching)")
+
+        file_path = context.file_path
+        line = context.cursor_position.line if context.cursor_position else -1
+
+        key = f"{file_path}:{line}"
+
+        if key in self._cache:
+            print("[FeedbackLayer] Returning cached feedback")
+            return self._cache[key]
+
+        feedback = await self.generate_feedback(context, user_state, feedback_types)
+        self._cache[key] = feedback
+        return feedback
     
     def invalidate_cache(self, file_path: Optional[str] = None) -> None:
         """
