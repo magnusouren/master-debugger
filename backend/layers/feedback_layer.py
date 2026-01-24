@@ -19,6 +19,7 @@ import time
 import hashlib
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any, Tuple
+import uuid
 
 from backend.types import (
     CodeContext,
@@ -144,6 +145,13 @@ class FeedbackLayer:
                 metadata=self._create_feedback_metadata(
                     cached=False,
                     generation_time_ms=(time.time() - start) * 1000.0,
+                    generated_at=time.time(),
+                    cache_key=self._compute_cache_key(context),
+                    feedback_id=str(uuid.uuid4()),
+                    session_id=self._get_session_id(context),
+                    extra={
+                        "used_llm": self._llm_client.get_model_name() if self._llm_client else "none",
+                    }
                 ),
             )
         except Exception as e:
@@ -159,6 +167,13 @@ class FeedbackLayer:
                 metadata=self._create_feedback_metadata(
                     cached=False,
                     generation_time_ms=(time.time() - start) * 1000.0,
+                    generated_at=time.time(),
+                    cache_key="",
+                    feedback_id=str(uuid.uuid4()),
+                    session_id=self._get_session_id(context),
+                    extra={
+                        "error": str(e)
+                    }
                 ),
             )
 
@@ -219,6 +234,15 @@ class FeedbackLayer:
             return await fut
 
     def invalidate_cache(self, file_path: Optional[str] = None) -> None:
+        """
+        Invalidate cache entries.
+
+        AI-generated code - should be checked further later
+        
+        :param self: Object instance
+        :param file_path: Optional file path to invalidate; if None, clear entire cache
+        :type file_path: Optional[str]
+        """
         if file_path is None:
             self._cache.clear()
             return
@@ -266,6 +290,19 @@ class FeedbackLayer:
         # stable-ish request id for logs; not same as cache key
         payload = f"{context.file_path}:{getattr(context, 'timestamp', 0.0)}"
         return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
+
+    def _get_session_id(self, context: CodeContext) -> str:
+        """
+        Docstring for _get_session_id
+        
+        :param self: Object instance
+        :param context: Code context
+        :type context: CodeContext
+        :return: Session ID string
+        :rtype: str
+        """
+
+        return "TODO"
 
     def _compute_cache_key(self, context: CodeContext) -> str:
         """
@@ -577,6 +614,16 @@ class FeedbackLayer:
                     dismissible=dismissible,
                     actionable=actionable,
                     action_label=action_label,
+                    metadata=self._create_feedback_metadata(
+                        generated_at=time.time(),
+                        generation_time_ms=0.0,
+                        cache_key=self._compute_cache_key(context),
+                        feedback_id=str(uuid.uuid4()), # TODO: generate ID that links to the response
+                        session_id=self._get_session_id(context),
+                        extra={
+                            "llm_model": self._llm_client.get_model_name() if self._llm_client else "none",
+                        },
+                    ),
                 ))
 
             return items or self._generate_fallback_feedback(context)
@@ -609,13 +656,29 @@ class FeedbackLayer:
             )
         ]
 
-    def _create_feedback_metadata(self, cached: bool = False, generation_time_ms: float = 0.0) -> FeedbackMetadata:
+    def _create_feedback_metadata(
+            self, 
+            cached: bool = False, 
+            generation_time_ms: float = 0.0, 
+            generated_at: float = 0.0, 
+            cache_key: str = "", 
+            feedback_id: str = "", 
+            session_id: str = "", 
+            extra: dict = None
+        ) -> FeedbackMetadata:
         """
         Adapt to your actual FeedbackMetadata fields.
         """
+        print("[FeedbackLayer] Creating feedback metadata")
         return FeedbackMetadata(
-            cached=cached,
+            generated_at=generated_at or time.time(), 
             generation_time_ms=generation_time_ms,
+            model_used=self._llm_client.get_model_name() if self._llm_client else None,
+            cached=cached,
+            cache_key=cache_key,
+            feedback_id=feedback_id,
+            session_id=session_id,
+            extra=extra or {},
         )
 
     def _filter_and_rank_feedback(self, items: List[FeedbackItem]) -> List[FeedbackItem]:
