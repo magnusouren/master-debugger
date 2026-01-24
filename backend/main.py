@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default=None,
+        default=None, # Maybee enter "config.yaml" here later
         help="Path to configuration file (YAML)",
     )
     parser.add_argument(
@@ -72,8 +72,13 @@ def load_config(config_path: str | None) -> "SystemConfig":
     Returns:
         System configuration.
     """
-    # TODO: Implement configuration loading
     from backend.types import SystemConfig
+
+    if config_path:
+        print(f"[Main] Loading configuration from {config_path}")
+        return SystemConfig.from_file(config_path)
+
+    print("[Main] No configuration file provided, using default settings")
     return SystemConfig()
 
 

@@ -55,7 +55,7 @@ class FeedbackLayer:
         Args:
             config: New configuration to apply.
         """
-        pass  # TODO: Implement configuration update
+        self._config = config
     
     def initialize_llm(self) -> bool:
         """
