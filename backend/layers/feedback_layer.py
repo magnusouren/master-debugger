@@ -115,10 +115,17 @@ class FeedbackLayer:
                 items=items,
                 request_id=self._make_request_id(context),
                 total_generation_time_ms=(time.time() - start) * 1000.0,
-                success=True,
+                success=False,
                 metadata=self._create_feedback_metadata(
                     cached=False,
                     generation_time_ms=(time.time() - start) * 1000.0,
+                    generated_at=time.time(),
+                    cache_key=self._compute_cache_key(context),
+                    feedback_id=str(uuid.uuid4()),
+                    session_id=self._get_session_id(context),
+                    extra={
+                        "rate_limited": True
+                    }
                 ),
             )
 
@@ -235,30 +242,14 @@ class FeedbackLayer:
 
     def invalidate_cache(self, file_path: Optional[str] = None) -> None:
         """
-        Invalidate cache entries.
-
-        AI-generated code - should be checked further later
+        TODO - fix
         
         :param self: Object instance
         :param file_path: Optional file path to invalidate; if None, clear entire cache
         :type file_path: Optional[str]
         """
-        if file_path is None:
-            self._cache.clear()
-            return
-
-        # naive prefix match because key includes file_path in hashed payload,
-        # so we keep an auxiliary strategy: remove entries that mention file_path
-        # by recomputing stored "request_id" isn't ideal. Simpler: store file_path
-        # in cache entry later if you want exact invalidation.
-        to_remove = []
-        for k, entry in self._cache.items():
-            # best-effort: if you include file_path in the unhashed payload below,
-            # you can also store a side-map.
-            if file_path in k:
-                to_remove.append(k)
-        for k in to_remove:
-            self._cache.pop(k, None)
+        self._cache.clear()
+        
 
     def get_cache_stats(self) -> Dict[str, Any]:
         # Prune expired first to keep stats meaningful
@@ -302,7 +293,7 @@ class FeedbackLayer:
         :rtype: str
         """
 
-        return "TODO"
+        return context.metadata.get('session_id', 'unknown')
 
     def _compute_cache_key(self, context: CodeContext) -> str:
         """
@@ -463,7 +454,7 @@ class FeedbackLayer:
             '      "title": string,\n'
             '      "message": string,\n'
             '      "type": "hint" | "suggestion" | "warning" | "explanation" | "simplification",\n'
-            '      "priority": "low" | "medium" | "high"\n'
+            '      "priority": "low" | "medium" | "high" | "critical",\n'
             '      "code_range": {\n'
             '        "start": {"line": int, "character": int},\n'
             '        "end": {"line": int, "character": int}\n'
@@ -471,7 +462,7 @@ class FeedbackLayer:
             '      "confidence": float (0.0 to 1.0),\n'
             '      "dismissible": boolean,\n'
             '      "actionable": boolean,\n'
-            '      "action_label": boolean,\n'
+            '      "action_label": string | null,\n'
             "    }\n"
             "  ]\n"
             "}\n\n"
@@ -499,9 +490,9 @@ class FeedbackLayer:
             f"{diag_text}\n\n"
 
             "Code (from context.file_content if available):\n"
-            "```"
-            f"{context.language_id}\n{code}\n"
-            "```"
+            f"<BEGIN_CODE language={context.language_id}>\n"
+            f"{code}\n"
+            "<END_CODE>\n"
         )
 
     async def _call_llm(self, prompt: str) -> str:
@@ -645,6 +636,13 @@ class FeedbackLayer:
                 FeedbackItem(
                     title=f"Diagnostic ({sev})",
                     message=str(msg)[: self._config.max_message_length],
+                    feedback_type=FeedbackType.WARNING if sev == "error" else FeedbackType.HINT,
+                    priority=FeedbackPriority.HIGH if sev == "error" else FeedbackPriority.MEDIUM,
+                    code_range=getattr(d0, "range", None),
+                    confidence=0.9,
+                    dismissible=True,
+                    actionable=False,
+                    action_label=None,
                 )
             ]
 
@@ -653,6 +651,13 @@ class FeedbackLayer:
             FeedbackItem(
                 title="Next step",
                 message="Describe what you expect this code to do, then add a small print/log or a test at the cursor location to verify assumptions.",
+                feedback_type=FeedbackType.SUGGESTION,
+                priority=FeedbackPriority.LOW,
+                code_range=None,
+                confidence=0.5,
+                dismissible=True,
+                actionable=True,
+                action_label="Add test/log",
             )
         ]
 
@@ -685,15 +690,25 @@ class FeedbackLayer:
         """
         Simple filtering and ranking:
         - enforce max items
-        - priority by priority (if set) and confidence
+        - filter by priority (if set)
+        - sort by priority (highest first) then confidence
         """
-        items = items[: self._config.max_feedback_items]
+        # Priority order: CRITICAL > HIGH > MEDIUM > LOW
+        priority_order = {
+            FeedbackPriority.LOW: 0,
+            FeedbackPriority.MEDIUM: 1,
+            FeedbackPriority.HIGH: 2,
+            FeedbackPriority.CRITICAL: 3,
+        }
 
         if self._min_priority is not None:
-            items = [it for it in items if it.priority >= self._min_priority]
-        items.sort(key=lambda it: (it.priority.value, it.confidence), reverse=True)
+            min_order = priority_order.get(self._min_priority, 0)
+            items = [it for it in items if priority_order.get(it.priority, 0) >= min_order]
 
-        return items
+        # Sort by priority (descending) then confidence (descending)
+        items.sort(key=lambda it: (priority_order.get(it.priority, 0), it.confidence), reverse=True)
+
+        return items[: self._config.max_feedback_items]
 
     def _update_rate_limit_window(self) -> None:
         now = time.time()
