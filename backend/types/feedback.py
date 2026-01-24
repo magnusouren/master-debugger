@@ -89,6 +89,9 @@ class FeedbackResponse:
     success: bool = True
     error_message: Optional[str] = None
 
+    # Additional data
+    metadata: FeedbackMetadata = field(default_factory=FeedbackMetadata)
+
 
 @dataclass
 class FeedbackInteraction:
