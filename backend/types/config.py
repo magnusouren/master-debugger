@@ -1,10 +1,6 @@
 """
 Configuration type definitions for all system layers.
 """
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
-from enum import Enum
-
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Optional, List, Dict, Any, Type, TypeVar, get_origin, get_args, Union
 from enum import Enum
@@ -36,7 +32,14 @@ def _coerce_value(value: Any, target_type: Any) -> Any:
 
     # Enum
     if isinstance(target_type, type) and issubclass(target_type, Enum):
-        return target_type(value)
+        try:
+            return target_type(value)
+        except ValueError as e:
+            valid_values = [member.value for member in target_type]  # type: ignore[attr-defined]
+            raise ValueError(
+                f"Invalid value {value!r} for enum {target_type.__name__}. "
+                f"Valid values are: {valid_values}"
+            ) from e
 
     # Nested dataclass
     if isinstance(target_type, type) and is_dataclass(target_type):
@@ -227,21 +230,28 @@ class SystemConfig:
     @classmethod
     def from_file(cls, path: str) -> "SystemConfig":
         """Load configuration from YAML file."""
-        with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+        try:
 
-        if not isinstance(data, dict):
-            raise ValueError("Top-level YAML must be a mapping")
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
 
-        return _dict_to_dataclass(data, cls)
+            if not isinstance(data, dict):
+                raise ValueError("Top-level YAML must be a mapping")
 
+            return _dict_to_dataclass(data, cls)
+        except Exception as e:
+            raise RuntimeError(f"[System Config] Failed to load configuration from {path}: {e}") from e
+        
     def to_file(self, path: str) -> None:
         """Save configuration to YAML file."""
-        data = _dataclass_to_dict(self)
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(
-                data,
-                f,
-                sort_keys=False,
-                default_flow_style=False,
-            )
+        try:
+            data = _dataclass_to_dict(self)
+            with open(path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(
+                    data,
+                    f,
+                    sort_keys=False,
+                    default_flow_style=False,
+                )
+        except Exception as e:
+            raise RuntimeError(f"[System Config] Failed to save configuration to {path}: {e}") from e
