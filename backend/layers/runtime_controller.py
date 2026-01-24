@@ -77,6 +77,13 @@ class RuntimeController:
         # Experiment tracking
         self._experiment_id: Optional[str] = self._config.controller.experiment_id
         self._participant_id: Optional[str] = self._config.controller.participant_id
+
+        # Generate session ID only if both participant_id and experiment_id are available
+        if self._config.controller.participant_id and self._config.controller.experiment_id:
+            self._session_id: Optional[str] = self._config.controller.participant_id + "_" + self._config.controller.experiment_id + "_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        else:
+            self._session_id: Optional[str] = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
     
     async def initialize(self) -> bool:
         """
@@ -184,6 +191,10 @@ class RuntimeController:
         """
         self._current_code_context = context
         self._stats["samples_processed"] += 1
+        self._current_code_context.metadata["experiment_id"] = self._experiment_id
+        self._current_code_context.metadata["participant_id"] = self._participant_id    
+        self._current_code_context.metadata["session_id"] = self._session_id    
+
         
         print(f"[Runtime Controller] Context update file: {context.file_path}, "
               f"cursor: L{context.cursor_position.line if context.cursor_position else '?'}")
@@ -266,7 +277,9 @@ class RuntimeController:
         Returns:
             True if feedback should be generated.
         """
-        # TODO: Implement feedback condition checking
+        if self._status != SystemStatus.READY:
+            return False
+
         if self._current_code_context is None:
             return False
 
