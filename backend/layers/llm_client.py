@@ -109,7 +109,7 @@ class OpenAIClient(LLMClient):
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[
-                    {"role": "system", "content": "You are a helpful coding assistant that provides concise feedback."},
+                    {"role": "system", "content": "You are a helpful coding assistant that provides concise feedback. Hints should increase learning without giving away full solutions."},
                     {"role": "user", "content": prompt},
                 ],
                 max_tokens=max_tokens,
@@ -171,6 +171,6 @@ def create_llm_client(
             print("[LLMClient] OpenAI not configured")
             return None
 
-    print("[LLMClient] No provider specified")
+    print("[LLMClient] No provider specified, or unsupported provider. value:", provider)
     return None
 

@@ -29,6 +29,7 @@ from backend.types import (
     FeedbackPriority,
     UserStateEstimate,
 )
+from backend.types.code_context import CodePosition, CodeRange
 from backend.types.config import FeedbackLayerConfig
 from backend.layers.llm_client import LLMClient, create_llm_client, LLMResponse
 
@@ -145,8 +146,8 @@ class FeedbackLayer:
                     generation_time_ms=(time.time() - start) * 1000.0,
                 ),
             )
-        except Exception:
-            print("[FeedbackLayer] Error during feedback generation, using fallback")
+        except Exception as e:
+            print(f"[FeedbackLayer] Error during feedback generation, using fallback: {e}")
             # Never fail hard in editor loop
             items = self._generate_fallback_feedback(context)
             items = self._filter_and_rank_feedback(items)
@@ -269,6 +270,9 @@ class FeedbackLayer:
     def _compute_cache_key(self, context: CodeContext) -> str:
         """
         Use a hash of relevant context, not just file name.
+
+        AI-generated code - should be optimized further later
+
         """
         cursor = getattr(context, "cursor_position", None)
         selection = getattr(context, "selection", None)
@@ -354,46 +358,113 @@ class FeedbackLayer:
         for k in expired:
             self._cache.pop(k, None)
 
+    from typing import Optional
+
     def _build_llm_prompt(
         self,
         context: CodeContext,
-        user_state: Optional[UserStateEstimate] = None,
+        user_state: Optional["UserStateEstimate"] = None,
     ) -> str:
-        """
-        Force strict JSON output. This makes parsing reliable.
-        """
         cursor = context.cursor_position
-        diagnostics = context.diagnostics or []
-        diag_text = "\n".join(
-            f"- ({getattr(d, 'severity', '')}) {getattr(d, 'message', '')}"
-            for d in diagnostics[:8]
+
+        def _fmt_pos(p: CodePosition) -> str:
+            return f"line {p.line}, col {p.character}"
+
+        def _fmt_range(r: CodeRange) -> str:
+            return f"{_fmt_pos(r.start)} -> {_fmt_pos(r.end)}"
+
+        # Diagnostics text (aligned with DiagnosticInfo / DiagnosticSeverity / CodeRange)
+        diag_lines = []
+        for d in (context.diagnostics or []):
+            sev = d.severity.value if hasattr(d.severity, "value") else str(d.severity)
+            src = d.source or "n/a"
+            code = d.code or "n/a"
+            diag_lines.append(
+                f"- [{sev}] {d.message} @ {_fmt_range(d.range)} (source={src}, code={code})"
+            )
+        diag_text = "\n".join(diag_lines) if diag_lines else "(none)"
+
+        selection_text = (
+            f"{_fmt_range(context.selection)}"
+            + (f"\nSelection content:\n{context.selection.content}"
+            if context.selection and context.selection.content else "")
+            if context.selection else "(none)"
         )
 
-        code = (context.file_content or "")[:12000]  # cap prompt size
+        visible_text = (
+            f"{_fmt_range(context.visible_range)}"
+            + (f"\nVisible content:\n{context.visible_range.content}"
+            if context.visible_range and context.visible_range.content else "")
+            if context.visible_range else "(none)"
+        )
+
+        # Code to show: prefer file_content; otherwise fall back to selection/visible content if present
+        code = (
+            context.file_content
+            or (context.visible_range.content if context.visible_range and context.visible_range.content else None)
+            or (context.selection.content if context.selection and context.selection.content else None)
+            or ""
+        )
+
+        # Optional user_state snippet (kept generic so it doesn't break if UserStateEstimate changes)
+        user_state_text = "(none)"
+        if user_state is not None:
+            # keep it robust: don't assume exact fields exist
+            try:
+                user_state_text = str(user_state)
+            except Exception:
+                user_state_text = "<unprintable user_state>"
 
         return (
-            "You are an assistant that generates concise, actionable code feedback for a VS Code user.\n"
-            "Return ONLY valid JSON with this schema:\n"
+            "You are an expert programming assistant. You will receive VS Code code context.\n"
+            "Your task: generate concise, actionable feedback items focused on the most likely issue near the cursor.\n\n"
+
+            "Return ONLY valid JSON (no markdown, no extra keys) with exactly this schema:\n"
             "{\n"
             '  "items": [\n'
             "    {\n"
             '      "title": string,\n'
             '      "message": string,\n'
-            '      "type": "hint"|"suggestion"|"warning"|"explanation"|"simplification",\n'
-            '      "priority": "low"|"medium"|"high"\n'
+            '      "type": "hint" | "suggestion" | "warning" | "explanation" | "simplification",\n'
+            '      "priority": "low" | "medium" | "high"\n'
+            '      "code_range": {\n'
+            '        "start": {"line": int, "character": int},\n'
+            '        "end": {"line": int, "character": int}\n'
+            '      },\n'
+            '      "confidence": float (0.0 to 1.0),\n'
+            '      "dismissible": boolean,\n'
+            '      "actionable": boolean,\n'
+            '      "action_label": boolean,\n'
             "    }\n"
             "  ]\n"
-            "}\n"
-            f"Constraints:\n- max items: {self._config.max_feedback_items}\n"
+            "}\n\n"
+
+            "Constraints:\n"
+            f"- max items: {self._config.max_feedback_items}\n"
             f"- max message length per item: {self._config.max_message_length}\n"
-            "- Focus on the most likely issue near the cursor.\n\n"
-            f"Language: {context.language_id}\n"
-            f"File: {context.file_path}\n"
-            f"Cursor: line {cursor.line}, col {cursor.character}\n\n"
-            f"Diagnostics:\n{diag_text or '(none)'}\n\n"
-            "Code:\n"
+            "- Focus on the most likely issue near the cursor.\n"
+            "- If diagnostics exist, prioritize them.\n"
+            "- Do NOT invent errors not supported by code/diagnostics.\n"
+            "- Prefer specific edits (what/where/how) over generic advice.\n\n"
+
+            "Context:\n"
+            f"- language_id: {context.language_id}\n"
+            f"- file_path: {context.file_path}\n"
+            f"- workspace_folder: {context.workspace_folder or '(none)'}\n"
+            f"- timestamp: {context.timestamp}\n"
+            f"- cursor_position: {_fmt_pos(cursor)}\n"
+            f"- selection: {selection_text}\n"
+            f"- visible_range: {visible_text}\n"
+            f"- metadata: {context.metadata if context.metadata else '{}'}\n"
+            f"- user_state: {user_state_text}\n\n"
+
+            "Diagnostics (DiagnosticInfo.severity is one of: error, warning, info, hint):\n"
+            f"{diag_text}\n\n"
+
+            "Code (from context.file_content if available):\n"
             "```"
-            f"{context.language_id}\n{code}\n```"
+            f"{context.language_id}\n{code}\n"
+            "```"
         )
 
     async def _call_llm(self, prompt: str) -> str:
@@ -431,16 +502,86 @@ class FeedbackLayer:
             raw_items = obj.get("items", [])[: self._config.max_feedback_items]
             items: List[FeedbackItem] = []
 
+            # Map string values to enums
+            type_map = {
+                "hint": FeedbackType.HINT,
+                "suggestion": FeedbackType.SUGGESTION,
+                "warning": FeedbackType.WARNING,
+                "explanation": FeedbackType.EXPLANATION,
+                "simplification": FeedbackType.SIMPLIFICATION,
+            }
+            priority_map = {
+                "low": FeedbackPriority.LOW,
+                "medium": FeedbackPriority.MEDIUM,
+                "high": FeedbackPriority.HIGH,
+                "critical": FeedbackPriority.CRITICAL,
+            }
+
             for it in raw_items:
                 title = str(it.get("title", "Feedback"))[:80]
                 msg = str(it.get("message", ""))[: self._config.max_message_length]
 
-                # If your FeedbackItem includes type/priority fields, map them here.
-                # Otherwise, ignore them for now.
-                items.append(FeedbackItem(title=title, message=msg))
+                # Parse type and priority
+                feedback_type = type_map.get(
+                    str(it.get("type", "hint")).lower(),
+                    FeedbackType.HINT
+                )
+                priority = priority_map.get(
+                    str(it.get("priority", "medium")).lower(),
+                    FeedbackPriority.MEDIUM
+                )
+
+                # Parse code_range if present
+                code_range: Optional[CodeRange] = None
+                raw_range = it.get("code_range")
+                if raw_range and isinstance(raw_range, dict):
+                    try:
+                        start = raw_range.get("start", {})
+                        end = raw_range.get("end", {})
+                        code_range = CodeRange(
+                            start=CodePosition(
+                                line=int(start.get("line", 0)),
+                                character=int(start.get("character", 0)),
+                            ),
+                            end=CodePosition(
+                                line=int(end.get("line", 0)),
+                                character=int(end.get("character", 0)),
+                            ),
+                        )
+                    except (TypeError, ValueError):
+                        code_range = None
+
+                # Parse confidence (0.0 to 1.0)
+                try:
+                    confidence = float(it.get("confidence", 0.5))
+                    confidence = max(0.0, min(1.0, confidence))
+                except (TypeError, ValueError):
+                    confidence = 0.5
+
+                # Parse boolean fields
+                dismissible = bool(it.get("dismissible", True))
+                actionable = bool(it.get("actionable", False))
+
+                # Parse action_label (string or None)
+                action_label = it.get("action_label")
+                if action_label is not None:
+                    action_label = str(action_label)[:50] if action_label else None
+
+                items.append(FeedbackItem(
+                    title=title,
+                    message=msg,
+                    feedback_type=feedback_type,
+                    priority=priority,
+                    code_range=code_range,
+                    confidence=confidence,
+                    dismissible=dismissible,
+                    actionable=actionable,
+                    action_label=action_label,
+                ))
 
             return items or self._generate_fallback_feedback(context)
-        except Exception:
+        except Exception as e:
+            print(f"[FeedbackLayer] Failed to parse LLM response: {e}")
             return self._generate_fallback_feedback(context)
 
     def _generate_fallback_feedback(self, context: CodeContext) -> List[FeedbackItem]:
@@ -479,12 +620,16 @@ class FeedbackLayer:
 
     def _filter_and_rank_feedback(self, items: List[FeedbackItem]) -> List[FeedbackItem]:
         """
-        For PoC: keep simple.
+        Simple filtering and ranking:
         - enforce max items
-        - enforce priority filter if you add priority to FeedbackItem later
+        - priority by priority (if set) and confidence
         """
         items = items[: self._config.max_feedback_items]
-        # TODO: if FeedbackItem has priority, apply self._min_priority here
+
+        if self._min_priority is not None:
+            items = [it for it in items if it.priority >= self._min_priority]
+        items.sort(key=lambda it: (it.priority.value, it.confidence), reverse=True)
+
         return items
 
     def _update_rate_limit_window(self) -> None:
