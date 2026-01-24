@@ -14,7 +14,7 @@ Responsibilities:
 - Logging and experiment control
 """
 from typing import Awaitable, Optional, Dict, Any, List, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import asyncio
 
@@ -77,6 +77,13 @@ class RuntimeController:
         # Experiment tracking
         self._experiment_id: Optional[str] = self._config.controller.experiment_id
         self._participant_id: Optional[str] = self._config.controller.participant_id
+
+        # Generate session ID only if both participant_id and experiment_id are available
+        if self._config.controller.participant_id and self._config.controller.experiment_id:
+            self._session_id: Optional[str] = f"{self._config.controller.participant_id}_{self._config.controller.experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        else:
+            self._session_id: Optional[str] = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
     
     async def initialize(self) -> bool:
         """
@@ -88,6 +95,11 @@ class RuntimeController:
         print("[Runtime Controller] Initializing runtime controller...")
         self._status = SystemStatus.READY
         self._stats["session_start"] = asyncio.get_event_loop().time()
+        
+        llm_ready = self._feedback_layer.initialize_llm()
+        if not llm_ready:
+            print("[Runtime Controller] LLM not configured - feedback will use fallback heuristics")
+        
         return True
     
     async def shutdown(self) -> None:
@@ -180,6 +192,14 @@ class RuntimeController:
         self._current_code_context = context
         self._stats["samples_processed"] += 1
         
+        if self._current_code_context.metadata is None:
+            self._current_code_context.metadata = {}
+
+        self._current_code_context.metadata["experiment_id"] = self._experiment_id
+        self._current_code_context.metadata["participant_id"] = self._participant_id    
+        self._current_code_context.metadata["session_id"] = self._session_id    
+
+        
         print(f"[Runtime Controller] Context update file: {context.file_path}, "
               f"cursor: L{context.cursor_position.line if context.cursor_position else '?'}")
         
@@ -206,12 +226,12 @@ class RuntimeController:
         
         msg = WebSocketMessage(
             type=MessageType.FEEDBACK_DELIVERY,
-            timestamp=datetime.now(datetime.timezone.utc).timestamp(),
+            timestamp=datetime.now(timezone.utc).timestamp(),
             payload=json_safe(feedback),
             message_id=None,
         )
         await self._emit(msg)
-        print(f"[RuntimeController] Sent feedback with {len(feedback.items)} items")
+        print(f"[Runtime Controller] Sent feedback with {len(feedback.items)} items \n")
         return True
     
     async def handle_feedback_interaction(
@@ -250,7 +270,7 @@ class RuntimeController:
                 else:
                     callback(message)
             except Exception as e:
-                print(f"  [RuntimeController] Callback failed: {e}")
+                print(f"  [Runtime Controller] Callback failed: {e}")
     
     # --- Feedback Control ---
     
@@ -261,7 +281,9 @@ class RuntimeController:
         Returns:
             True if feedback should be generated.
         """
-        # TODO: Implement feedback condition checking
+        if self._status != SystemStatus.READY:
+            return False
+
         if self._current_code_context is None:
             return False
 
@@ -276,7 +298,7 @@ class RuntimeController:
         """
 
         if self._current_code_context is None:
-            print("[RuntimeController] No code context available for feedback generation.")
+            print("[Runtime Controller] No code context available for feedback generation.")
             return None
 
         return await self._feedback_layer.generate_feedback_cached(
