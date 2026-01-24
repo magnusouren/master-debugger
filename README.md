@@ -120,17 +120,6 @@ Copy `backend/config.example.yaml` to `backend/config.yaml` and customize:
 - Feedback layer LLM settings
 - Server ports and logging
 
-## Development
+## Declaration of AI:
 
-This is a skeleton project. All function bodies contain `pass` and TODO comments indicating where logic should be implemented.
-
-### Implementation Priority
-
-1. Eye tracker connection (using tobii-research SDK)
-2. Signal processing layer (basic feature extraction)
-3. WebSocket communication
-4. VS Code context collection
-5. Reactive tool (start with rule-based thresholds)
-6. Feedback rendering
-7. Feedback generation
-8. Forecasting tool (proactive mode)
+This project has been developed with the assistance of AI tools to enhance code quality and documentation. All code and content have been reviewed and validated by the project maintainers to ensure accuracy and integrity.

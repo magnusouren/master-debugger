@@ -70,6 +70,7 @@ export interface CodePosition {
 export interface CodeRange {
     start: CodePosition;
     end: CodePosition;
+    content?: string;
 }
 
 /**
@@ -85,16 +86,16 @@ export interface DiagnosticInfo {
 
 /**
  * Complete code context captured from VS Code.
- */
+ *  */
 export interface CodeContext {
-    filePath: string;
-    fileContent: string;
-    languageId: string;
-    cursorPosition: CodePosition;
+    file_path: string;
+    file_content?: string;
+    language_id: string;
+    cursor_position: CodePosition;
     selection?: CodeRange;
-    visibleRange?: CodeRange;
+    visible_range?: CodeRange;
     diagnostics: DiagnosticInfo[];
-    workspaceFolder?: string;
+    workspace_folder?: string;
     timestamp: number;
     metadata?: Record<string, unknown>;
 }
@@ -103,13 +104,13 @@ export interface CodeContext {
  * Metadata for a feedback item.
  */
 export interface FeedbackMetadata {
-    generatedAt: number;
-    generationTimeMs: number;
-    modelUsed?: string;
+    generated_at: number;
+    generation_time_ms: number;
+    model_used?: string;
     cached: boolean;
-    cacheKey?: string;
-    feedbackId: string;
-    sessionId?: string;
+    cache_key?: string;
+    feedback_id: string;
+    session_id?: string;
     extra?: Record<string, unknown>;
 }
 
@@ -119,13 +120,13 @@ export interface FeedbackMetadata {
 export interface FeedbackItem {
     title: string;
     message: string;
-    feedbackType: FeedbackType;
+    feedback_type: FeedbackType;
     priority: FeedbackPriority;
-    codeRange?: CodeRange;
+    code_range?: CodeRange;
     confidence: number;
     dismissible: boolean;
     actionable: boolean;
-    actionLabel?: string;
+    action_label?: string;
     metadata: FeedbackMetadata;
 }
 
@@ -133,10 +134,10 @@ export interface FeedbackItem {
  * User interaction with feedback.
  */
 export interface FeedbackInteraction {
-    feedbackId: string;
-    interactionType: "dismissed" | "accepted" | "clicked" | "hovered";
+    feedback_id: string;
+    interaction_type: "dismissed" | "accepted" | "clicked" | "hovered";
     timestamp: number;
-    durationMs?: number;
+    duration_ms?: number;
     metadata?: Record<string, unknown>;
 }
 
@@ -147,7 +148,7 @@ export interface WebSocketMessage {
     type: MessageType;
     timestamp: number;
     payload: Record<string, unknown>;
-    messageId?: string;
+    message_id?: string;
 }
 
 /**
@@ -155,9 +156,9 @@ export interface WebSocketMessage {
  */
 export interface FeedbackDeliveryPayload {
     items: FeedbackItem[];
-    requestId?: string;
-    triggeredBy: "reactive" | "proactive" | "manual";
-    userStateScore?: number;
+    request_id?: string;
+    triggered_by: "reactive" | "proactive" | "manual";
+    user_state_score?: number;
 }
 
 /**
@@ -165,21 +166,21 @@ export interface FeedbackDeliveryPayload {
  */
 export interface StatusUpdatePayload {
     status: SystemStatus;
-    eyeTrackerConnected: boolean;
-    vscodeConnected: boolean;
-    operationMode: "reactive" | "proactive";
-    samplesProcessed: number;
-    feedbackGenerated: number;
-    errorMessage?: string;
+    eye_tracker_connected: boolean;
+    vscode_connected: boolean;
+    operation_mode: "reactive" | "proactive";
+    samples_processed: number;
+    feedback_generated: number;
+    error_message?: string;
 }
 
 /**
  * Context request from backend.
  */
 export interface ContextRequestPayload {
-    requestId: string;
-    includeFileContent: boolean;
-    includeDiagnostics: boolean;
-    includeVisibleRange: boolean;
-    activeFileOnly: boolean;
+    request_id: string;
+    include_file_content: boolean;
+    include_diagnostics: boolean;
+    include_visible_range: boolean;
+    active_file_only: boolean;
 }

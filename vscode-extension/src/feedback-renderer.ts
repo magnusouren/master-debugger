@@ -37,6 +37,8 @@ export class FeedbackRenderer {
      */
     renderFeedback(items: FeedbackItem[]): void {
         // TODO: Implement feedback rendering
+
+        console.log("FEEDBACK ITEMS:", items);
     }
 
     /**
@@ -86,7 +88,7 @@ export class FeedbackRenderer {
      */
     recordInteraction(
         feedbackId: string,
-        interactionType: FeedbackInteraction["interactionType"]
+        interactionType: FeedbackInteraction["interaction_type"]
     ): void {
         // TODO: Implement interaction recording
     }

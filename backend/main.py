@@ -104,14 +104,14 @@ async def run_server(config: "SystemConfig") -> None:
     
     server = Server(config)
     
-    print("Starting servers...")
+    print("[Main] Starting servers...")
     
     # Set up signal handlers for graceful shutdown
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
     
     def signal_handler():
-        print("\nShutdown signal received...")
+        print("\n[Main] Shutdown signal received...")
         shutdown_event.set()
     
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -123,12 +123,11 @@ async def run_server(config: "SystemConfig") -> None:
         # Wait for shutdown signal
         await shutdown_event.wait()
     except asyncio.CancelledError:
-        print("Server shutdown requested")
+        print("[Main] Server shutdown requested")
     finally:
-        print("Stopping servers...")
+        print("[Main] Stopping servers...")
         await server.stop()
-        print("Servers stopped gracefully")
-
+        print("[Main] Servers stopped gracefully")
 
 def main() -> int:
     """Main entry point."""
@@ -148,18 +147,18 @@ def main() -> int:
     
     # TODO: Set operation mode from args
     
-    print(f"Starting Eye Tracking Debugger Backend...")
-    print(f"  WebSocket: ws://{args.host}:{args.ws_port}")
-    print(f"  REST API:  http://{args.host}:{args.api_port}")
-    print(f"  Mode: {args.mode}")
+    print(f"[Main] Starting Eye Tracking Debugger Backend...")
+    print(f"[Main] WebSocket: ws://{args.host}:{args.ws_port}")
+    print(f"[Main] REST API:  http://{args.host}:{args.api_port}")
+    print(f"[Main] Mode: {args.mode}")
     
     try:
         asyncio.run(run_server(config))
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        print("\n[Main] Shutting down...")
         return 0
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        print(f"[Main] Error: {e}", file=sys.stderr)
         return 1
     
     return 0

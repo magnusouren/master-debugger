@@ -10,14 +10,9 @@ import asyncio
 import json
 from dataclasses import asdict
 
-from backend.types import (
-    WebSocketMessage,
-    MessageType,
-    ContextUpdate,
-    FeedbackMessage,
-    SystemStatusMessage,
-    FeedbackInteraction,
-)
+from backend.api.serialization import json_safe
+from backend.types.messages import FeedbackMessage, MessageType, SystemStatusMessage, WebSocketMessage
+
 
 
 # Type alias for message handlers
@@ -61,7 +56,8 @@ class WebSocketServer:
         )
         self._is_running = True
         self._loop = asyncio.get_event_loop()
-    
+
+
     async def stop(self) -> None:
         """Stop the WebSocket server and disconnect all clients."""
         self._is_running = False
@@ -110,7 +106,9 @@ class WebSocketServer:
             message_type: Type of message to handle.
             handler: Async function to handle the message.
         """
-        pass  # TODO: Implement handler registration
+
+        self._message_handlers[message_type] = handler
+
     
     def unregister_handler(self, message_type: MessageType) -> None:
         """
@@ -119,7 +117,9 @@ class WebSocketServer:
         Args:
             message_type: Type of message to unregister.
         """
-        pass  # TODO: Implement handler removal
+
+        if message_type in self._message_handlers:
+            del self._message_handlers[message_type]
     
     async def send_to_client(
         self,
@@ -139,17 +139,23 @@ class WebSocketServer:
         pass  # TODO: Implement targeted sending
     
     async def broadcast(self, message: WebSocketMessage) -> int:
-        """
-        Broadcast a message to all connected clients.
+        sent = 0
+        try:
+            text = self._serialize_message(message)
+
+            for client in list(self._clients):
+                try:
+                    await client.send(text)
+                    sent += 1
+                except Exception as e:
+                    print(f"  [WebSocket] Failed to send to client: {e}")
+                    self._clients.discard(client)
+
+        except Exception as e:
+            print(f"[WebSocket] Broadcast error: {type(e).__name__}: {e}")
+
+        return sent
         
-        Args:
-            message: Message to broadcast.
-            
-        Returns:
-            Number of clients message was sent to.
-        """
-        pass  # TODO: Implement broadcasting
-    
     async def send_feedback(self, feedback: FeedbackMessage) -> bool:
         """
         Send feedback to VS Code extension.
@@ -201,13 +207,13 @@ class WebSocketServer:
             "connected_at": asyncio.get_event_loop().time(),
         }
         
-        print(f"  Client connected: {client_id}")
+        print(f"[WebSocket] Client connected: {client_id}")
         
         try:
             async for message in websocket:
                 await self._process_message(message, client_id)
         except Exception as e:
-            print(f"  Client error: {e}")
+            print(f"[WebSocket] Client error: {e}")
         finally:
             await self._handle_disconnection(client_id)
     
@@ -218,7 +224,7 @@ class WebSocketServer:
         Args:
             client_id: ID of disconnected client.
         """
-        print(f"  Client disconnected: {client_id}")
+        print(f"[WebSocket] Client disconnected: {client_id}")
         if client_id in self._client_info:
             websocket = self._client_info[client_id].get("websocket")
             if websocket in self._clients:
@@ -254,10 +260,21 @@ class WebSocketServer:
         """
         message = self._parse_message(raw_message)
         if message:
+            # Log context updates
+            if message.type == MessageType.CONTEXT_UPDATE:
+                # payload: ContextUpdate = message.payload  # Explicitly typing payload as ContextUpdate
+                print(f"[WebSocket] Processing context update from client {client_id}: ")
+
             handler = self._message_handlers.get(message.type)
             if handler:
-                await handler(message, client_id)
-    
+                try:
+                    await handler(message, client_id)
+                except Exception as e:
+                    print(
+                        f"[WebSocket] Handler error for {message.type}: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                
     def _parse_message(self, raw_message: str) -> Optional[WebSocketMessage]:
         """
         Parse a raw message into a WebSocketMessage.
@@ -275,22 +292,19 @@ class WebSocketServer:
                 type=MessageType(data.get("type")),
                 timestamp=data.get("timestamp", 0),
                 payload=data.get("payload", {}),
-                message_id=data.get("messageId"),
+                message_id=data.get("message_id"),
             )
         except (json.JSONDecodeError, ValueError):
             return None
     
     def _serialize_message(self, message: WebSocketMessage) -> str:
-        """
-        Serialize a message to JSON string.
-        
-        Args:
-            message: Message to serialize.
-            
-        Returns:
-            JSON string.
-        """
-        pass  # TODO: Implement message serialization
+        data = {
+            "type": message.type.value,
+            "timestamp": message.timestamp,
+            "payload": message.payload,
+            "message_id": message.message_id,
+        }
+        return json.dumps(json_safe(data))
     
     def _generate_client_id(self) -> str:
         """

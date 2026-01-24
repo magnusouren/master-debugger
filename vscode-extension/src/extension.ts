@@ -22,6 +22,10 @@ let contextCollector: ContextCollector | null = null;
 let feedbackRenderer: FeedbackRenderer | null = null;
 let statusBar: StatusBarManager | null = null;
 
+// Debounce timer for context updates
+let contextUpdateTimer: NodeJS.Timeout | null = null;
+const CONTEXT_UPDATE_DEBOUNCE_MS = 500;
+
 /**
  * Extension activation.
  */
@@ -169,6 +173,9 @@ async function connectToBackend(): Promise<void> {
             "Connected to Eye Tracking backend"
         );
         statusBar?.setConnected(true);
+
+        // Send initial context immediately
+        sendContextUpdate();
     } else {
         vscode.window.showErrorMessage(
             "Failed to connect to Eye Tracking backend"
@@ -204,26 +211,67 @@ function clearFeedback(): void {
 // --- Event Handlers ---
 
 function onActiveEditorChanged(editor: vscode.TextEditor | undefined): void {
-    // TODO: Implement active editor change handling
+    if (editor) {
+        console.log(`Active editor changed: ${editor.document.uri.toString()}`);
+        // Send context immediately when switching files
+        sendContextUpdate();
+    } else {
+        console.log("No active editor");
+    }
 }
 
 function onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
-    // TODO: Implement document change handling
+    // Only track changes in the active editor
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor && event.document === activeEditor.document) {
+        console.log(`Document changed: ${event.document.uri.toString()}`);
+        // Debounce context updates during typing
+        scheduleContextUpdate();
+    }
 }
 
 function onSelectionChanged(event: vscode.TextEditorSelectionChangeEvent): void {
-    // TODO: Implement selection change handling
+    // TODO - only track selection changes in the active editor, dont send the whole file again
+    console.log(`Selection changed in: ${event.textEditor.document.uri.toString()}`);
+    // Debounce selection changes (cursor movement)
+    scheduleContextUpdate();
+}
+
+/**
+ * Schedule a debounced context update.
+ */
+function scheduleContextUpdate(): void {
+    if (contextUpdateTimer) {
+        clearTimeout(contextUpdateTimer);
+    }
+    contextUpdateTimer = setTimeout(() => {
+        sendContextUpdate();
+    }, CONTEXT_UPDATE_DEBOUNCE_MS);
+}
+
+/**
+ * Send current context to the backend.
+ */
+function sendContextUpdate(): void {
+    if (!wsClient?.isConnected()) {
+        console.log("WebSocket not connected, skipping context update");
+        return;
+    }
+
+    const context = contextCollector?.collectContext();
+    if (context) {
+        console.log(`Sending context update for: ${context.file_path}`);
+        wsClient.sendContextUpdate(context);
+    }
 }
 
 function onConfigurationChanged(event: vscode.ConfigurationChangeEvent): void {
-    // TODO: Implement configuration change handling
     if (event.affectsConfiguration("eyeTrackingDebugger")) {
         updateConfiguration();
     }
 }
 
 function updateConfiguration(): void {
-    // TODO: Implement configuration update
     const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
     const host = config.get<string>("backendHost") || "localhost";
     const port = config.get<number>("websocketPort") || 8765;
@@ -233,7 +281,8 @@ function updateConfiguration(): void {
 // --- Message Handlers ---
 
 function handleFeedbackDelivery(message: { payload: Record<string, unknown> }): void {
-    // TODO: Implement feedback delivery handling
+    console.log("Received feedback delivery message");
+
     const payload = message.payload as unknown as FeedbackDeliveryPayload;
     feedbackRenderer?.renderFeedback(payload.items);
 }

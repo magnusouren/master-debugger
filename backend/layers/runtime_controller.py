@@ -13,28 +13,23 @@ Responsibilities:
 - Configuring layers for reactive and proactive modes
 - Logging and experiment control
 """
-from typing import Optional, Dict, Any, List, Callable
+from typing import Awaitable, Optional, Dict, Any, List, Callable
 from datetime import datetime
 from enum import Enum
 import asyncio
 
-from backend.types import (
-    WindowFeatures,
-    PredictedFeatures,
-    UserStateEstimate,
-    CodeContext,
-    FeedbackResponse,
-    FeedbackInteraction,
-    SystemConfig,
-    ControllerConfig,
-    OperationMode,
-    SystemStatus,
-    WebSocketMessage,
-)
+
+from backend.api.serialization import json_safe
 from backend.layers.signal_processing import SignalProcessingLayer
 from backend.layers.forecasting_tool import ForecastingTool
 from backend.layers.reactive_tool import ReactiveTool
 from backend.layers.feedback_layer import FeedbackLayer
+from backend.types.code_context import CodeContext
+from backend.types.config import OperationMode, SystemConfig
+from backend.types.eye_tracking import PredictedFeatures, WindowFeatures
+from backend.types.feedback import FeedbackInteraction, FeedbackResponse
+from backend.types.messages import MessageType, SystemStatus, WebSocketMessage
+from backend.types.user_state import UserStateEstimate
 
 
 class RuntimeController:
@@ -74,7 +69,7 @@ class RuntimeController:
         }
         
         # Callbacks for external communication
-        self._websocket_callbacks: List[Callable[[WebSocketMessage], None]] = []
+        self._websocket_callbacks: List[Callable[[WebSocketMessage], Awaitable[None]]] = []
         
         # Event loop reference
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -90,14 +85,14 @@ class RuntimeController:
         Returns:
             True if initialization successful.
         """
-        print("  Initializing runtime controller...")
+        print("[Runtime Controller] Initializing runtime controller...")
         self._status = SystemStatus.READY
         self._stats["session_start"] = asyncio.get_event_loop().time()
         return True
     
     async def shutdown(self) -> None:
         """Shutdown all system components gracefully."""
-        print("  Shutting down runtime controller...")
+        print("[Runtime Controller] Shutting down runtime controller...")
         self._status = SystemStatus.DISCONNECTED
     
     def configure(self, config: SystemConfig) -> None:
@@ -177,21 +172,27 @@ class RuntimeController:
     async def handle_context_update(self, context: CodeContext) -> None:
         """
         Handle code context update from VS Code.
+        First step in the data flow pipeline in the Control Layer.
         
         Args:
             context: Updated code context.
         """
-        pass  # TODO: Implement context update handling
-    
-    async def request_context(self) -> Optional[CodeContext]:
-        """
-        Request current code context from VS Code.
+        self._current_code_context = context
+        self._stats["samples_processed"] += 1
         
-        Returns:
-            Code context or None if unavailable.
-        """
-        pass  # TODO: Implement context request
-    
+        print(f"[Runtime Controller] Context update file: {context.file_path}, "
+              f"cursor: L{context.cursor_position.line if context.cursor_position else '?'}")
+        
+        # Check if feedback should be generated
+        if self.should_generate_feedback():
+            feedback = await self.trigger_feedback_generation()
+            if feedback:
+                print(f"[Runtime Controller] → Generated {len(feedback.items)} feedback item(s)")
+                self._stats["feedback_generated"] += 1
+                # Send feedback back to VS Code
+                await self.send_feedback(feedback)
+
+        
     async def send_feedback(self, feedback: FeedbackResponse) -> bool:
         """
         Send feedback to VS Code for display.
@@ -202,7 +203,16 @@ class RuntimeController:
         Returns:
             True if sent successfully.
         """
-        pass  # TODO: Implement feedback sending
+        
+        msg = WebSocketMessage(
+            type=MessageType.FEEDBACK_DELIVERY,
+            timestamp=datetime.now(datetime.timezone.utc).timestamp(),
+            payload=json_safe(feedback),
+            message_id=None,
+        )
+        await self._emit(msg)
+        print(f"[RuntimeController] Sent feedback with {len(feedback.items)} items")
+        return True
     
     async def handle_feedback_interaction(
         self, interaction: FeedbackInteraction
@@ -224,7 +234,23 @@ class RuntimeController:
         Args:
             callback: Function to call with messages.
         """
-        pass  # TODO: Implement callback registration
+        self._websocket_callbacks.append(callback)
+        
+    async def _emit(self, message: WebSocketMessage) -> None:
+        """
+        Emit a message through registered websocket callbacks.
+        
+        Args:
+            message: Message to emit.
+        """
+        for callback in self._websocket_callbacks:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(message)
+                else:
+                    callback(message)
+            except Exception as e:
+                print(f"  [RuntimeController] Callback failed: {e}")
     
     # --- Feedback Control ---
     
@@ -235,7 +261,11 @@ class RuntimeController:
         Returns:
             True if feedback should be generated.
         """
-        pass  # TODO: Implement feedback decision logic
+        # TODO: Implement feedback condition checking
+        if self._current_code_context is None:
+            return False
+
+        return True 
     
     async def trigger_feedback_generation(self) -> Optional[FeedbackResponse]:
         """
@@ -244,7 +274,17 @@ class RuntimeController:
         Returns:
             Generated feedback or None.
         """
-        pass  # TODO: Implement feedback triggering
+
+        if self._current_code_context is None:
+            print("[RuntimeController] No code context available for feedback generation.")
+            return None
+
+        return await self._feedback_layer.generate_feedback_cached(
+            context=self._current_code_context,
+            user_state=self._current_user_state,
+            feedback_types=None, # TODO - decide if different types needed
+        )
+
     
     def get_feedback_cooldown_remaining(self) -> float:
         """
