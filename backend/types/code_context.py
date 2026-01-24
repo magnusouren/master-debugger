@@ -87,6 +87,10 @@ class DiagnosticInfo:
         if not isinstance(data, dict):
             raise TypeError(f"DiagnosticInfo.from_dict expected dict, got {type(data).__name__}")
 
+        range_data = data.get("range")
+        if range_data is None or not isinstance(range_data, dict):
+            raise KeyError("DiagnosticInfo missing required field: range")
+
         return cls(
             message=str(data.get("message", "")),
             severity=DiagnosticSeverity.from_value(data.get("severity", "info")),

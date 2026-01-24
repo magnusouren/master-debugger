@@ -203,12 +203,11 @@ class RuntimeController:
         Returns:
             True if sent successfully.
         """
-        from dataclasses import asdict
         
         msg = WebSocketMessage(
             type=MessageType.FEEDBACK_DELIVERY,
-            timestamp=datetime.utcnow().timestamp(),
-            payload=json_safe(feedback),   # not asdict(feedback)
+            timestamp=datetime.now(datetime.timezone.utc).timestamp(),
+            payload=json_safe(feedback),
             message_id=None,
         )
         await self._emit(msg)
@@ -263,6 +262,8 @@ class RuntimeController:
             True if feedback should be generated.
         """
         # TODO: Implement feedback condition checking
+        if self._current_code_context is None:
+            return False
 
         return True 
     
@@ -273,6 +274,10 @@ class RuntimeController:
         Returns:
             Generated feedback or None.
         """
+
+        if self._current_code_context is None:
+            print("[RuntimeController] No code context available for feedback generation.")
+            return None
 
         return await self._feedback_layer.generate_feedback_cached(
             context=self._current_code_context,

@@ -141,6 +141,8 @@ export class ContextCollector {
                 return "info";
             case vscode.DiagnosticSeverity.Hint:
                 return "hint";
+            default:
+                return "info";
         }
     }
 

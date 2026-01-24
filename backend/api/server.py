@@ -13,7 +13,6 @@ from backend.layers import RuntimeController
 from backend.api.websocket_server import WebSocketServer
 from backend.api.rest_api import RestAPI
 from backend.types.code_context import CodeContext
-from backend.types.feedback import FeedbackInteraction
 from backend.types.messages import MessageType, WebSocketMessage
 
 

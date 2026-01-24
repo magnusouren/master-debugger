@@ -235,8 +235,6 @@ function onSelectionChanged(event: vscode.TextEditorSelectionChangeEvent): void 
     console.log(`Selection changed in: ${event.textEditor.document.uri.toString()}`);
     // Debounce selection changes (cursor movement)
     scheduleContextUpdate();
-
-    const context = contextCollector?.collectContext();
 }
 
 /**
