@@ -30,6 +30,7 @@ from backend.types import (
     UserStateEstimate,
 )
 from backend.types.config import FeedbackLayerConfig
+from backend.layers.llm_client import LLMClient, create_llm_client, LLMResponse
 
 
 @dataclass
@@ -52,7 +53,7 @@ class FeedbackLayer:
         self._inflight: Dict[str, asyncio.Future] = {}
         self._lock = asyncio.Lock()
 
-        self._llm_client: Optional[object] = None  # replace later
+        self._llm_client: Optional[LLMClient] = None
         self._min_priority: Optional[FeedbackPriority] = None
 
         # Simple stats
@@ -64,20 +65,28 @@ class FeedbackLayer:
 
     def initialize_llm(self) -> bool:
         """
-        Keep it simple for PoC: only validate config here.
-        You can instantiate an actual client later.
+        Initialize the LLM client based on configuration.
         """
-        if not self._config.llm_provider:
-            self._llm_client = None
-            return False
-
-        # Example “configured” state; replace with real client later.
-        if self._config.llm_provider in ("openai", "anthropic", "local"):
-            self._llm_client = object()
-            return True
-
-        self._llm_client = None
-        return False
+        print("[FeedbackLayer] Initializing LLM client")
+        self.set_llm_client(create_llm_client(
+            provider=self._config.llm_provider,
+            api_key=self._config.llm_api_key,
+            model=self._config.llm_model,
+        ))
+        
+        configured = self._llm_client is not None and self._llm_client.is_configured()
+        if configured:
+            print(f"[FeedbackLayer] LLM initialized: {self._llm_client.get_model_name()}")
+        else:
+            print("[FeedbackLayer] LLM not configured")
+        
+        return configured
+    
+    def set_llm_client(self, client: LLMClient) -> None:
+        """
+        Inject a custom LLM client (useful for testing).
+        """
+        self._llm_client = client
 
     def shutdown_llm(self) -> None:
         self._llm_client = None
@@ -115,10 +124,10 @@ class FeedbackLayer:
 
         try:
             # LLM path if configured
-            if self._llm_client and self._config.llm_api_key:
-                print("[FeedbackLayer] Using LLM for feedback generation")
+            if self._llm_client and self._llm_client.is_configured():
+                print(f"[FeedbackLayer] Using LLM for feedback generation ({self._llm_client.get_model_name()})")
                 prompt = self._build_llm_prompt(context, user_state)
-                raw = await self._call_llm(prompt)  # make async
+                raw = await self._call_llm(prompt)
                 items = self._parse_llm_response(raw, context)
             else:
                 print("[FeedbackLayer] LLM not configured, using fallback")
@@ -389,24 +398,29 @@ class FeedbackLayer:
 
     async def _call_llm(self, prompt: str) -> str:
         """
-        PoC: keep as async so you can plug in network call later.
-        For now, raise if not configured.
+        Call the LLM client to generate feedback.
+        
+        Returns the raw response content as a string.
+        Raises RuntimeError if the client is not configured or call fails.
         """
-        if not (self._llm_client and self._config.llm_api_key):
-            raise RuntimeError("LLM not configured")
-
-        # TODO: replace with real provider call (openai/anthropic/local)
-        await asyncio.sleep(0.05)
-        return json.dumps({
-            "items": [
-                {
-                    "title": "Sample Feedback",
-                    "message": "This is a sample feedback item.",
-                    "type": "hint",
-                    "priority": "medium",
-                }
-            ]
-        })
+        if not self._llm_client:
+            raise RuntimeError("LLM client not initialized")
+        
+        if not self._llm_client.is_configured():
+            raise RuntimeError("LLM client not configured")
+        
+        response: LLMResponse = await self._llm_client.generate(
+            prompt=prompt,
+            max_tokens=500,
+            temperature=0.3,
+        )
+        
+        if not response.success:
+            raise RuntimeError(f"LLM call failed: {response.error}")
+        
+        print(f"[FeedbackLayer] LLM response received in {response.latency_ms:.0f}ms (tokens: {response.usage.get('total_tokens', 0)})")
+        
+        return response.content
 
     def _parse_llm_response(self, response: str, context: CodeContext) -> List[FeedbackItem]:
         """

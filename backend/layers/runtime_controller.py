@@ -88,6 +88,11 @@ class RuntimeController:
         print("[Runtime Controller] Initializing runtime controller...")
         self._status = SystemStatus.READY
         self._stats["session_start"] = asyncio.get_event_loop().time()
+        
+        llm_ready = self._feedback_layer.initialize_llm()
+        if not llm_ready:
+            print("[Runtime Controller] LLM not configured - feedback will use fallback heuristics")
+        
         return True
     
     async def shutdown(self) -> None:

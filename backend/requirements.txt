@@ -33,6 +33,6 @@ structlog>=23.0.0
 # scikit-learn>=1.3.0
 # torch>=2.0.0
 
-# LLM integration (optional, for feedback generation)
-# openai>=1.0.0
-# anthropic>=0.7.0
+# LLM integration (for feedback generation)
+openai>=1.0.0
+# anthropic>=0.7.0  # Future support
