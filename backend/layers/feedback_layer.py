@@ -292,7 +292,8 @@ class FeedbackLayer:
         :rtype: str
         """
 
-        return context.metadata.get('session_id', 'unknown')
+        md = context.metadata or {}
+        return str(md.get("session_id", "unknown"))
 
     def _compute_cache_key(self, context: CodeContext) -> str:
         """
@@ -625,30 +626,45 @@ class FeedbackLayer:
         Cheap heuristics that always return something useful.
         """
         print("[FeedbackLayer] Generating fallback feedback")
+
         diags = context.diagnostics or []
         if diags:
             d0 = diags[0]
-            msg = getattr(d0, "message", "There is a diagnostic message.")
-            sev = getattr(d0, "severity", "unknown")
+
+            msg = str(getattr(d0, "message", "There is a diagnostic message."))[
+                : self._config.max_message_length
+            ]
+
+            sev_raw = getattr(d0, "severity", None)
+            if hasattr(sev_raw, "value"):
+                sev = str(sev_raw.value).lower()
+            else:
+                sev = str(sev_raw).lower() if sev_raw is not None else "unknown"
+
+            is_error = sev == "error"
+
             return [
                 FeedbackItem(
                     title=f"Diagnostic ({sev})",
-                    message=str(msg)[: self._config.max_message_length],
-                    feedback_type=FeedbackType.WARNING if sev == "error" else FeedbackType.HINT,
-                    priority=FeedbackPriority.HIGH if sev == "error" else FeedbackPriority.MEDIUM,
+                    message=msg,
+                    feedback_type=FeedbackType.WARNING if is_error else FeedbackType.HINT,
+                    priority=FeedbackPriority.HIGH if is_error else FeedbackPriority.MEDIUM,
                     code_range=getattr(d0, "range", None),
-                    confidence=0.9,
+                    confidence=0.9 if is_error else 0.7,
                     dismissible=True,
                     actionable=False,
                     action_label=None,
                 )
             ]
 
-        # If no diagnostics, suggest “next action” near cursor
+        # No diagnostics → generic guidance near cursor
         return [
             FeedbackItem(
                 title="Next step",
-                message="Describe what you expect this code to do, then add a small print/log or a test at the cursor location to verify assumptions.",
+                message=(
+                    "Explain what you expect this code to do, then add a small "
+                    "print/log or a test near the cursor to verify that assumption."
+                ),
                 feedback_type=FeedbackType.SUGGESTION,
                 priority=FeedbackPriority.LOW,
                 code_range=None,
