@@ -5,6 +5,91 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
+from dataclasses import dataclass, field, fields, is_dataclass
+from typing import Optional, List, Dict, Any, Type, TypeVar, get_origin, get_args, Union
+from enum import Enum
+import yaml
+
+T = TypeVar("T")
+
+# ------------------------------------------------------------------
+# Internal helpers
+# ------------------------------------------------------------------
+
+def _is_optional(tp: Any) -> bool:
+    origin = get_origin(tp)
+    return origin is Union and type(None) in get_args(tp)
+
+
+def _strip_optional(tp: Any) -> Any:
+    return next(t for t in get_args(tp) if t is not type(None))
+
+
+def _coerce_value(value: Any, target_type: Any) -> Any:
+    """Convert YAML value into the target field type."""
+    if value is None:
+        return None
+
+    # Optional[T]
+    if _is_optional(target_type):
+        return _coerce_value(value, _strip_optional(target_type))
+
+    # Enum
+    if isinstance(target_type, type) and issubclass(target_type, Enum):
+        return target_type(value)
+
+    # Nested dataclass
+    if isinstance(target_type, type) and is_dataclass(target_type):
+        return _dict_to_dataclass(value, target_type)
+
+    origin = get_origin(target_type)
+
+    # List[T]
+    if origin in (list, List):
+        (item_type,) = get_args(target_type)
+        return [_coerce_value(v, item_type) for v in value]
+
+    # Dict[K, V]
+    if origin in (dict, Dict):
+        key_type, val_type = get_args(target_type)
+        return {
+            _coerce_value(k, key_type): _coerce_value(v, val_type)
+            for k, v in value.items()
+        }
+
+    return value
+
+
+def _dict_to_dataclass(data: Dict[str, Any], cls: Type[T]) -> T:
+    """Create dataclass instance from dict (ignores unknown keys)."""
+    field_map = {f.name: f for f in fields(cls)}
+    kwargs = {}
+
+    for key, value in data.items():
+        if key not in field_map:
+            continue  # ignore unknown config keys
+        field_type = field_map[key].type
+        kwargs[key] = _coerce_value(value, field_type)
+
+    return cls(**kwargs)
+
+
+def _dataclass_to_dict(obj: Any) -> Any:
+    """Convert dataclass to YAML-safe dict."""
+    if is_dataclass(obj):
+        return {f.name: _dataclass_to_dict(getattr(obj, f.name)) for f in fields(obj)}
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, dict):
+        return {k: _dataclass_to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_dataclass_to_dict(v) for v in obj]
+    return obj
+
+#------------------------------------------------------------------
+# Configuration Data Classes
+#------------------------------------------------------------------
+
 
 class OperationMode(Enum):
     """System operation modes."""
@@ -138,12 +223,25 @@ class SystemConfig:
     reactive_tool: ReactiveToolConfig = field(default_factory=ReactiveToolConfig)
     feedback_layer: FeedbackLayerConfig = field(default_factory=FeedbackLayerConfig)
     controller: ControllerConfig = field(default_factory=ControllerConfig)
-    
+
     @classmethod
     def from_file(cls, path: str) -> "SystemConfig":
-        """Load configuration from file."""
-        pass  # TODO: Implement YAML/JSON loading
-    
+        """Load configuration from YAML file."""
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+
+        if not isinstance(data, dict):
+            raise ValueError("Top-level YAML must be a mapping")
+
+        return _dict_to_dataclass(data, cls)
+
     def to_file(self, path: str) -> None:
-        """Save configuration to file."""
-        pass  # TODO: Implement YAML/JSON saving
+        """Save configuration to YAML file."""
+        data = _dataclass_to_dict(self)
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(
+                data,
+                f,
+                sort_keys=False,
+                default_flow_style=False,
+            )
