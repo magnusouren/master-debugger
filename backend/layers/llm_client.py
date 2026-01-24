@@ -8,6 +8,8 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
+from openai import AsyncOpenAI
+
 
 
 @dataclass
@@ -69,7 +71,6 @@ class OpenAIClient(LLMClient):
     def _init_client(self) -> None:
         """Initialize the OpenAI client."""
         try:
-            from openai import AsyncOpenAI
 
             kwargs: Dict[str, Any] = {"api_key": self._api_key}
             if self._base_url:

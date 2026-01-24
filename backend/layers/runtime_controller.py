@@ -80,7 +80,7 @@ class RuntimeController:
 
         # Generate session ID only if both participant_id and experiment_id are available
         if self._config.controller.participant_id and self._config.controller.experiment_id:
-            self._session_id: Optional[str] = self._config.controller.participant_id + "_" + self._config.controller.experiment_id + "_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            self._session_id: Optional[str] = f"{self._config.controller.participant_id}_{self._config.controller.experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         else:
             self._session_id: Optional[str] = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -191,6 +191,10 @@ class RuntimeController:
         """
         self._current_code_context = context
         self._stats["samples_processed"] += 1
+        
+        if self._current_code_context.metadata is None:
+            self._current_code_context.metadata = {}
+
         self._current_code_context.metadata["experiment_id"] = self._experiment_id
         self._current_code_context.metadata["participant_id"] = self._participant_id    
         self._current_code_context.metadata["session_id"] = self._session_id    
@@ -222,7 +226,7 @@ class RuntimeController:
         
         msg = WebSocketMessage(
             type=MessageType.FEEDBACK_DELIVERY,
-            timestamp = datetime.now(timezone.utc).timestamp(),
+            timestamp=datetime.now(timezone.utc).timestamp(),
             payload=json_safe(feedback),
             message_id=None,
         )

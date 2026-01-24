@@ -84,11 +84,14 @@ class FeedbackLayer:
         
         return configured
     
-    def set_llm_client(self, client: LLMClient) -> None:
+    def set_llm_client(self, client: Optional[LLMClient]) -> None:
         """
         Inject a custom LLM client (useful for testing).
         """
-        self._llm_client = client
+        if client:
+            self._llm_client = client
+            return
+        print("[FeedbackLayer] No LLM client provided, disabling LLM usage")
 
     def shutdown_llm(self) -> None:
         self._llm_client = None
@@ -189,13 +192,7 @@ class FeedbackLayer:
         Generate feedback with caching.
 
         AI-generated code - should be optimized further later
-        
-        :param self: Object instance
-        :param context: Code context
-        :param user_state: Optional user state estimate
-        :param feedback_types: Optional list of feedback types to generate
-        :return: Feedback response
-        :rtype: FeedbackResponse
+ 
         """
         cache_key = self._compute_cache_key(context)
 
@@ -206,7 +203,7 @@ class FeedbackLayer:
         if cached is not None:
             return cached
 
-        # Single-flight: atomisk avgjør creator vs waiter
+        # Single-flight: prevent duplicate concurrent calls
         async with self._lock:
             cached2 = self._check_cache(cache_key)
             if cached2 is not None:
@@ -243,9 +240,6 @@ class FeedbackLayer:
         """
         TODO - fix
         
-        :param self: Object instance
-        :param file_path: Optional file path to invalidate; if None, clear entire cache
-        :type file_path: Optional[str]
         """
         self._cache.clear()
         
@@ -364,6 +358,7 @@ class FeedbackLayer:
             if getattr(resp, "metadata", None):
                 resp.metadata.cached = True
         except Exception:
+            print("[FeedbackLayer] Failed to mark cached metadata")
             pass
 
         return resp
