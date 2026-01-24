@@ -14,7 +14,7 @@ Responsibilities:
 - Logging and experiment control
 """
 from typing import Awaitable, Optional, Dict, Any, List, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import asyncio
 
@@ -206,12 +206,12 @@ class RuntimeController:
         
         msg = WebSocketMessage(
             type=MessageType.FEEDBACK_DELIVERY,
-            timestamp=datetime.now(datetime.timezone.utc).timestamp(),
+            timestamp = datetime.now(timezone.utc).timestamp(),
             payload=json_safe(feedback),
             message_id=None,
         )
         await self._emit(msg)
-        print(f"[RuntimeController] Sent feedback with {len(feedback.items)} items")
+        print(f"[Runtime Controller] Sent feedback with {len(feedback.items)} items \n")
         return True
     
     async def handle_feedback_interaction(
@@ -250,7 +250,7 @@ class RuntimeController:
                 else:
                     callback(message)
             except Exception as e:
-                print(f"  [RuntimeController] Callback failed: {e}")
+                print(f"  [Runtime Controller] Callback failed: {e}")
     
     # --- Feedback Control ---
     
@@ -276,7 +276,7 @@ class RuntimeController:
         """
 
         if self._current_code_context is None:
-            print("[RuntimeController] No code context available for feedback generation.")
+            print("[Runtime Controller] No code context available for feedback generation.")
             return None
 
         return await self._feedback_layer.generate_feedback_cached(
