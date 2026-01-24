@@ -184,61 +184,60 @@ class FeedbackLayer:
                 ),
             )
 
-    async def generate_feedback_cached(
-        self,
-        context: CodeContext,
-        user_state: Optional[UserStateEstimate] = None,
-        feedback_types: Optional[List[FeedbackType]] = None,
-    ) -> FeedbackResponse:
+    async def generate_feedback_cached(self, context, user_state=None, feedback_types=None) -> FeedbackResponse:
         """
-        Caching + optional single-flight.
+        Generate feedback with caching.
+
+        AI-generated code - should be optimized further later
+        
+        :param self: Object instance
+        :param context: Code context
+        :param user_state: Optional user state estimate
+        :param feedback_types: Optional list of feedback types to generate
+        :return: Feedback response
+        :rtype: FeedbackResponse
         """
-        print("[FeedbackLayer] Generating cached feedback")
         cache_key = self._compute_cache_key(context)
 
         if not self._config.enable_cache:
-            print("[FeedbackLayer] Cache disabled, generating fresh feedback")
             return await self.generate_feedback(context, user_state, feedback_types)
 
-        # Fast path: try cache
         cached = self._check_cache(cache_key)
         if cached is not None:
             return cached
 
-        # Optional single-flight to avoid stampede
+        # Single-flight: atomisk avgjør creator vs waiter
         async with self._lock:
             cached2 = self._check_cache(cache_key)
             if cached2 is not None:
                 return cached2
 
-            if cache_key in self._inflight:
-                fut = self._inflight[cache_key]
-            else:
-                fut = asyncio.get_event_loop().create_future()
+            fut = self._inflight.get(cache_key)
+            if fut is None:
+                fut = asyncio.get_running_loop().create_future()
                 self._inflight[cache_key] = fut
+                creator = True
+            else:
+                creator = False
 
-        if fut.done():
-            return fut.result()
-
-        # Only the creator should compute; others await
-        creator = False
-        async with self._lock:
-            creator = (self._inflight.get(cache_key) is fut) and (not fut.done())
-
-        if creator:
-            try:
-                resp = await self.generate_feedback(context, user_state, feedback_types)
-                self._store_in_cache(cache_key, resp)
-                fut.set_result(resp)
-                return resp
-            except Exception as e:
-                fut.set_exception(e)
-                raise
-            finally:
-                async with self._lock:
-                    self._inflight.pop(cache_key, None)
-        else:
+        if not creator:
+            # waiter
             return await fut
+
+        # creator
+        try:
+            resp = await self.generate_feedback(context, user_state, feedback_types)
+            self._store_in_cache(cache_key, resp)
+            fut.set_result(resp)
+            return resp
+        except Exception as e:
+            fut.set_exception(e)
+            raise
+        finally:
+            async with self._lock:
+                # slett bare hvis det fortsatt er samme fut (ekstra robust)
+                if self._inflight.get(cache_key) is fut:
+                    self._inflight.pop(cache_key, None)
 
     def invalidate_cache(self, file_path: Optional[str] = None) -> None:
         """
@@ -386,8 +385,6 @@ class FeedbackLayer:
         for k in expired:
             self._cache.pop(k, None)
 
-    from typing import Optional
-
     def _build_llm_prompt(
         self,
         context: CodeContext,
@@ -434,6 +431,7 @@ class FeedbackLayer:
             or ""
         )
 
+        # TODO - give more details about user state for better personalized feedback
         # Optional user_state snippet (kept generic so it doesn't break if UserStateEstimate changes)
         user_state_text = "(none)"
         if user_state is not None:
