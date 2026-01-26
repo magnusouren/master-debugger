@@ -189,6 +189,10 @@ class FeedbackLayerConfig:
     # Rate limiting
     max_generations_per_minute: int = 10
 
+    # LLM generation parameters
+    max_tokens: int = 500
+    temperature: float = 0.3
+
 
 @dataclass
 class ControllerConfig:
