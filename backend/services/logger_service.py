@@ -204,7 +204,7 @@ class LoggerService:
     
     def export_experiment_logs(self, filepath: str) -> bool:
         """
-        Export experiment logs to JSON and CSV file.
+        Export experiment logs to CSV file.
         
         Args:
             filepath: Path to export file.
@@ -213,7 +213,7 @@ class LoggerService:
             True if successful.
         """
         try:
-            filepath = filepath if filepath.endswith(".json") else f"{filepath}.json"
+            filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
 
             logs_data = [
                 {
@@ -226,9 +226,6 @@ class LoggerService:
             ]
             
             with open(filepath, "w") as f:
-                json.dump(logs_data, f, indent=2, default=str)
-
-            with open(filepath.replace(".json", ".csv"), "w") as f:
                 f.write("timestamp,level,event_type,data\n")
                 for entry in logs_data:
                     data_str = json.dumps(entry["data"]).replace('"', '""')
@@ -259,7 +256,7 @@ class LoggerService:
     
     def export_system_logs(self, filepath: str) -> bool:
         """
-        Export system logs to JSON and CSV file.
+        Export system logs to CSV file.
         
         Args:
             filepath: Path to export file.
@@ -268,7 +265,7 @@ class LoggerService:
             True if successful.
         """
         try:
-            filepath = filepath if filepath.endswith(".json") else f"{filepath}.json"
+            filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
             logs_data = [
                 {
                     "timestamp": entry.timestamp,
@@ -278,11 +275,8 @@ class LoggerService:
                 }
                 for entry in self.system_logs
             ]
-            
-            with open(filepath, "w") as f:
-                json.dump(logs_data, f, indent=2, default=str)
 
-            with open(filepath.replace(".json", ".csv"), "w") as f:
+            with open(filepath, "w") as f:
                 f.write("timestamp,level,event_type,data\n")
                 for entry in logs_data:
                     data_str = json.dumps(entry["data"]).replace('"', '""')
