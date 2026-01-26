@@ -498,8 +498,8 @@ class FeedbackLayer:
         
         response: LLMResponse = await self._llm_client.generate(
             prompt=prompt,
-            max_tokens=500,
-            temperature=0.3,
+            max_tokens=self._config.max_tokens,
+            temperature=self._config.temperature,
         )
         
         if not response.success:
