@@ -67,11 +67,14 @@ master-debuger/
 source .venv/bin/activate
 
 # Install dependencies
-pip install -r backend/requirements.txt
+cd backend
+pip install -r requirements.txt
 
 # Run the backend
-python backend/main.py
+cd backend
+python main.py --config config.yaml
 ```
+The backend will start a WebSocket server on port 8765 and a REST API server on port 8080 by default. Adjust ports in `config.yaml` as needed.
 
 ### VS Code Extension
 
