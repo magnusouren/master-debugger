@@ -9,7 +9,7 @@ Supports configurable log levels and thresholds per category.
 """
 from typing import Dict, Any, List, Optional
 from enum import Enum
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 
@@ -73,7 +73,7 @@ class LoggerService:
             data: Event data as dictionary.
             level: Log level (DEBUG, INFO, WARNING, ERROR).
         """
-        if not self._should_log(level):
+        if not self._should_log(level, category="experiment"):
             return
         
         entry = LogEntry(
@@ -104,7 +104,7 @@ class LoggerService:
             data: Event data as dictionary.
             level: Log level (DEBUG, INFO, WARNING, ERROR).
         """
-        if not self._should_log(level):
+        if not self._should_log(level, category="system"):
             return
         
         entry = LogEntry(
@@ -293,21 +293,31 @@ class LoggerService:
     
     # --- Internal Methods ---
     
-    def _should_log(self, level: str) -> bool:
+    def _should_log(self, level: str, category: str = "experiment") -> bool:
         """
         Determine if a message should be logged based on level.
         
         Args:
             level: Message level.
+            category: Log category, e.g. "experiment" or "system".
             
         Returns:
             True if message should be logged.
         """
         try:
             level_obj = LogLevel[level.upper()]
-            return level_obj.value >= self.experiment_level.value
         except KeyError:
+            # Preserve existing behavior: log unknown levels by default.
             return True  # Log unknown levels
+        
+        # Choose appropriate threshold based on category.
+        if category.lower() == "system":
+            threshold = self.system_level
+        else:
+            # Default to experiment threshold for "experiment" and any other categories.
+            threshold = self.experiment_level
+        
+        return level_obj.value >= threshold.value
     
     def _print_log(self, entry: LogEntry) -> None:
         """
@@ -316,7 +326,7 @@ class LoggerService:
         Args:
             entry: Log entry to print.
         """
-        timestamp = datetime.fromtimestamp(entry.timestamp).strftime("%H:%M:%S")
+        timestamp = datetime.fromtimestamp(entry.timestamp, tz=timezone.utc).strftime("%H:%M:%S")
         
         # Color codes for terminal
         colors = {

@@ -191,14 +191,6 @@ def main() -> int:
         },
     )
     
-    logger.system(
-        "backend_servers_configured",
-        {
-            "websocket_url": f"ws://{args.host}:{args.ws_port}",
-            "api_url": f"http://{args.host}:{args.api_port}",
-        },
-    )
-    
     try:
         asyncio.run(run_server(config))
     except KeyboardInterrupt:

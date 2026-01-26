@@ -114,7 +114,7 @@ class RuntimeController:
         if not llm_ready:
             self._logger.system("llm_not_configured", {"fallback": "heuristics"}, level="WARNING")
         
-        self._logger.system("runtime_controller_initialized",
+        self._logger.system("runtime_controller_ready",
                             {"status": self._status.name}, level="DEBUG")
         return True
     
