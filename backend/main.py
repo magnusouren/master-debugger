@@ -59,6 +59,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--experiment-log-level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Experiment log level",
+    )
+    parser.add_argument(
+        "--system-log-level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="System log level",
+    )
     return parser.parse_args()
 
 
@@ -73,12 +87,15 @@ def load_config(config_path: str | None) -> "SystemConfig":
         System configuration.
     """
     from backend.types import SystemConfig
+    from backend.services.logger_service import get_logger
+    
+    logger = get_logger()
 
     if config_path:
-        print(f"[Main] Loading configuration from {config_path}")
+        logger.system("config_loading", {"path": config_path})
         return SystemConfig.from_file(config_path)
 
-    print("[Main] No configuration file provided, using default settings")
+    logger.system("config_using_defaults", {})
     return SystemConfig()
 
 
@@ -95,6 +112,13 @@ def setup_logging(debug: bool = False) -> None:
         level=level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
+    
+    # Suppress verbose third-party library logs
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("websockets.server").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
 
 
 async def run_server(config: "SystemConfig") -> None:
@@ -105,18 +129,18 @@ async def run_server(config: "SystemConfig") -> None:
         config: System configuration.
     """
     from backend.api.server import Server
+    from backend.services.logger_service import get_logger
     import signal
     
     server = Server(config)
-    
-    print("[Main] Starting servers...")
+    logger = get_logger()
     
     # Set up signal handlers for graceful shutdown
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
     
     def signal_handler():
-        print("\n[Main] Shutdown signal received...")
+        logger.system("shutdown_signal_received", {})
         shutdown_event.set()
     
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -128,11 +152,9 @@ async def run_server(config: "SystemConfig") -> None:
         # Wait for shutdown signal
         await shutdown_event.wait()
     except asyncio.CancelledError:
-        print("[Main] Server shutdown requested")
+        logger.system("server_shutdown_requested", {})
     finally:
-        print("[Main] Stopping servers...")
         await server.stop()
-        print("[Main] Servers stopped gracefully")
 
 def main() -> int:
     """Main entry point."""
@@ -140,6 +162,13 @@ def main() -> int:
     
     # Set up logging
     setup_logging(debug=args.debug)
+    
+    # Initialize logger service with configured levels
+    from backend.services.logger_service import initialize_logger
+    logger = initialize_logger(
+        experiment_level=args.experiment_log_level,
+        system_level=args.system_log_level,
+    )
     
     # Load configuration
     config = load_config(args.config)
@@ -152,18 +181,27 @@ def main() -> int:
     
     # TODO: Set operation mode from args
     
-    print(f"[Main] Starting Eye Tracking Debugger Backend...")
-    print(f"[Main] WebSocket: ws://{args.host}:{args.ws_port}")
-    print(f"[Main] REST API:  http://{args.host}:{args.api_port}")
-    print(f"[Main] Mode: {args.mode}")
+    logger.system(
+        "backend_startup",
+        {
+            "websocket_url": f"ws://{args.host}:{args.ws_port}",
+            "api_url": f"http://{args.host}:{args.api_port}",
+            "mode": args.mode,
+            "debug": args.debug,
+        },
+    )
     
     try:
         asyncio.run(run_server(config))
     except KeyboardInterrupt:
-        print("\n[Main] Shutting down...")
+        logger.system("keyboard_interrupt", {})
         return 0
     except Exception as e:
-        print(f"[Main] Error: {e}", file=sys.stderr)
+        logger.system(
+            "backend_error",
+            {"error": str(e), "error_type": type(e).__name__},
+            level="ERROR",
+        )
         return 1
     
     return 0

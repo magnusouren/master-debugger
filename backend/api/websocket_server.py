@@ -11,6 +11,7 @@ import json
 from dataclasses import asdict
 
 from backend.api.serialization import json_safe
+from backend.services.logger_service import get_logger
 from backend.types.messages import FeedbackMessage, MessageType, SystemStatusMessage, WebSocketMessage
 
 
@@ -44,6 +45,7 @@ class WebSocketServer:
         self._message_handlers: Dict[MessageType, MessageHandler] = {}
         self._is_running: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._logger = get_logger()
     
     async def start(self) -> None:
         """Start the WebSocket server."""
@@ -149,7 +151,11 @@ class WebSocketServer:
             await websocket.send(text)
             return True
         except Exception as e:
-            print(f"[WebSocket] Failed to send to client {client_id}: {e}")
+            self._logger.system(
+                "websocket_send_to_client_error",
+                {"client_id": client_id, "error": str(e)},
+                level="ERROR",
+            )
             return False
     
     async def broadcast(self, message: WebSocketMessage) -> int:
@@ -162,11 +168,19 @@ class WebSocketServer:
                     await client.send(text)
                     sent += 1
                 except Exception as e:
-                    print(f"  [WebSocket] Failed to send to client: {e}")
+                    self._logger.system(
+                        "websocket_broadcast_client_error",
+                        {"error": str(e)},
+                        level="WARNING",
+                    )
                     self._clients.discard(client)
 
         except Exception as e:
-            print(f"[WebSocket] Broadcast error: {type(e).__name__}: {e}")
+            self._logger.system(
+                "websocket_broadcast_error",
+                {"error": str(e), "error_type": type(e).__name__},
+                level="ERROR",
+            )
 
         return sent
     
@@ -188,13 +202,20 @@ class WebSocketServer:
             "connected_at": asyncio.get_event_loop().time(),
         }
         
-        print(f"[WebSocket] Client connected: {client_id}")
+        self._logger.system(
+            "websocket_client_connected",
+            {"client_id": client_id, "total_clients": len(self._clients)},
+        )
         
         try:
             async for message in websocket:
                 await self._process_message(message, client_id)
         except Exception as e:
-            print(f"[WebSocket] Client error: {e}")
+            self._logger.system(
+                "websocket_client_error",
+                {"client_id": client_id, "error": str(e)},
+                level="WARNING",
+            )
         finally:
             await self._handle_disconnection(client_id)
     
@@ -205,7 +226,10 @@ class WebSocketServer:
         Args:
             client_id: ID of disconnected client.
         """
-        print(f"[WebSocket] Client disconnected: {client_id}")
+        self._logger.system(
+            "websocket_client_disconnected",
+            {"client_id": client_id, "total_clients": len(self._clients) - 1},
+        )
         if client_id in self._client_info:
             websocket = self._client_info[client_id].get("websocket")
             if websocket in self._clients:
@@ -229,17 +253,21 @@ class WebSocketServer:
         if message:
             # Log context updates
             if message.type == MessageType.CONTEXT_UPDATE:
-                # payload: ContextUpdate = message.payload  # Explicitly typing payload as ContextUpdate
-                print(f"[WebSocket] Processing context update from client {client_id}: ")
+                self._logger.system(
+                    "websocket_context_update_received",
+                    {"client_id": client_id},
+                    level="DEBUG",
+                )
 
             handler = self._message_handlers.get(message.type)
             if handler:
                 try:
                     await handler(message, client_id)
                 except Exception as e:
-                    print(
-                        f"[WebSocket] Handler error for {message.type}: "
-                        f"{type(e).__name__}: {e}"
+                    self._logger.system(
+                        "websocket_handler_error",
+                        {"message_type": message.type.value, "error": str(e)},
+                        level="ERROR",
                     )
                 
     def _parse_message(self, raw_message: str) -> Optional[WebSocketMessage]:

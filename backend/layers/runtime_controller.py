@@ -24,6 +24,7 @@ from backend.layers.signal_processing import SignalProcessingLayer
 from backend.layers.forecasting_tool import ForecastingTool
 from backend.layers.reactive_tool import ReactiveTool
 from backend.layers.feedback_layer import FeedbackLayer
+from backend.services.logger_service import get_logger
 from backend.types.code_context import CodeContext
 from backend.types.config import OperationMode, SystemConfig
 from backend.types.eye_tracking import PredictedFeatures, WindowFeatures
@@ -83,6 +84,19 @@ class RuntimeController:
             self._session_id: Optional[str] = f"{self._config.controller.participant_id}_{self._config.controller.experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         else:
             self._session_id: Optional[str] = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        
+        # Initialize logger
+        self._logger = get_logger()
+        self._logger.system(
+            "runtime_controller_initialized",
+            {
+                "operation_mode": self._operation_mode.name,
+                "experiment_id": self._experiment_id,
+                "participant_id": self._participant_id,
+                "session_id": self._session_id,
+            },
+            level="DEBUG",
+        )
 
     
     async def initialize(self) -> bool:
@@ -92,19 +106,21 @@ class RuntimeController:
         Returns:
             True if initialization successful.
         """
-        print("[Runtime Controller] Initializing runtime controller...")
+        self._logger.system("runtime_controller_initializing", {}, level="DEBUG")
         self._status = SystemStatus.READY
         self._stats["session_start"] = asyncio.get_event_loop().time()
         
         llm_ready = self._feedback_layer.initialize_llm()
         if not llm_ready:
-            print("[Runtime Controller] LLM not configured - feedback will use fallback heuristics")
+            self._logger.system("llm_not_configured", {"fallback": "heuristics"}, level="WARNING")
         
+        self._logger.system("runtime_controller_ready",
+                            {"status": self._status.name}, level="DEBUG")
         return True
     
     async def shutdown(self) -> None:
         """Shutdown all system components gracefully."""
-        print("[Runtime Controller] Shutting down runtime controller...")
+        self._logger.system("runtime_controller_shutdown", {"final_stats": self._stats}, level="INFO")
         self._status = SystemStatus.DISCONNECTED
     
     def configure(self, config: SystemConfig) -> None:
@@ -200,14 +216,28 @@ class RuntimeController:
         self._current_code_context.metadata["session_id"] = self._session_id    
 
         
-        print(f"[Runtime Controller] Context update file: {context.file_path}, "
-              f"cursor: L{context.cursor_position.line if context.cursor_position else '?'}")
+        self._logger.experiment(
+            "context_updated",
+            {
+                "file_path": context.file_path,
+                "cursor_line": context.cursor_position.line if context.cursor_position else None,
+                "session_id": self._session_id,
+            },
+            level="DEBUG",
+        )
         
         # Check if feedback should be generated
         if self.should_generate_feedback():
             feedback = await self.trigger_feedback_generation()
             if feedback:
-                print(f"[Runtime Controller] → Generated {len(feedback.items)} feedback item(s)")
+                self._logger.experiment(
+                    "feedback_generated",
+                    {
+                        "item_count": len(feedback.items),
+                        "session_id": self._session_id,
+                    },
+                    level="DEBUG",
+                )
                 self._stats["feedback_generated"] += 1
                 # Send feedback back to VS Code
                 await self.send_feedback(feedback, client_id=context.metadata.get("client_id"))
@@ -233,10 +263,18 @@ class RuntimeController:
                 target_client_id=client_id
             )
             await self._emit(msg)
-            print(f"[Runtime Controller] Sent feedback with {len(feedback.items)} items to client {client_id} \n")
+            self._logger.system(
+                "feedback_sent",
+                {"item_count": len(feedback.items), "client_id": client_id},
+                level="INFO",
+            )
             return True
         except Exception as e:
-            print(f"[Runtime Controller] Error sending feedback: {e}")
+            self._logger.system(
+                "feedback_send_error",
+                {"error": str(e), "client_id": client_id},
+                level="ERROR",
+            )
             return False
     
     async def handle_feedback_interaction(
@@ -275,7 +313,11 @@ class RuntimeController:
                 else:
                     callback(message)
             except Exception as e:
-                print(f"  [Runtime Controller] Callback failed: {e}")
+                self._logger.system(
+                    "websocket_callback_error",
+                    {"error": str(e)},
+                    level="ERROR",
+                )
     
     # --- Feedback Control ---
     
@@ -303,7 +345,11 @@ class RuntimeController:
         """
 
         if self._current_code_context is None:
-            print("[Runtime Controller] No code context available for feedback generation.")
+            self._logger.system(
+                "feedback_generation_no_context",
+                {},
+                level="DEBUG",
+            )
             return None
 
         return await self._feedback_layer.generate_feedback_cached(
