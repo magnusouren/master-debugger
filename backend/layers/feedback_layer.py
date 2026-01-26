@@ -25,6 +25,7 @@ import uuid
 from backend.types.code_context import CodeContext, CodePosition, CodeRange
 from backend.types.config import FeedbackLayerConfig
 from backend.services.llm_client import LLMClient, create_llm_client, LLMResponse
+from backend.services.logger_service import get_logger
 from backend.types.feedback import FeedbackItem, FeedbackMetadata, FeedbackPriority, FeedbackResponse, FeedbackType
 from backend.types.user_state import UserStateEstimate
 
@@ -55,6 +56,9 @@ class FeedbackLayer:
         # Simple stats
         self._cache_hits = 0
         self._cache_misses = 0
+        
+        # Initialize logger
+        self._logger = get_logger()
 
     def configure(self, config: FeedbackLayerConfig) -> None:
         self._config = config
@@ -63,7 +67,7 @@ class FeedbackLayer:
         """
         Initialize the LLM client based on configuration.
         """
-        print("[FeedbackLayer] Initializing LLM client")
+        self._logger.system("llm_client_initializing", {}, level="DEBUG")
         self.set_llm_client(create_llm_client(
             provider=self._config.llm_provider,
             api_key=self._config.llm_api_key,
@@ -72,9 +76,17 @@ class FeedbackLayer:
         
         configured = self._llm_client is not None and self._llm_client.is_configured()
         if configured:
-            print(f"[FeedbackLayer] LLM initialized: {self._llm_client.get_model_name()}")
+            self._logger.system(
+                "llm_client_initialized",
+                {"model": self._llm_client.get_model_name()},
+                level="DEBUG",
+            )
         else:
-            print("[FeedbackLayer] LLM not configured")
+            self._logger.system(
+                "llm_client_not_configured",
+                {},
+                level="WARNING",
+            )
         
         return configured
     
@@ -85,7 +97,11 @@ class FeedbackLayer:
         if client:
             self._llm_client = client
             return
-        print("[FeedbackLayer] No LLM client provided, disabling LLM usage")
+        self._logger.system(
+            "llm_client_not_provided",
+            {"fallback": "disabled"},
+            level="WARNING",
+        )
 
     def shutdown_llm(self) -> None:
         self._llm_client = None
@@ -102,7 +118,11 @@ class FeedbackLayer:
         - resilient (fallback on errors)
         - deterministic output shape
         """
-        print("[FeedbackLayer] Generating feedback")
+        self._logger.system(
+            "feedback_generation_started",
+            {"has_user_state": user_state is not None},
+            level="DEBUG",
+        )
         start = time.time()
 
         if self.is_rate_limited():
@@ -131,15 +151,29 @@ class FeedbackLayer:
         try:
             # LLM path if configured
             if self._llm_client and self._llm_client.is_configured():
-                print(f"[FeedbackLayer] Using LLM for feedback generation ({self._llm_client.get_model_name()})")
+                self._logger.system(
+                    "feedback_using_llm",
+                    {"model": self._llm_client.get_model_name()},
+                    level="DEBUG",
+                )
                 prompt = self._build_llm_prompt(context, user_state)
                 raw = await self._call_llm(prompt)
                 items = self._parse_llm_response(raw, context)
             else:
-                print("[FeedbackLayer] LLM not configured, using fallback")
+                self._logger.system(
+                    "feedback_using_fallback",
+                    {},
+                    level="DEBUG",
+                )
                 items = self._generate_fallback_feedback(context)
 
             items = self._filter_and_rank_feedback(items)
+
+            self._logger.system(
+                "feedback_generation_completed",
+                {"num_items": len(items), "generation_time_ms": (time.time() - start) * 1000.0},
+                level="INFO",
+            )
 
             return FeedbackResponse(
                 items=items,
@@ -159,7 +193,11 @@ class FeedbackLayer:
                 ),
             )
         except Exception as e:
-            print(f"[FeedbackLayer] Error during feedback generation, using fallback: {e}")
+            self._logger.system(
+                "feedback_generation_error",
+                {"error": str(e), "error_type": type(e).__name__},
+                level="WARNING",
+            )
             # Never fail hard in editor loop
             items = self._generate_fallback_feedback(context)
             items = self._filter_and_rank_feedback(items)
@@ -256,7 +294,11 @@ class FeedbackLayer:
         self._rate_limit_window = [t for t in self._rate_limit_window if t >= cutoff]
         limited = len(self._rate_limit_window) >= self._config.max_generations_per_minute
         if limited:
-            print("[FeedbackLayer] Rate limited")
+            self._logger.system(
+                "feedback_rate_limited",
+                {"pending_requests": len(self._rate_limit_window)},
+                level="DEBUG",
+            )
         return limited
 
     def set_feedback_priority_filter(self, min_priority: FeedbackPriority) -> None:
@@ -340,20 +382,31 @@ class FeedbackLayer:
         entry = self._cache.get(cache_key)
         if not entry:
             self._cache_misses += 1
-            print("[FeedbackLayer] Cache miss")
+            self._logger.system(
+                "feedback_cache_miss",
+                {"total_misses": self._cache_misses},
+                level="DEBUG",
+            )
             return None
 
         self._cache_hits += 1
-        print("[FeedbackLayer] Cache hit")
+        self._logger.system(
+            "feedback_cache_hit",
+            {"total_hits": self._cache_hits},
+            level="DEBUG",
+        )
         resp = entry.response
 
         # Mark metadata as cached (if you have that field)
         try:
             if getattr(resp, "metadata", None):
                 resp.metadata.cached = True
-        except Exception:
-            print("[FeedbackLayer] Failed to mark cached metadata")
-            pass
+        except Exception as e:
+            self._logger.system(
+                "feedback_cache_metadata_error",
+                {"error": str(e)},
+                level="WARNING",
+            )
 
         return resp
 
@@ -505,7 +558,11 @@ class FeedbackLayer:
         if not response.success:
             raise RuntimeError(f"LLM call failed: {response.error}")
         
-        print(f"[FeedbackLayer] LLM response received in {response.latency_ms:.0f}ms (tokens: {response.usage.get('total_tokens', 0)})")
+        self._logger.system(
+            "llm_call_success",
+            {"model": self._llm_client.get_model_name(), "latency_ms": response.latency_ms},
+            level="DEBUG",
+        )
         
         return response.content
 
@@ -566,7 +623,11 @@ class FeedbackLayer:
                         )
                     except (TypeError, ValueError):
                         code_range = None
-
+                        self._logger.system(
+                            "invalid_code_range",
+                            {"raw_range": raw_range},
+                            level="DEBUG",
+                        )
                 # Parse confidence (0.0 to 1.0)
                 try:
                     confidence = float(it.get("confidence", 0.5))
@@ -607,14 +668,22 @@ class FeedbackLayer:
 
             return items or self._generate_fallback_feedback(context)
         except Exception as e:
-            print(f"[FeedbackLayer] Failed to parse LLM response: {e}")
+            self._logger.system(
+                "llm_response_parsing_error",
+                {"error": str(e), "response_snippet": response[:200]},
+                level="WARNING",
+            )
             return self._generate_fallback_feedback(context)
 
     def _generate_fallback_feedback(self, context: CodeContext) -> List[FeedbackItem]:
         """
         Cheap heuristics that always return something useful.
         """
-        print("[FeedbackLayer] Generating fallback feedback")
+        self._logger.system(
+            "generating_fallback_feedback",
+            {},
+            level="WARNING",
+        )
 
         diags = context.diagnostics or []
         if diags:
@@ -677,7 +746,18 @@ class FeedbackLayer:
         """
         Adapt to your actual FeedbackMetadata fields.
         """
-        print("[FeedbackLayer] Creating feedback metadata")
+        self._logger.system(
+            "feedback_metadata_created",
+            {
+                "cached": cached,
+                "generation_time_ms": generation_time_ms,
+                "generated_at": generated_at,
+                "cache_key": cache_key,
+                "feedback_id": feedback_id,
+                "session_id": session_id,
+            },
+            level="DEBUG",
+        )
         return FeedbackMetadata(
             generated_at=generated_at or time.time(), 
             generation_time_ms=generation_time_ms,

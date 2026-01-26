@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 from openai import AsyncOpenAI
+from backend.services.logger_service import get_logger
 
 
 
@@ -78,7 +79,12 @@ class OpenAIClient(LLMClient):
 
             self._client = AsyncOpenAI(**kwargs)
         except ImportError:
-            print("[OpenAIClient] openai package not installed")
+            logger = get_logger()
+            logger.system(
+                "openai_package_not_installed",
+                {},
+                level="WARNING",
+            )
             self._client = None
 
     def is_configured(self) -> bool:
@@ -160,18 +166,32 @@ def create_llm_client(
     Returns:
         Configured LLMClient instance or None if not configured
     """
+    logger = get_logger()
+    
     if provider == "openai":
         client = OpenAIClient(
             api_key=api_key,
             model=model or "gpt-4o-mini",
         )
         if client.is_configured():
-            print(f"[LLMClient] OpenAI client configured with model: {client.get_model_name()}")
+            logger.system(
+                "llm_client_created",
+                {"provider": "openai", "model": client.get_model_name()},
+                level="DEBUG",
+            )
             return client
         else:
-            print("[LLMClient] OpenAI not configured")
+            logger.system(
+                "llm_client_not_configured",
+                {"provider": "openai"},
+                level="WARNING",
+            )
             return None
 
-    print("[LLMClient] No provider specified, or unsupported provider. value:", provider)
+    logger.system(
+        "llm_provider_unsupported",
+        {"provider": provider},
+        level="WARNING",
+    )
     return None
 

@@ -13,6 +13,7 @@ from backend.types import SystemConfig
 from backend.layers import RuntimeController
 from backend.api.websocket_server import WebSocketServer
 from backend.api.rest_api import RestAPI
+from backend.services.logger_service import get_logger
 from backend.types.code_context import CodeContext
 from backend.types.messages import MessageType, WebSocketMessage
 
@@ -44,14 +45,20 @@ class Server:
         
         self._is_running: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._logger = get_logger()
 
 
 
     
     async def start(self) -> None:
         """Start all server components."""
-        print(f"[Server] Starting WebSocket server on ws://{self._config.controller.websocket_host}:{self._config.controller.websocket_port}")
-        print(f"[Server] Starting REST API server on http://{self._config.controller.api_host}:{self._config.controller.api_port}")
+        self._logger.system(
+            "servers_starting",
+            {
+                "websocket_url": f"ws://{self._config.controller.websocket_host}:{self._config.controller.websocket_port}",
+                "api_url": f"http://{self._config.controller.api_host}:{self._config.controller.api_port}",
+            },
+        )
         
         # Wire up the components
         self._wire_components()
@@ -64,18 +71,18 @@ class Server:
         await self._controller.initialize()
         
         self._is_running = True
-        print("[Server] All servers started successfully! \n")
+        self._logger.system("servers_started", {})
     
     async def stop(self) -> None:
         """Stop all server components gracefully."""
-        print("[Server] Stopping servers...")
+        self._logger.system("servers_stopping", {})
         self._is_running = False
         
         await self._controller.shutdown()
         await self._websocket_server.stop()
         await self._rest_api.stop()
         
-        print("[Server] All servers stopped")
+        self._logger.system("servers_stopped", {})
     
     def run(self) -> None:
         """
@@ -90,7 +97,7 @@ class Server:
             self._loop.run_until_complete(self.start())
             self._loop.run_forever()
         except KeyboardInterrupt:
-            print("[Server] Keyboard interrupt received. Shutting down...")
+            self._logger.system("keyboard_interrupt", {})
         finally:
             self._loop.run_until_complete(self.stop())
             self._loop.close()
@@ -157,18 +164,30 @@ class Server:
             # target specific clients if needed
             if msg.target_client_id:
                 try:
-                    print(f"[Server] Sending outbound message to client {msg.target_client_id} via WebSocket")
                     await self._websocket_server.send_to_client(msg.target_client_id, msg)
                     return
                 except Exception as e:
-                    print(f"[Server] Error sending outbound message to client {msg.target_client_id} via WebSocket: {e}")
+                    self._logger.system(
+                        "error_sending_to_client",
+                        {"client_id": msg.target_client_id, "error": str(e)},
+                        level="ERROR",
+                    )
                     return
                 
             # broadcast to all clients
             try:
                 await self._websocket_server.broadcast(msg)
+                self._logger.system(
+                    "message_broadcast",
+                    {"message_type": msg.type.value},
+                    level="DEBUG",
+                )
             except Exception as e:
-                print(f"[Server] Error broadcasting outbound message via WebSocket: {e}")
+                self._logger.system(
+                    "error_broadcasting_message",
+                    {"error": str(e)},
+                    level="ERROR",
+                )
 
         self._controller.register_websocket_callback(send_outbound)
 
@@ -187,10 +206,14 @@ class Server:
         Set up WebSocket message handlers to handle messages correctly.
         """
         async def on_context_update(message: WebSocketMessage, client_id: str) -> None:
-            print(f"[Server] Received context update from client {client_id}")
+            self._logger.system(
+                "context_update_received",
+                {"client_id": client_id},
+                level="DEBUG",
+            )
 
             # Convert payload into your internal CodeContext type
-            ctx = CodeContext.from_dict(message.payload) 
+            ctx = CodeContext.from_dict(message.payload)
             ctx.metadata = {**ctx.metadata, "client_id": client_id}
             await self._controller.handle_context_update(ctx)
 
@@ -216,7 +239,10 @@ class Server:
         Args:
             sig: The signal received.
         """
-        print(f"[Server] Received shutdown signal: {sig.name}. Shutting down...")
+        self._logger.system(
+            "shutdown_signal",
+            {"signal": sig.name},
+        )
         await self.stop()
         self._loop.stop()
 
