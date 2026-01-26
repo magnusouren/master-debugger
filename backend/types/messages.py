@@ -45,6 +45,7 @@ class WebSocketMessage:
     timestamp: float
     payload: Dict[str, Any] = field(default_factory=dict)
     message_id: Optional[str] = None
+    target_client_id: Optional[str] = None  # For targeted messages
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert message to dictionary for JSON serialization."""
@@ -52,7 +53,8 @@ class WebSocketMessage:
             "type": self.type.value,
             "timestamp": self.timestamp,
             "payload": self.payload,
-            "message_id": self.message_id
+            "message_id": self.message_id,
+            "target_client_id": self.target_client_id
         }
     
     @classmethod
