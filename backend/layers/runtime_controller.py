@@ -112,8 +112,8 @@ class RuntimeController:
         if not llm_ready:
             self._logger.system("llm_not_configured", {"fallback": "heuristics"}, level="WARNING")
 
-        # Start main loop as background task
-        asyncio.create_task(self._run_main_loop())
+        # Start main loop as background task - store it to prevent garbage collection
+        main = asyncio.create_task(self._run_main_loop())
         
         self._logger.system("runtime_controller_ready",
                             {"status": self._status.name}, level="DEBUG")
@@ -154,14 +154,24 @@ class RuntimeController:
         Args:
             mode: REACTIVE or PROACTIVE mode.
         """
-        if mode != self._operation_mode:
-            self._operation_mode = mode
-            self._logger.system(
-                "operation_mode_changed",
-                {"new_mode": self._operation_mode.name},
-                level="INFO",
-            )
-            # Reconfigure layers as needed
+        # Keep the stored configuration in sync with the current operation mode
+        if self._config is not None and getattr(self._config, "controller", None) is not None:
+            self._config.controller.operation_mode = mode
+        
+        self._logger.system(
+            "operation_mode_changed",
+            {"new_mode": self._operation_mode.name},
+            level="INFO",
+        )
+
+        self._logger.experiment(
+            "operation_mode_changed",
+            {"new_mode": self._operation_mode.name},
+            level="INFO",
+        )
+
+        # Reconfigure layers as needed using the updated configuration
+        if self._config is not None:
             self.configure(self._config)
     
     def get_operation_mode(self) -> OperationMode:
@@ -389,7 +399,7 @@ class RuntimeController:
 
         if feedback is not None:
             self._last_feedback_time = asyncio.get_event_loop().time()
-            self._stats["feedback_generated"] = self._stats.get("feedback_generated", 0) + 1
+            self._stats["feedback_generated"] = self._stats.get("feedback_generated",0) + 1
             return feedback
         else:
             self._logger.system(
@@ -400,7 +410,6 @@ class RuntimeController:
             return None
     
 
-    
     def get_feedback_cooldown_remaining(self) -> float:
         """
         Get remaining cooldown time before next feedback.
