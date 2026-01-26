@@ -15,7 +15,6 @@ Responsibilities:
 """
 from typing import Awaitable, Optional, Dict, Any, List, Callable
 from datetime import datetime, timezone
-from enum import Enum
 import asyncio
 
 
@@ -97,7 +96,6 @@ class RuntimeController:
             },
             level="DEBUG",
         )
-
     
     async def initialize(self) -> bool:
         """
@@ -113,6 +111,9 @@ class RuntimeController:
         llm_ready = self._feedback_layer.initialize_llm()
         if not llm_ready:
             self._logger.system("llm_not_configured", {"fallback": "heuristics"}, level="WARNING")
+
+        # Start main loop as background task - store it to prevent garbage collection
+        main = asyncio.create_task(self._run_main_loop())
         
         self._logger.system("runtime_controller_ready",
                             {"status": self._status.name}, level="DEBUG")
@@ -122,6 +123,7 @@ class RuntimeController:
         """Shutdown all system components gracefully."""
         self._logger.system("runtime_controller_shutdown", {"final_stats": self._stats}, level="INFO")
         self._status = SystemStatus.DISCONNECTED
+
     
     def configure(self, config: SystemConfig) -> None:
         """
@@ -130,7 +132,20 @@ class RuntimeController:
         Args:
             config: New system configuration.
         """
-        pass  # TODO: Implement configuration update
+        self._config = config
+        self._operation_mode = config.controller.operation_mode
+        
+        # Reconfigure layers
+        self._signal_processing.configure(config.signal_processing)
+        self._forecasting.configure(config.forecasting)
+        self._reactive_tool.configure(config.reactive_tool)
+        self._feedback_layer.configure(config.feedback_layer)
+        
+        self._logger.system(
+            "runtime_controller_reconfigured",
+            {"operation_mode": self._operation_mode.name},
+            level="INFO",
+        )
     
     def set_operation_mode(self, mode: OperationMode) -> None:
         """
@@ -139,7 +154,25 @@ class RuntimeController:
         Args:
             mode: REACTIVE or PROACTIVE mode.
         """
-        pass  # TODO: Implement mode switching
+        # Keep the stored configuration in sync with the current operation mode
+        if self._config is not None and getattr(self._config, "controller", None) is not None:
+            self._config.controller.operation_mode = mode
+        
+        self._logger.system(
+            "operation_mode_changed",
+            {"new_mode": self._operation_mode.name},
+            level="INFO",
+        )
+
+        self._logger.experiment(
+            "operation_mode_changed",
+            {"new_mode": self._operation_mode.name},
+            level="INFO",
+        )
+
+        # Reconfigure layers as needed using the updated configuration
+        if self._config is not None:
+            self.configure(self._config)
     
     def get_operation_mode(self) -> OperationMode:
         """
@@ -148,7 +181,7 @@ class RuntimeController:
         Returns:
             Current operation mode.
         """
-        pass  # TODO: Implement mode getter
+        return self._operation_mode
     
     def get_status(self) -> SystemStatus:
         """
@@ -157,7 +190,7 @@ class RuntimeController:
         Returns:
             Current system status.
         """
-        pass  # TODO: Implement status getter
+        return self._status
     
     def get_statistics(self) -> Dict[str, Any]:
         """
@@ -166,7 +199,7 @@ class RuntimeController:
         Returns:
             Dictionary of statistics.
         """
-        pass  # TODO: Implement statistics getter
+        return self._stats
     
     # --- Eye Tracker Interface ---
     
@@ -217,28 +250,29 @@ class RuntimeController:
 
         
         self._logger.experiment(
-            "context_updated",
+            "context_update_received",
             {
-                "file_path": context.file_path,
-                "cursor_line": context.cursor_position.line if context.cursor_position else None,
-                "session_id": self._session_id,
+                "metadata": self._current_code_context.metadata,
+                "experiment_id": self._experiment_id,
+                "participant_id": self._participant_id,
+                "session_id": self._session_id
             },
             level="DEBUG",
         )
-        
-        # Check if feedback should be generated
+
+        self._logger.system(
+            "context_update_processed",
+            {
+                "file": context.file_path, 
+                "line": context.cursor_position.line,
+                "char": context.cursor_position.character
+            },
+            level="INFO",
+        )
+
         if self.should_generate_feedback():
             feedback = await self.trigger_feedback_generation()
             if feedback:
-                self._logger.experiment(
-                    "feedback_generated",
-                    {
-                        "item_count": len(feedback.items),
-                        "session_id": self._session_id,
-                    },
-                    level="DEBUG",
-                )
-                self._stats["feedback_generated"] += 1
                 # Send feedback back to VS Code
                 await self.send_feedback(feedback, client_id=context.metadata.get("client_id"))
 
@@ -299,6 +333,8 @@ class RuntimeController:
         """
         self._websocket_callbacks.append(callback)
         
+    # --- Messaging ---
+
     async def _emit(self, message: WebSocketMessage) -> None:
         """
         Emit a message through registered websocket callbacks.
@@ -324,6 +360,8 @@ class RuntimeController:
     def should_generate_feedback(self) -> bool:
         """
         Determine if feedback should be generated based on current state.
+
+        TODO - implement cooldowns, user state checks, etc.
         
         Returns:
             True if feedback should be generated.
@@ -352,13 +390,26 @@ class RuntimeController:
             )
             return None
 
-        return await self._feedback_layer.generate_feedback_cached(
+
+        feedback = await self._feedback_layer.generate_feedback_cached(
             context=self._current_code_context,
             user_state=self._current_user_state,
             feedback_types=None, # TODO - decide if different types needed
         )
 
+        if feedback is not None:
+            self._last_feedback_time = asyncio.get_event_loop().time()
+            self._stats["feedback_generated"] = self._stats.get("feedback_generated",0) + 1
+            return feedback
+        else:
+            self._logger.system(
+                "feedback_generation_no_feedback",
+                {},
+                level="DEBUG",
+            )
+            return None
     
+
     def get_feedback_cooldown_remaining(self) -> float:
         """
         Get remaining cooldown time before next feedback.
@@ -366,7 +417,7 @@ class RuntimeController:
         Returns:
             Remaining seconds in cooldown.
         """
-        pass  # TODO: Implement cooldown calculation
+        pass # TODO: Implement cooldown logic
     
     # --- Data Flow Callbacks ---
     
@@ -417,20 +468,7 @@ class RuntimeController:
         """End the current experiment session."""
         pass  # TODO: Implement experiment end
     
-    def log_event(
-        self, 
-        event_type: str, 
-        data: Dict[str, Any]
-    ) -> None:
-        """
-        Log an event for the experiment.
-        
-        Args:
-            event_type: Type of event.
-            data: Event data.
-        """
-        pass  # TODO: Implement event logging
-    
+
     def get_experiment_data(self) -> Dict[str, Any]:
         """
         Get collected experiment data.
@@ -469,8 +507,29 @@ class RuntimeController:
     
     async def _run_main_loop(self) -> None:
         """Main processing loop."""
-        pass  # TODO: Implement main loop
+
+        self._logger.system("runtime_controller_main_loop_started", {}, level="DEBUG")
+        while self._status == SystemStatus.READY:
+            await asyncio.sleep(0.1)  # Main loop tick
+            
+            # Update statistics
+            self._update_statistics()
+            
+            # # Check for feedback generation
+            # if self.should_generate_feedback():
+            #     feedback = await self.trigger_feedback_generation()
+            #     if feedback:
+            #         # Send feedback back to VS Code
+            #         await self.send_feedback(feedback)
+
+        self._logger.system("runtime_controller_main_loop_ended", {}, level="DEBUG")
     
     def _update_statistics(self) -> None:
-        """Update internal statistics."""
-        pass  # TODO: Implement statistics update
+        """
+        Update runtime statistics. 
+        # TODO implement more stats as needed
+        Currently tracks uptime.
+        """
+        if self._stats["session_start"] is not None:
+            elapsed = asyncio.get_event_loop().time() - self._stats["session_start"]
+            self._stats["uptime_seconds"] = elapsed
