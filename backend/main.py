@@ -154,9 +154,7 @@ async def run_server(config: "SystemConfig") -> None:
     except asyncio.CancelledError:
         logger.system("server_shutdown_requested", {})
     finally:
-        logger.system("servers_stopping", {})
         await server.stop()
-        logger.system("servers_stopped", {})
 
 def main() -> int:
     """Main entry point."""
