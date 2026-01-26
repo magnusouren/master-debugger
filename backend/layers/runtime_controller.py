@@ -454,7 +454,7 @@ class RuntimeController:
         self, 
         experiment_id: str, 
         participant_id: str
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
         Start a new experiment session.
         
@@ -466,7 +466,8 @@ class RuntimeController:
             "experiment_started",
             {
                 "experiment_id": experiment_id,
-                "participant_id": participant_id
+                "participant_id": participant_id,
+                "session_id": self._session_id
             },
             level="INFO",
         )
@@ -475,7 +476,8 @@ class RuntimeController:
             "experiment_started",
             {
                 "experiment_id": experiment_id,
-                "participant_id": participant_id
+                "participant_id": participant_id,
+                "session_id": self._session_id
             },
             level="INFO",
         )
@@ -483,14 +485,23 @@ class RuntimeController:
         self._participant_id = participant_id
         self._session_id = f"{participant_id}_{experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
+        return {
+            "status": "started",
+            "experiment_id": self._experiment_id,
+            "participant_id": self._participant_id,
+            "session_id": self._session_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message": "Experiment started successfully."
+        }
 
-    def end_experiment(self) -> None:
+    def end_experiment(self) -> Dict[str, Any]:
         """End the current experiment session."""
         self._logger.system(
             "experiment_ended",
             {
                 "experiment_id": self._experiment_id,
-                "participant_id": self._participant_id
+                "participant_id": self._participant_id,
+                "session_id": self._session_id
             },
             level="INFO",
         )
@@ -499,7 +510,8 @@ class RuntimeController:
             "experiment_ended",
             {
                 "experiment_id": self._experiment_id,
-                "participant_id": self._participant_id
+                "participant_id": self._participant_id,
+                "session_id": self._session_id
             },
             level="INFO",
         )
@@ -507,7 +519,15 @@ class RuntimeController:
         self._experiment_id = None
         self._participant_id = None
         self._session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    
+
+        return {
+            "status": "ended",
+            "experiment_id": self._experiment_id,
+            "participant_id": self._participant_id,
+            "session_id": self._session_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message": "Experiment ended successfully."
+        }
 
     def get_experiment_data(self) -> Dict[str, Any]:
         """
@@ -542,7 +562,7 @@ class RuntimeController:
             return False
 
         try:
-            filepath = f"experiment_{self._experiment_id}_participant_{self._participant_id}_{self._session_id}.json"
+            filepath = f"experiment_{self._experiment_id}_participant_{self._participant_id}_{self._session_id}.csv"
             self._logger.export_experiment_logs(filepath)
             return True
         except Exception as e:
