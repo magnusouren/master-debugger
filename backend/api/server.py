@@ -4,6 +4,7 @@ Combined Server
 Main server that runs both WebSocket and REST API servers together.
 Entry point for the backend application.
 """
+import datetime
 from typing import Optional, Dict, Any
 import asyncio
 import signal
@@ -82,11 +83,21 @@ class Server:
         
         This is the main entry point for running the server.
         """
-        pass  # TODO: Implement blocking run
+        self._loop = asyncio.get_event_loop()
+        self._setup_signal_handlers()
+        
+        try:
+            self._loop.run_until_complete(self.start())
+            self._loop.run_forever()
+        except KeyboardInterrupt:
+            print("[Server] Keyboard interrupt received. Shutting down...")
+        finally:
+            self._loop.run_until_complete(self.stop())
+            self._loop.close()
     
     async def run_async(self) -> None:
         """Run the server asynchronously."""
-        pass  # TODO: Implement async run
+        await self.start()
     
     def is_running(self) -> bool:
         """
@@ -95,7 +106,7 @@ class Server:
         Returns:
             True if server is running.
         """
-        pass  # TODO: Implement status check
+        return self._is_running
     
     def get_controller(self) -> RuntimeController:
         """
@@ -128,13 +139,36 @@ class Server:
     
     def _setup_signal_handlers(self) -> None:
         """Set up signal handlers for graceful shutdown."""
-        pass  # TODO: Implement signal handlers
+        if self._loop is None:
+            return
+        
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            self._loop.add_signal_handler(
+                sig,
+                lambda s=sig: asyncio.create_task(self._shutdown_handler(s))
+            )
+        
     
     def _wire_components(self) -> None:
     # Controller -> WebSocket (outbound)
         async def send_outbound(msg: WebSocketMessage) -> None:
             # broadcast by default; you can add targeting later
-            await self._websocket_server.broadcast(msg)
+
+            # target specific clients if needed
+            if msg.target_client_id:
+                try:
+                    print(f"[Server] Sending outbound message to client {msg.target_client_id} via WebSocket")
+                    await self._websocket_server.send_to_client(msg.target_client_id, msg)
+                    return
+                except Exception as e:
+                    print(f"[Server] Error sending outbound message to client {msg.target_client_id} via WebSocket: {e}")
+                    return
+                
+            # broadcast to all clients
+            try:
+                await self._websocket_server.broadcast(msg)
+            except Exception as e:
+                print(f"[Server] Error broadcasting outbound message via WebSocket: {e}")
 
         self._controller.register_websocket_callback(send_outbound)
 
@@ -149,15 +183,31 @@ class Server:
         pass  # TODO: Implement route setup
     
     def _setup_websocket_handlers(self) -> None:
+        """
+        Set up WebSocket message handlers to handle messages correctly.
+        """
         async def on_context_update(message: WebSocketMessage, client_id: str) -> None:
             print(f"[Server] Received context update from client {client_id}")
 
             # Convert payload into your internal CodeContext type
             ctx = CodeContext.from_dict(message.payload) 
+            ctx.metadata = {**ctx.metadata, "client_id": client_id}
             await self._controller.handle_context_update(ctx)
+
+        async def on_ping(message: WebSocketMessage, client_id: str) -> None:
+            pong_msg = WebSocketMessage(
+                type=MessageType.PONG,
+                timestamp=datetime.datetime.now(datetime.timezone.utc).timestamp(),
+                payload={},
+                message_id=message.message_id,  # Echo the incoming message_id
+            )
+            await self._websocket_server.send_to_client(client_id, pong_msg)
+
+        # Register handlers here
 
         # Register the handler for context updates
         self._websocket_server.register_handler(MessageType.CONTEXT_UPDATE, on_context_update)
+        self._websocket_server.register_handler(MessageType.PING, on_ping)
     
     async def _shutdown_handler(self, sig: signal.Signals) -> None:
         """
@@ -166,7 +216,9 @@ class Server:
         Args:
             sig: The signal received.
         """
-        pass  # TODO: Implement shutdown handler
+        print(f"[Server] Received shutdown signal: {sig.name}. Shutting down...")
+        await self.stop()
+        self._loop.stop()
 
 
 def create_server(config_path: Optional[str] = None) -> Server:
@@ -179,12 +231,26 @@ def create_server(config_path: Optional[str] = None) -> Server:
     Returns:
         Configured server instance.
     """
-    pass  # TODO: Implement server factory
+    config = SystemConfig.load_from_file(config_path) if config_path else SystemConfig()
+    server = Server(config)
+    return server
 
 
 def main() -> None:
     """Main entry point for running the server."""
-    pass  # TODO: Implement main function
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the combined backend server.")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to the configuration file.",
+    )
+    args = parser.parse_args()
+
+    server = create_server(args.config)
+    server.run()
 
 
 if __name__ == "__main__":
