@@ -462,11 +462,51 @@ class RuntimeController:
             experiment_id: Unique experiment identifier.
             participant_id: Unique participant identifier.
         """
-        pass  # TODO: Implement experiment start
-    
+        self._logger.system(
+            "experiment_started",
+            {
+                "experiment_id": experiment_id,
+                "participant_id": participant_id
+            },
+            level="INFO",
+        )
+
+        self._logger.experiment(
+            "experiment_started",
+            {
+                "experiment_id": experiment_id,
+                "participant_id": participant_id
+            },
+            level="INFO",
+        )
+        self._experiment_id = experiment_id
+        self._participant_id = participant_id
+        self._session_id = f"{participant_id}_{experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+
+
     def end_experiment(self) -> None:
         """End the current experiment session."""
-        pass  # TODO: Implement experiment end
+        self._logger.system(
+            "experiment_ended",
+            {
+                "experiment_id": self._experiment_id,
+                "participant_id": self._participant_id
+            },
+            level="INFO",
+        )
+
+        self._logger.experiment(
+            "experiment_ended",
+            {
+                "experiment_id": self._experiment_id,
+                "participant_id": self._participant_id
+            },
+            level="INFO",
+        )
+
+        self._experiment_id = None
+        self._participant_id = None
+        self._session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     
 
     def get_experiment_data(self) -> Dict[str, Any]:
@@ -476,20 +516,43 @@ class RuntimeController:
         Returns:
             Dictionary of experiment data.
         """
-        pass  # TODO: Implement data retrieval
+        if self._experiment_id is None or self._participant_id is None:
+            self._logger.system(
+                "get_experiment_data_no_experiment",
+                {},
+                level="WARNING",
+            )
+            return {}
+        
+        return self._logger.get_experiment_logs() # TODO - filter by experiment/participant/session if needed
     
-    def export_experiment_data(self, path: str) -> bool:
+    def export_experiment_data(self) -> bool:
         """
         Export experiment data to file.
-        
-        Args:
-            path: Path to export file.
             
         Returns:
             True if export successful.
         """
-        pass  # TODO: Implement data export
-    
+        if self._experiment_id is None or self._participant_id is None:
+            self._logger.system(
+                "export_experiment_data_no_experiment",
+                {},
+                level="WARNING",
+            )
+            return False
+
+        try:
+            filepath = f"experiment_{self._experiment_id}_participant_{self._participant_id}_{self._session_id}.json"
+            self._logger.export_experiment_logs(filepath)
+            return True
+        except Exception as e:
+            self._logger.system(
+                "export_experiment_data_error",
+                {"error": str(e)},
+                level="ERROR",
+            )
+            return False
+
     # --- Internal Methods ---
     
     def _setup_layer_callbacks(self) -> None:
