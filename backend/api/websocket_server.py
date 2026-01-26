@@ -83,7 +83,7 @@ class WebSocketServer:
         Returns:
             True if server is running.
         """
-        pass  # TODO: Implement status check
+        return self._is_running
     
     def get_connected_clients(self) -> int:
         """
@@ -92,7 +92,7 @@ class WebSocketServer:
         Returns:
             Number of connected clients.
         """
-        pass  # TODO: Implement client count
+        return len(self._clients)
     
     def register_handler(
         self,
@@ -136,7 +136,21 @@ class WebSocketServer:
         Returns:
             True if sent successfully.
         """
-        pass  # TODO: Implement targeted sending
+        client_info = self._client_info.get(client_id)
+        if not client_info:
+            return False
+        
+        websocket = client_info.get("websocket")
+        if not websocket:
+            return False
+        
+        try:
+            text = self._serialize_message(message)
+            await websocket.send(text)
+            return True
+        except Exception as e:
+            print(f"[WebSocket] Failed to send to client {client_id}: {e}")
+            return False
     
     async def broadcast(self, message: WebSocketMessage) -> int:
         sent = 0
@@ -155,39 +169,6 @@ class WebSocketServer:
             print(f"[WebSocket] Broadcast error: {type(e).__name__}: {e}")
 
         return sent
-        
-    async def send_feedback(self, feedback: FeedbackMessage) -> bool:
-        """
-        Send feedback to VS Code extension.
-        
-        Args:
-            feedback: Feedback message to send.
-            
-        Returns:
-            True if sent successfully.
-        """
-        pass  # TODO: Implement feedback sending
-    
-    async def send_status_update(self, status: SystemStatusMessage) -> bool:
-        """
-        Send status update to connected clients.
-        
-        Args:
-            status: Status message to send.
-            
-        Returns:
-            True if sent successfully.
-        """
-        pass  # TODO: Implement status update sending
-    
-    async def request_context(self, client_id: Optional[str] = None) -> None:
-        """
-        Request code context from VS Code.
-        
-        Args:
-            client_id: Optional specific client to request from.
-        """
-        pass  # TODO: Implement context request
     
     # --- Internal Methods ---
     
@@ -230,21 +211,7 @@ class WebSocketServer:
             if websocket in self._clients:
                 self._clients.discard(websocket)
             del self._client_info[client_id]
-    
-    async def _receive_messages(
-        self, 
-        websocket: object, 
-        client_id: str
-    ) -> None:
-        """
-        Receive and process messages from a client.
-        
-        Args:
-            websocket: The WebSocket connection.
-            client_id: ID of the client.
-        """
-        async for message in websocket:
-            await self._process_message(message, client_id)
+
     
     async def _process_message(
         self, 
@@ -303,18 +270,7 @@ class WebSocketServer:
             "timestamp": message.timestamp,
             "payload": message.payload,
             "message_id": message.message_id,
+            "target_client_id": message.target_client_id,
         }
         return json.dumps(json_safe(data))
-    
-    def _generate_client_id(self) -> str:
-        """
-        Generate a unique client ID.
         
-        Returns:
-            Unique client ID string.
-        """
-        pass  # TODO: Implement ID generation
-    
-    async def _ping_clients(self) -> None:
-        """Send periodic ping to keep connections alive."""
-        pass  # TODO: Implement ping logic
