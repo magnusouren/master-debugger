@@ -145,9 +145,9 @@ class OpenAIClient(LLMClient):
 
 
 def create_llm_client(
-    provider: Optional[str] = None,
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
+    provider: Optional[str] = None, # from config: llm_provider
+    api_key: Optional[str] = None, # from config: llm_api_key
+    model: Optional[str] = None, # from config: llm_model
 ) -> Optional[LLMClient]:
     """
     Factory function to create the appropriate LLM client.
