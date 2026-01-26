@@ -21,18 +21,12 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict, Any, Tuple
 import uuid
 
-from backend.types import (
-    CodeContext,
-    FeedbackItem,
-    FeedbackResponse,
-    FeedbackMetadata,
-    FeedbackType,
-    FeedbackPriority,
-    UserStateEstimate,
-)
-from backend.types.code_context import CodePosition, CodeRange
+
+from backend.types.code_context import CodeContext, CodePosition, CodeRange
 from backend.types.config import FeedbackLayerConfig
-from backend.layers.llm_client import LLMClient, create_llm_client, LLMResponse
+from backend.services.llm_client import LLMClient, create_llm_client, LLMResponse
+from backend.types.feedback import FeedbackItem, FeedbackMetadata, FeedbackPriority, FeedbackResponse, FeedbackType
+from backend.types.user_state import UserStateEstimate
 
 
 @dataclass

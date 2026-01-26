@@ -19,6 +19,8 @@ master-debuger/
 │   │   ├── reactive_tool.py        # User state estimation
 │   │   ├── feedback_layer.py       # Feedback generation
 │   │   └── runtime_controller.py   # Central orchestrator
+│   ├── services/               # Service implementations
+│   │   ├── llm_client.py       # LLM interaction
 │   ├── types/                  # Type definitions
 │   │   ├── __init__.py
 │   │   ├── eye_tracking.py     # Eye tracking data types
