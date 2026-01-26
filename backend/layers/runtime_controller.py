@@ -210,29 +210,34 @@ class RuntimeController:
                 print(f"[Runtime Controller] → Generated {len(feedback.items)} feedback item(s)")
                 self._stats["feedback_generated"] += 1
                 # Send feedback back to VS Code
-                await self.send_feedback(feedback)
+                await self.send_feedback(feedback, client_id=context.metadata.get("client_id"))
 
-        
-    async def send_feedback(self, feedback: FeedbackResponse) -> bool:
+    async def send_feedback(self, feedback: FeedbackResponse, client_id: Optional[str] = None) -> bool:
         """
         Send feedback to VS Code for display.
         
         Args:
             feedback: Feedback to send.
+            client_id: Optional target client ID.
             
         Returns:
             True if sent successfully.
         """
         
-        msg = WebSocketMessage(
-            type=MessageType.FEEDBACK_DELIVERY,
-            timestamp=datetime.now(timezone.utc).timestamp(),
-            payload=json_safe(feedback),
-            message_id=None,
-        )
-        await self._emit(msg)
-        print(f"[Runtime Controller] Sent feedback with {len(feedback.items)} items \n")
-        return True
+        try:
+            msg = WebSocketMessage(
+                type=MessageType.FEEDBACK_DELIVERY,
+                timestamp=datetime.now(timezone.utc).timestamp(),
+                payload=json_safe(feedback),
+                message_id=None, # not a response to a specific message, so no message_id needed
+                target_client_id=client_id
+            )
+            await self._emit(msg)
+            print(f"[Runtime Controller] Sent feedback with {len(feedback.items)} items to client {client_id} \n")
+            return True
+        except Exception as e:
+            print(f"[Runtime Controller] Error sending feedback: {e}")
+            return False
     
     async def handle_feedback_interaction(
         self, interaction: FeedbackInteraction
