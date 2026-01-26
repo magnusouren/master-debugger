@@ -42,13 +42,15 @@ reactive_tool:
 # Feedback Layer
 feedback_layer:
   llm_provider: null  # openai, anthropic, local
-  llm_model: null
-  llm_api_key: null
-  max_feedback_items: 3
-  max_message_length: 200
+  llm_model: null # e.g., gpt-4, claude-2
+  llm_api_key: null # sk-...
+  max_feedback_items: 3 
+  max_message_length: 200 
   enable_cache: true
   cache_ttl_seconds: 300.0
   max_generations_per_minute: 10
+  max_tokens: 500
+  temperature: 0.3
 
 # Runtime Controller
 controller:
