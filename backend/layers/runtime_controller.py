@@ -78,6 +78,7 @@ class RuntimeController:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         
         # Experiment tracking
+        self._experiement_is_active: bool = False
         self._experiment_id: Optional[str] = self._config.controller.experiment_id
         self._participant_id: Optional[str] = self._config.controller.participant_id
 
@@ -227,7 +228,7 @@ class RuntimeController:
             operation_mode=self._operation_mode.name,
             samples_processed=self._stats["samples_processed"],
             feedback_generated=self._stats["feedback_generated"],
-            experiment_active=self._experiment_id is not None,
+            experiment_active=self._experiement_is_active,
             experiment_id=self._experiment_id,
             participant_id=self._participant_id,
         )
@@ -494,7 +495,7 @@ class RuntimeController:
         self, 
         experiment_id: str, 
         participant_id: str
-    ) -> Dict[str, Any]:
+        ) -> SystemStatusMessage:
         """
         Start a new experiment session.
         
@@ -505,6 +506,7 @@ class RuntimeController:
 
         self._experiment_id = experiment_id
         self._participant_id = participant_id
+        self._experiement_is_active = True
         self._session_id = f"{participant_id}_{experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
         self._logger.system(
@@ -527,16 +529,9 @@ class RuntimeController:
             level="INFO",
         )
 
-        return {
-            "status": "started",
-            "experiment_id": self._experiment_id,
-            "participant_id": self._participant_id,
-            "session_id": self._session_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "message": "Experiment started successfully."
-        }
+        return self.get_system_status()
 
-    def end_experiment(self) -> Dict[str, Any]:
+    def end_experiment(self) -> SystemStatusMessage:
         """End the current experiment session."""
         self._logger.system(
             "experiment_ended",
@@ -563,15 +558,9 @@ class RuntimeController:
         self._experiment_id = None
         self._participant_id = None
         self._session_id = None
+        self._experiement_is_active = False
 
-        return {
-            "status": "ended",
-            "experiment_id": self._experiment_id,
-            "participant_id": self._participant_id,
-            "session_id": self._session_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "message": "Experiment ended successfully."
-        }
+        return self.get_system_status()
 
     def get_experiment_data(self) -> Dict[str, Any]:
         """
