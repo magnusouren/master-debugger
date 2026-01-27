@@ -527,10 +527,6 @@ class RuntimeController:
             level="INFO",
         )
 
-
-        # Broadcast experiment status periodically
-        await self._broadcast_experiment_status()
-
         return {
             "status": "started",
             "experiment_id": self._experiment_id,
@@ -561,6 +557,8 @@ class RuntimeController:
             },
             level="INFO",
         )
+
+        self.export_experiment_data()
 
         self._experiment_id = None
         self._participant_id = None
@@ -608,7 +606,7 @@ class RuntimeController:
             return False
 
 
-        filepath = f"experiment_{self._experiment_id}_participant_{self._participant_id}_{self._session_id}.csv"
+        filepath = f"logs/experiments/experiment_{self._experiment_id}_participant_{self._participant_id}_{self._session_id}.csv"
         success = self._logger.export_experiment_logs(filepath)
         return success
 
