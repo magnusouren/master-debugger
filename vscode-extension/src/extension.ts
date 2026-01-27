@@ -12,10 +12,10 @@ import { StatusBarManager } from "./status-bar";
 import {
     MessageType,
     FeedbackDeliveryPayload,
-    StatusUpdatePayload,
     ContextRequestPayload,
     SystemStatus,
 } from "./types";
+import { isStatusUpdatePayload } from "./utils/typeguard";
 
 let wsClient: WebSocketClient | null = null;
 let contextCollector: ContextCollector | null = null;
@@ -157,7 +157,6 @@ function setupMessageHandlers(): void {
 
     wsClient.onMessage(MessageType.FEEDBACK_DELIVERY, handleFeedbackDelivery);
     wsClient.onMessage(MessageType.STATUS_UPDATE, handleStatusUpdate);
-    wsClient.onMessage(MessageType.EXPERIMENT_STATUS_UPDATE, handleExperimentStatusUpdate);
     wsClient.onMessage(MessageType.CONTEXT_REQUEST, handleContextRequest);
     wsClient.onMessage(MessageType.ERROR, handleError);
 }
@@ -289,17 +288,25 @@ function handleFeedbackDelivery(message: { payload: Record<string, unknown> }): 
 }
 
 function handleStatusUpdate(message: { payload: Record<string, unknown> }): void {
-    // TODO: Implement status update handling
-    // TODO: Update protocol to include more status details
-    const payload = message.payload as unknown as StatusUpdatePayload;
-    statusBar?.setStatus(payload.status);
-}
+    const payloadUnknown = message.payload;
 
-function handleExperimentStatusUpdate(message: { payload: Record<string, unknown> }): void {
-    // TODO: Implement experiment status update handling
-    const payload = message.payload as Record<string, unknown>;
-    const experimentStatus = payload["experiment_status"] as string || "unknown";
-    vscode.window.showInformationMessage(`Experiment Status: ${experimentStatus}`);
+    if (!isStatusUpdatePayload(payloadUnknown)) {
+        console.warn("STATUS_UPDATE payload did not match StatusUpdatePayload shape", payloadUnknown);
+        return;
+    }
+
+    const payload = payloadUnknown; // nå er den type-safe
+
+    statusBar?.setStatus(payload);
+
+    // Eksempel: oppdater en global store
+    // systemStore.setState({ status: payload });
+
+    // Eksempel: hvis error
+    if (payload.status === SystemStatus.ERROR && payload.error_message) {
+        console.error("Backend error:", payload.error_message);
+        vscode.window.showErrorMessage(`Eye Tracking Debugger Error: ${payload.error_message}`);
+    }
 }
 
 function handleContextRequest(message: { payload: Record<string, unknown> }): void {
