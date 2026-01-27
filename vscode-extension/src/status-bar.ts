@@ -2,11 +2,11 @@
  * Status bar manager - shows connection and system status.
  */
 import * as vscode from "vscode";
-import { StatusUpdatePayload, SystemStatus } from "./types";
+import { SystemStatusMessage, SystemStatus } from "./types";
 
 export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
-    private currentStatus: StatusUpdatePayload | null = null;
+    private currentStatus: SystemStatusMessage | null = null;
 
     constructor(context: vscode.ExtensionContext) {
         this.statusBarItem = vscode.window.createStatusBarItem(
@@ -22,7 +22,7 @@ export class StatusBarManager {
     /**
      * Update the displayed status.
      */
-    setStatus(status: StatusUpdatePayload): void {
+    setStatus(status: SystemStatusMessage): void {
         this.currentStatus = status;
         this.updateDisplay();
     }
@@ -88,8 +88,12 @@ export class StatusBarManager {
         const eyeTrackerText = this.currentStatus.eye_tracker_connected
             ? "Eye Tracker: Connected"
             : "Eye Tracker: Disconnected";
+        
+        const experimentText = this.currentStatus.experiment_active
+            ? "Experiment: Running"
+            : "Experiment: Stopped";
 
-        this.statusBarItem.text = `Eye Tracking Debugger: ${statusIcon} | ${connectionText} | ${modeText} | ${eyeTrackerText}`;
+        this.statusBarItem.text = `Debugger: ${statusIcon} | ${connectionText} | ${modeText} | ${eyeTrackerText} | ${experimentText}`;
         this.statusBarItem.color = statusColor;
     }
 

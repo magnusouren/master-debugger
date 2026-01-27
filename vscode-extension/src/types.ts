@@ -164,8 +164,9 @@ export interface FeedbackDeliveryPayload {
 /**
  * System status update message.
  */
-export interface StatusUpdatePayload {
+export interface SystemStatusMessage {
     status: SystemStatus;
+    timestamp: number;
     eye_tracker_connected: boolean;
     vscode_connected: boolean;
     operation_mode: "reactive" | "proactive";
