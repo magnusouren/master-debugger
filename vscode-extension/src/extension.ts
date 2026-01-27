@@ -290,6 +290,7 @@ function handleFeedbackDelivery(message: { payload: Record<string, unknown> }): 
 
 function handleStatusUpdate(message: { payload: Record<string, unknown> }): void {
     // TODO: Implement status update handling
+    // TODO: Update protocol to include more status details
     const payload = message.payload as unknown as StatusUpdatePayload;
     statusBar?.setStatus(payload.status);
 }
