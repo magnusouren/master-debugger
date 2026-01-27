@@ -552,13 +552,15 @@ class RuntimeController:
             },
             level="INFO",
         )
+        
+        # Mark experiment as inactive before exporting data to avoid logging new entries during export
+        self._experiment_is_active = False
 
         self.export_experiment_data()
 
         self._experiment_id = None
         self._participant_id = None
         self._session_id = None
-        self._experiment_is_active = False
 
         return self.get_system_status()
 
