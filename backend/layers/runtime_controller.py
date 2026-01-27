@@ -670,7 +670,7 @@ class RuntimeController:
 
     async def _broadcast_system_status(self) -> None:
         """
-        Broadcast current experiment status to all connected clients.
+        Broadcast current system status to all connected clients.
         """
         status_msg = self.get_system_status()
         msg = WebSocketMessage(
