@@ -112,6 +112,23 @@ class RuntimeController:
         if not llm_ready:
             self._logger.system("llm_not_configured", {"fallback": "heuristics"}, level="WARNING")
 
+        if not self._experiment_id or not self._participant_id:
+            self._logger.system(
+                "runtime_controller_ready_no_experiment",
+                {"warning": "Running without experiment context"},
+                level="WARNING",
+            )
+        else:
+            self._logger.system(
+                "runtime_controller_ready_with_experiment",
+                {
+                    "experiment_id": self._experiment_id,
+                    "participant_id": self._participant_id,
+                    "session_id": self._session_id
+                },
+                level="INFO",
+            )
+
         # Start main loop as background task - store it to prevent garbage collection
         main = asyncio.create_task(self._run_main_loop())
         
@@ -450,7 +467,7 @@ class RuntimeController:
     
     # --- Logging and Experiment Control ---
     
-    def start_experiment(
+    async def start_experiment(
         self, 
         experiment_id: str, 
         participant_id: str
@@ -484,6 +501,10 @@ class RuntimeController:
         self._experiment_id = experiment_id
         self._participant_id = participant_id
         self._session_id = f"{participant_id}_{experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+
+
+        # Broadcast experiment status periodically
+        await self._broadcast_experiment_status()
 
         return {
             "status": "started",
@@ -572,6 +593,26 @@ class RuntimeController:
                 level="ERROR",
             )
             return False
+        
+    def get_experiment_status(self) -> Dict[str, Any]:
+        """
+        Get current experiment status for frontend display.
+        
+        Returns:
+            Dict with experiment state, ready status, and details.
+        """
+        return {
+            "is_active": self._experiment_id is not None and self._participant_id is not None,
+            "is_ready": self._status == SystemStatus.READY,
+            "experiment_id": self._experiment_id,
+            "participant_id": self._participant_id,
+            "session_id": self._session_id,
+            "can_start": self._status == SystemStatus.READY and not (self._experiment_id and self._participant_id),
+            "can_stop": self._experiment_id is not None and self._participant_id is not None,
+            "uptime_seconds": self._stats.get("uptime_seconds", 0),
+            "samples_processed": self._stats["samples_processed"],
+            "feedback_generated": self._stats["feedback_generated"],
+        }
 
     # --- Internal Methods ---
     
@@ -597,6 +638,9 @@ class RuntimeController:
             
             # Update statistics
             self._update_statistics()
+
+            # Broadcast experiment status periodically
+            await self._broadcast_experiment_status()
             
             # # Check for feedback generation
             # if self.should_generate_feedback():
@@ -616,3 +660,15 @@ class RuntimeController:
         if self._stats["session_start"] is not None:
             elapsed = asyncio.get_event_loop().time() - self._stats["session_start"]
             self._stats["uptime_seconds"] = elapsed
+
+    
+    async def _broadcast_experiment_status(self) -> None:
+        """
+        Broadcast current experiment status to all connected clients.
+        """
+        msg = WebSocketMessage(
+            type=MessageType.EXPERIMENT_STATUS_UPDATE,  # new message type
+            payload=self.get_experiment_status(),
+            timestamp=datetime.now(timezone.utc).timestamp()
+        )
+        await self._emit(msg)
