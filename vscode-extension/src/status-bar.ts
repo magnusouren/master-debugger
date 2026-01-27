@@ -69,7 +69,7 @@ export class StatusBarManager {
 
     private updateDisplay(): void {
         this.statusBarItem.backgroundColor = undefined;
-        if (!this.currentStatus) {
+        if (!this.currentStatus?.vscode_connected) {
             this.statusBarItem.text = "Eye Tracking Debugger: Disconnected";
             this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
             this.statusBarItem.color = 'black';
@@ -113,6 +113,7 @@ export class StatusBarManager {
     }
 
     private getStatusColor(status: SystemStatus): string {
+
         switch (status) {
              case SystemStatus.INITIALIZING:
                 return "orange";

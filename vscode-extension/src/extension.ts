@@ -180,7 +180,8 @@ async function connectToBackend(): Promise<void> {
         try {
             const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
             const host = config.get<string>("backendHost") || "localhost";
-            const port = config.get<number>("websocketPort") || 8765;
+            // Use API port for HTTP /status requests (default 8080)
+            const port = config.get<number>("apiPort") || 8080;
             const statusPayload = await fetchStatus(host, port);
 
             if (isStatusUpdatePayload(statusPayload)) {

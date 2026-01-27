@@ -69,7 +69,7 @@ class RuntimeController:
         }
 
         # eye tracker connection state
-        self._eye_tracker_connected: str = None
+        self._eye_tracker_connected: bool = False
         
         # Callbacks for external communication
         self._websocket_callbacks: List[Callable[[WebSocketMessage], Awaitable[None]]] = []
@@ -266,7 +266,7 @@ class RuntimeController:
         Returns:
             True if connected.
         """
-        return self._eye_tracker_connected is not None
+        return self._eye_tracker_connected
     
     # --- VS Code Communication ---
     
@@ -618,6 +618,14 @@ class RuntimeController:
     def _setup_layer_callbacks(self) -> None:
         """Set up callbacks between layers for data flow."""
         pass  # TODO: Implement callback setup
+
+    def set_websocket_server(self, server: Any) -> None:
+        """
+        Provide a reference to the WebSocket server so the controller can
+        compute the actual number of connected VS Code clients.
+        """
+        self._websocket_server = server
+
     
     def _validate_system_state(self) -> bool:
         """
