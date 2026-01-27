@@ -183,8 +183,6 @@ class RestAPI:
 
             except web.HTTPException:
                 raise
-            except Exception as e:
-                return self._create_error_response(str(e), status=400)
 
             except Exception as e:
                 return self._create_error_response(f"Internal server error: {e}", status=500)
