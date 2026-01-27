@@ -201,14 +201,10 @@ class Server:
     def _setup_api_routes(self) -> None:
         """Set up REST API routes with controller handlers."""
 
-        async def handle_get_system_status(_: Dict[str, Any]) -> Dict[str, Any]:
-            status_msg = self._controller.get_system_status()
-            return json_safe(status_msg)
-
         self._rest_api.register_route(
             "/status",
             HttpMethod.GET,
-            handle_get_system_status,
+            self._controller.get_system_status,
         )
 
         self._rest_api.register_route(
