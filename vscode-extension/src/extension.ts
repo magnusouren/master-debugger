@@ -12,10 +12,11 @@ import { StatusBarManager } from "./status-bar";
 import {
     MessageType,
     FeedbackDeliveryPayload,
-    StatusUpdatePayload,
     ContextRequestPayload,
     SystemStatus,
 } from "./types";
+import { isStatusUpdatePayload } from "./utils/typeguard";
+import { fetchStatus } from "./api";
 
 let wsClient: WebSocketClient | null = null;
 let contextCollector: ContextCollector | null = null;
@@ -157,7 +158,6 @@ function setupMessageHandlers(): void {
 
     wsClient.onMessage(MessageType.FEEDBACK_DELIVERY, handleFeedbackDelivery);
     wsClient.onMessage(MessageType.STATUS_UPDATE, handleStatusUpdate);
-    wsClient.onMessage(MessageType.EXPERIMENT_STATUS_UPDATE, handleExperimentStatusUpdate);
     wsClient.onMessage(MessageType.CONTEXT_REQUEST, handleContextRequest);
     wsClient.onMessage(MessageType.ERROR, handleError);
 }
@@ -170,13 +170,28 @@ async function connectToBackend(): Promise<void> {
 
     const connected = await wsClient.connect();
     if (connected) {
-        vscode.window.showInformationMessage(
-            "Connected to Eye Tracking backend"
-        );
+        vscode.window.showInformationMessage("Connected to Eye Tracking backend");
         statusBar?.setConnected(true);
 
         // Send initial context immediately
         sendContextUpdate();
+
+        // Fetch system status from REST API and update status bar
+        try {
+            const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
+            const host = config.get<string>("backendHost") || "localhost";
+            // Use API port for HTTP /status requests (default 8080)
+            const port = config.get<number>("apiPort") || 8080;
+            const statusPayload = await fetchStatus(host, port);
+
+            if (isStatusUpdatePayload(statusPayload)) {
+                statusBar?.setStatus(statusPayload);
+            } else {
+                console.warn("/status response did not match expected shape", statusPayload);
+            }
+        } catch (err) {
+            console.warn("Failed to fetch /status from backend:", err);
+        }
     } else {
         vscode.window.showErrorMessage(
             "Failed to connect to Eye Tracking backend"
@@ -289,17 +304,21 @@ function handleFeedbackDelivery(message: { payload: Record<string, unknown> }): 
 }
 
 function handleStatusUpdate(message: { payload: Record<string, unknown> }): void {
-    // TODO: Implement status update handling
-    // TODO: Update protocol to include more status details
-    const payload = message.payload as unknown as StatusUpdatePayload;
-    statusBar?.setStatus(payload.status);
-}
+    const payloadUnknown = message.payload;
 
-function handleExperimentStatusUpdate(message: { payload: Record<string, unknown> }): void {
-    // TODO: Implement experiment status update handling
-    const payload = message.payload as Record<string, unknown>;
-    const experimentStatus = payload["experiment_status"] as string || "unknown";
-    vscode.window.showInformationMessage(`Experiment Status: ${experimentStatus}`);
+    if (!isStatusUpdatePayload(payloadUnknown)) {
+        console.warn("STATUS_UPDATE payload did not match StatusUpdatePayload shape", payloadUnknown);
+        return;
+    }
+
+    const payload = payloadUnknown; // type is now confirmed
+
+    statusBar?.setStatus(payload);
+
+    if (payload.status === SystemStatus.ERROR && payload.error_message) {
+        console.error("Backend error:", payload.error_message);
+        vscode.window.showErrorMessage(`Eye Tracking Debugger Error: ${payload.error_message}`);
+    }
 }
 
 function handleContextRequest(message: { payload: Record<string, unknown> }): void {

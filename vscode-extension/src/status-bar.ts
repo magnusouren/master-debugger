@@ -2,11 +2,11 @@
  * Status bar manager - shows connection and system status.
  */
 import * as vscode from "vscode";
-import { SystemStatus } from "./types";
+import { StatusUpdatePayload, SystemStatus } from "./types";
 
 export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
-    private currentStatus: SystemStatus = SystemStatus.DISCONNECTED;
+    private currentStatus: StatusUpdatePayload | null = null;
 
     constructor(context: vscode.ExtensionContext) {
         this.statusBarItem = vscode.window.createStatusBarItem(
@@ -22,36 +22,40 @@ export class StatusBarManager {
     /**
      * Update the displayed status.
      */
-    setStatus(status: SystemStatus): void {
-        // TODO: Implement status update
-    }
-
-    /**
-     * Update experiment status
-     */
-    setExperimentStatus(experimentStatus: string): void {
-        // TODO: Implement experiment status update
+    setStatus(status: StatusUpdatePayload): void {
+        this.currentStatus = status;
+        this.updateDisplay();
     }
 
     /**
      * Set the connection state.
      */
     setConnected(connected: boolean): void {
-        // TODO: Implement connection state update
+        if (this.currentStatus) {
+            this.currentStatus.vscode_connected = connected;
+            this.updateDisplay();
+        }
     }
 
     /**
      * Set the operation mode.
      */
     setMode(mode: "reactive" | "proactive"): void {
-        // TODO: Implement mode display
+        if (this.currentStatus) {
+            this.currentStatus.operation_mode = mode;
+            this.updateDisplay();
+        }
     }
 
     /**
      * Show temporary message.
      */
     showMessage(message: string, durationMs: number = 3000): void {
-        // TODO: Implement temporary message
+        const originalText = this.statusBarItem.text;
+        this.statusBarItem.text = message;
+        setTimeout(() => {
+            this.statusBarItem.text = originalText;
+        }, durationMs);
     }
 
     /**
@@ -64,18 +68,67 @@ export class StatusBarManager {
     // --- Private Methods ---
 
     private updateDisplay(): void {
-        // TODO: Implement display update
-        this.statusBarItem.text = "$(eye) Eye Tracking";
-        this.statusBarItem.tooltip = "Click for status details";
+        this.statusBarItem.backgroundColor = undefined;
+        if (!this.currentStatus?.vscode_connected) {
+            this.statusBarItem.text = "Eye Tracking Debugger: Disconnected";
+            this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+            this.statusBarItem.color = 'black';
+            return;
+        }
+
+        const statusIcon = this.getStatusIcon(this.currentStatus.status);
+        const statusColor = this.getStatusColor(this.currentStatus.status);
+        const modeText =
+            this.currentStatus.operation_mode === "proactive"
+                ? "Proactive"
+                : "Reactive";
+        const connectionText = this.currentStatus.vscode_connected
+            ? "Connected"
+            : "Disconnected";
+        const eyeTrackerText = this.currentStatus.eye_tracker_connected
+            ? "Eye Tracker: Connected"
+            : "Eye Tracker: Disconnected";
+
+        this.statusBarItem.text = `Eye Tracking Debugger: ${statusIcon} | ${connectionText} | ${modeText} | ${eyeTrackerText}`;
+        this.statusBarItem.color = statusColor;
     }
 
     private getStatusIcon(status: SystemStatus): string {
-        // TODO: Implement icon mapping
-        return "$(eye)";
+        switch (status) {
+            case SystemStatus.INITIALIZING:
+                return "$(loading~spin)";
+            case SystemStatus.READY:
+                return "$(check)";
+            case SystemStatus.PROCESSING:
+                return "$(sync~spin)";
+            case SystemStatus.DISCONNECTED:
+                return "$(circle-slash)";
+            case SystemStatus.PAUSED:
+                return "$(debug-pause)";
+            case SystemStatus.ERROR:
+                return "$(error)";
+            default:
+                return "$(question)";
+        }
     }
 
-    private getStatusColor(status: SystemStatus): string | undefined {
-        // TODO: Implement color mapping
-        return undefined;
+    private getStatusColor(status: SystemStatus): string {
+
+        switch (status) {
+             case SystemStatus.INITIALIZING:
+                return "orange";
+            case SystemStatus.READY:
+                return "green";
+            case SystemStatus.PROCESSING:
+                return "yellow";
+            case SystemStatus.DISCONNECTED:
+                return "gray";
+            case SystemStatus.PAUSED:
+                return "blue";
+            case SystemStatus.ERROR:
+                return "red";
+            default:
+                return "gray";
+        }
     }
 }

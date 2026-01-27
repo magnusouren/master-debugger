@@ -16,7 +16,6 @@ export enum MessageType {
     FEEDBACK_DELIVERY = "feedback_delivery",
     STATUS_UPDATE = "status_update",
     ERROR = "error",
-    EXPERIMENT_STATUS_UPDATE = "experiment_status_update",
 
     // Bidirectional
     PING = "ping",
@@ -172,6 +171,9 @@ export interface StatusUpdatePayload {
     operation_mode: "reactive" | "proactive";
     samples_processed: number;
     feedback_generated: number;
+    experiment_active: boolean;
+    experiment_id?: string;
+    participant_id?: string;
     error_message?: string;
 }
 
