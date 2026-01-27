@@ -21,7 +21,6 @@ class MessageType(Enum):
     FEEDBACK_DELIVERY = "feedback_delivery"
     STATUS_UPDATE = "status_update"
     ERROR = "error"
-    EXPERIMENT_STATUS_UPDATE = "experiment_status_update"
     
     # Bidirectional
     PING = "ping"
@@ -108,13 +107,18 @@ class SystemStatusMessage:
     vscode_connected: bool = False
     
     # Current state
-    current_user_state: Optional[UserStateEstimate] = None
     operation_mode: str = "reactive"
     
     # Statistics
     samples_processed: int = 0
     feedback_generated: int = 0
+
+    # Experiment status
+    experiment_active: bool = False
+    experiment_id: Optional[str] = None
+
+    # Participant ID
+    participant_id: Optional[str] = None
     
     # Error information
     error_message: Optional[str] = None
-    error_details: Dict[str, Any] = field(default_factory=dict)
