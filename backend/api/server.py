@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any
 import asyncio
 import signal
 
+from backend.api.serialization import json_safe
 from backend.types import SystemConfig
 from backend.layers import RuntimeController
 from backend.api.websocket_server import WebSocketServer
@@ -199,22 +200,15 @@ class Server:
     
     def _setup_api_routes(self) -> None:
         """Set up REST API routes with controller handlers."""
-        async def handle_get_status(request: Dict[str, Any]) -> Dict[str, Any]:
-            """
-            Wrapper for RuntimeController.get_status to ensure a dict payload.
-            Returns: {"status": "<status_string>"}.
-            """
-            result = self._controller.get_status()
-            if asyncio.iscoroutine(result):
-                result = await result
-            # If result is an Enum, prefer its value; otherwise, fall back to str().
-            status_str = getattr(result, "value", str(result))
-            return {"status": status_str}
+
+        async def handle_get_system_status(_: Dict[str, Any]) -> Dict[str, Any]:
+            status_msg = self._controller.get_system_status()
+            return json_safe(status_msg)
 
         self._rest_api.register_route(
             "/status",
             HttpMethod.GET,
-            handle_get_status,
+            handle_get_system_status,
         )
 
         self._rest_api.register_route(
