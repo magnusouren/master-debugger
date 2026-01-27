@@ -223,7 +223,7 @@ class RuntimeController:
             status=self.get_status(),
             timestamp=datetime.now(timezone.utc).timestamp(),
             eye_tracker_connected=self.is_eye_tracker_connected(),
-            vscode_connected=len(self._websocket_callbacks) > 0,
+            vscode_connected=len(self._websocket_callbacks) > 0, # TODO: improve this if possible
             operation_mode=self._operation_mode.name,
             samples_processed=self._stats["samples_processed"],
             feedback_generated=self._stats["feedback_generated"],
