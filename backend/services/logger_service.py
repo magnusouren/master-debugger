@@ -13,6 +13,9 @@ from enum import Enum
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+from pathlib import Path
+from backend.api.serialization import json_safe
+
 
 
 class LogLevel(Enum):
@@ -212,9 +215,14 @@ class LoggerService:
             
         Returns:
             True if successful.
+
         """
         try:
             filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
+            filepath = Path(filepath)
+
+            # Ensure parent directories exist
+            filepath.parent.mkdir(parents=True, exist_ok=True)
 
             logs_data = [
                 {
@@ -277,6 +285,12 @@ class LoggerService:
         """
         try:
             filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
+            filepath = Path(filepath)
+
+            # Ensure parent directories exist
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+
+
             logs_data = [
                 {
                     "timestamp": entry.timestamp,
@@ -401,7 +415,7 @@ class LoggerService:
         reset = "\033[0m"
         
         color = colors.get(entry.level, "")
-        data_str = json.dumps(entry.data) if entry.data else ""
+        data_str = json.dumps(json_safe(entry.data)) if entry.data else ""
         
         print(f"{color}[{timestamp}] [{entry.level}] {entry.event_type}{reset} {data_str}")
 
