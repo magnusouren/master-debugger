@@ -82,7 +82,7 @@ class RuntimeController:
         if self._config.controller.participant_id and self._config.controller.experiment_id:
             self._session_id: Optional[str] = f"{self._config.controller.participant_id}_{self._config.controller.experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         else:
-            self._session_id: Optional[str] = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            self._session_id: Optional[str] = None
         
         # Initialize logger
         self._logger = get_logger()
@@ -541,7 +541,7 @@ class RuntimeController:
 
         self._experiment_id = None
         self._participant_id = None
-        self._session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        self._session_id = None
 
         return {
             "status": "ended",
@@ -584,17 +584,11 @@ class RuntimeController:
             )
             return False
 
-        try:
-            filepath = f"experiment_{self._experiment_id}_participant_{self._participant_id}_{self._session_id}.csv"
-            self._logger.export_experiment_logs(filepath)
-            return True
-        except Exception as e:
-            self._logger.system(
-                "export_experiment_data_error",
-                {"error": str(e)},
-                level="ERROR",
-            )
-            return False
+
+        filepath = f"experiment_{self._experiment_id}_participant_{self._participant_id}_{self._session_id}.csv"
+        success = self._logger.export_experiment_logs(filepath)
+        return success
+
         
     def get_experiment_status(self) -> Dict[str, Any]:
         """
