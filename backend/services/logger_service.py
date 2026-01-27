@@ -204,7 +204,7 @@ class LoggerService:
     
     def export_experiment_logs(self, filepath: str) -> bool:
         """
-        Export experiment logs to JSON file.
+        Export experiment logs to CSV file.
         
         Args:
             filepath: Path to export file.
@@ -213,6 +213,8 @@ class LoggerService:
             True if successful.
         """
         try:
+            filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
+
             logs_data = [
                 {
                     "timestamp": entry.timestamp,
@@ -224,17 +226,37 @@ class LoggerService:
             ]
             
             with open(filepath, "w") as f:
-                json.dump(logs_data, f, indent=2, default=str)
-            
-            print(f"[Logger] Exported {len(logs_data)} experiment logs to {filepath}")
+                f.write("timestamp,level,event_type,data\n")
+                for entry in logs_data:
+                    data_str = json.dumps(entry["data"]).replace('"', '""')
+                    f.write(f'{entry["timestamp"]},{entry["level"]},{entry["event_type"]},"{data_str}"\n')
+
+            self._print_log(
+                LogEntry(
+                    timestamp=datetime.now(timezone.utc).timestamp(),
+                    level="INFO",
+                    event_type="export_experiment_logs",
+                    data={"filepath": filepath, "count": len(logs_data)},
+                    category="system",
+                )
+            )
             return True
         except Exception as e:
-            print(f"[Logger] Error exporting experiment logs: {e}")
+            self._print_log(
+                LogEntry(
+                    timestamp=datetime.now(timezone.utc).timestamp(),
+                    level="ERROR",
+                    event_type="export_experiment_logs_error",
+                    data={"error": str(e)},
+                    category="system",
+                )
+            )
             return False
+        
     
     def export_system_logs(self, filepath: str) -> bool:
         """
-        Export system logs to JSON file.
+        Export system logs to CSV file.
         
         Args:
             filepath: Path to export file.
@@ -243,6 +265,7 @@ class LoggerService:
             True if successful.
         """
         try:
+            filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
             logs_data = [
                 {
                     "timestamp": entry.timestamp,
@@ -252,15 +275,35 @@ class LoggerService:
                 }
                 for entry in self.system_logs
             ]
-            
+
             with open(filepath, "w") as f:
-                json.dump(logs_data, f, indent=2, default=str)
+                f.write("timestamp,level,event_type,data\n")
+                for entry in logs_data:
+                    data_str = json.dumps(entry["data"]).replace('"', '""')
+                    f.write(f'{entry["timestamp"]},{entry["level"]},{entry["event_type"]},"{data_str}"\n')
             
-            print(f"[Logger] Exported {len(logs_data)} system logs to {filepath}")
+            self._print_log(
+                LogEntry(
+                    timestamp=datetime.now(timezone.utc).timestamp(),
+                    level="INFO",
+                    event_type="export_system_logs",
+                    data={"filepath": filepath, "count": len(logs_data)},
+                    category="system",
+                )
+            )
             return True
         except Exception as e:
-            print(f"[Logger] Error exporting system logs: {e}")
+            self._print_log(
+                LogEntry(
+                    timestamp=datetime.now(timezone.utc).timestamp(),
+                    level="ERROR",
+                    event_type="export_system_logs_error",
+                    data={"error": str(e)},
+                    category="system",
+                )
+            )
             return False
+
     
     def get_statistics(self) -> Dict[str, Any]:
         """

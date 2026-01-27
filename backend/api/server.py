@@ -12,7 +12,7 @@ import signal
 from backend.types import SystemConfig
 from backend.layers import RuntimeController
 from backend.api.websocket_server import WebSocketServer
-from backend.api.rest_api import RestAPI
+from backend.api.rest_api import HttpMethod, RestAPI
 from backend.services.logger_service import get_logger
 from backend.types.code_context import CodeContext
 from backend.types.messages import MessageType, WebSocketMessage
@@ -199,7 +199,37 @@ class Server:
     
     def _setup_api_routes(self) -> None:
         """Set up REST API routes with controller handlers."""
-        pass  # TODO: Implement route setup
+        async def handle_get_status(request: Dict[str, Any]) -> Dict[str, Any]:
+            """
+            Wrapper for RuntimeController.get_status to ensure a dict payload.
+            Returns: {"status": "<status_string>"}.
+            """
+            result = self._controller.get_status()
+            if asyncio.iscoroutine(result):
+                result = await result
+            # If result is an Enum, prefer its value; otherwise, fall back to str().
+            status_str = getattr(result, "value", str(result))
+            return {"status": status_str}
+
+        self._rest_api.register_route(
+            "/status",
+            HttpMethod.GET,
+            handle_get_status,
+        )
+
+        self._rest_api.register_route(
+            "/experiment/start",
+            HttpMethod.POST,
+            self._controller.start_experiment,
+        )
+        
+        self._rest_api.register_route(
+            "/experiment/end",
+            HttpMethod.POST,
+            self._controller.end_experiment,
+        )
+
+        # TODO - add more routes as needed
     
     def _setup_websocket_handlers(self) -> None:
         """

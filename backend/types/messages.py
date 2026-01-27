@@ -21,6 +21,7 @@ class MessageType(Enum):
     FEEDBACK_DELIVERY = "feedback_delivery"
     STATUS_UPDATE = "status_update"
     ERROR = "error"
+    EXPERIMENT_STATUS_UPDATE = "experiment_status_update"
     
     # Bidirectional
     PING = "ping"
