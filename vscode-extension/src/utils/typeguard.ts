@@ -1,6 +1,6 @@
-import { StatusUpdatePayload } from "../types";
+import { SystemStatusMessage } from "../types";
 
-export function isStatusUpdatePayload(x: unknown): x is StatusUpdatePayload {
+export function isStatusUpdatePayload(x: unknown): x is SystemStatusMessage {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
 

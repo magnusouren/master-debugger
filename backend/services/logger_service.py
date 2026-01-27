@@ -7,11 +7,15 @@ Provides structured logging with two main categories:
 
 Supports configurable log levels and thresholds per category.
 """
+import csv
 from typing import Dict, Any, List, Optional
 from enum import Enum
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+from pathlib import Path
+from backend.api.serialization import json_safe
+
 
 
 class LogLevel(Enum):
@@ -211,9 +215,14 @@ class LoggerService:
             
         Returns:
             True if successful.
+
         """
         try:
             filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
+            filepath = Path(filepath)
+
+            # Ensure parent directories exist
+            filepath.parent.mkdir(parents=True, exist_ok=True)
 
             logs_data = [
                 {
@@ -225,11 +234,21 @@ class LoggerService:
                 for entry in self.experiment_logs
             ]
             
-            with open(filepath, "w") as f:
-                f.write("timestamp,level,event_type,data\n")
+            
+            with open(filepath, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["timestamp", "level", "event_type", "data"])
+
                 for entry in logs_data:
-                    data_str = json.dumps(entry["data"]).replace('"', '""')
-                    f.write(f'{entry["timestamp"]},{entry["level"]},{entry["event_type"]},"{data_str}"\n')
+                    dt = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
+                    timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+                    writer.writerow([
+                        timestamp_str,
+                        entry["level"],
+                        entry["event_type"],
+                        json.dumps(json_safe(entry["data"])),
+                    ])
 
             self._print_log(
                 LogEntry(
@@ -266,6 +285,12 @@ class LoggerService:
         """
         try:
             filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
+            filepath = Path(filepath)
+
+            # Ensure parent directories exist
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+
+
             logs_data = [
                 {
                     "timestamp": entry.timestamp,
@@ -276,11 +301,20 @@ class LoggerService:
                 for entry in self.system_logs
             ]
 
-            with open(filepath, "w") as f:
-                f.write("timestamp,level,event_type,data\n")
+            with open(filepath, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["timestamp", "level", "event_type", "data"])
+
                 for entry in logs_data:
-                    data_str = json.dumps(entry["data"]).replace('"', '""')
-                    f.write(f'{entry["timestamp"]},{entry["level"]},{entry["event_type"]},"{data_str}"\n')
+                    dt = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
+                    timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+                    writer.writerow([
+                        timestamp_str,
+                        entry["level"],
+                        entry["event_type"],
+                        json.dumps(json_safe(entry["data"])),
+                    ])
             
             self._print_log(
                 LogEntry(
@@ -381,7 +415,7 @@ class LoggerService:
         reset = "\033[0m"
         
         color = colors.get(entry.level, "")
-        data_str = json.dumps(entry.data) if entry.data else ""
+        data_str = json.dumps(json_safe(entry.data)) if entry.data else ""
         
         print(f"{color}[{timestamp}] [{entry.level}] {entry.event_type}{reset} {data_str}")
 
