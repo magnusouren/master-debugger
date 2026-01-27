@@ -157,6 +157,7 @@ function setupMessageHandlers(): void {
 
     wsClient.onMessage(MessageType.FEEDBACK_DELIVERY, handleFeedbackDelivery);
     wsClient.onMessage(MessageType.STATUS_UPDATE, handleStatusUpdate);
+    wsClient.onMessage(MessageType.EXPERIMENT_STATUS_UPDATE, handleExperimentStatusUpdate);
     wsClient.onMessage(MessageType.CONTEXT_REQUEST, handleContextRequest);
     wsClient.onMessage(MessageType.ERROR, handleError);
 }
@@ -291,6 +292,13 @@ function handleStatusUpdate(message: { payload: Record<string, unknown> }): void
     // TODO: Implement status update handling
     const payload = message.payload as unknown as StatusUpdatePayload;
     statusBar?.setStatus(payload.status);
+}
+
+function handleExperimentStatusUpdate(message: { payload: Record<string, unknown> }): void {
+    // TODO: Implement experiment status update handling
+    const payload = message.payload as Record<string, unknown>;
+    const experimentStatus = payload["experiment_status"] as string || "unknown";
+    vscode.window.showInformationMessage(`Experiment Status: ${experimentStatus}`);
 }
 
 function handleContextRequest(message: { payload: Record<string, unknown> }): void {

@@ -27,6 +27,13 @@ export class StatusBarManager {
     }
 
     /**
+     * Update experiment status
+     */
+    setExperimentStatus(experimentStatus: string): void {
+        // TODO: Implement experiment status update
+    }
+
+    /**
      * Set the connection state.
      */
     setConnected(connected: boolean): void {
