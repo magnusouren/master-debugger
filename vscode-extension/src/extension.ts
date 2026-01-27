@@ -16,6 +16,7 @@ import {
     SystemStatus,
 } from "./types";
 import { isStatusUpdatePayload } from "./utils/typeguard";
+import { fetchStatus } from "./api";
 
 let wsClient: WebSocketClient | null = null;
 let contextCollector: ContextCollector | null = null;
@@ -169,13 +170,27 @@ async function connectToBackend(): Promise<void> {
 
     const connected = await wsClient.connect();
     if (connected) {
-        vscode.window.showInformationMessage(
-            "Connected to Eye Tracking backend"
-        );
+        vscode.window.showInformationMessage("Connected to Eye Tracking backend");
         statusBar?.setConnected(true);
 
         // Send initial context immediately
         sendContextUpdate();
+
+        // Fetch system status from REST API and update status bar
+        try {
+            const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
+            const host = config.get<string>("backendHost") || "localhost";
+            const port = config.get<number>("websocketPort") || 8765;
+            const statusPayload = await fetchStatus(host, port);
+
+            if (isStatusUpdatePayload(statusPayload)) {
+                statusBar?.setStatus(statusPayload);
+            } else {
+                console.warn("/status response did not match expected shape", statusPayload);
+            }
+        } catch (err) {
+            console.warn("Failed to fetch /status from backend:", err);
+        }
     } else {
         vscode.window.showErrorMessage(
             "Failed to connect to Eye Tracking backend"
@@ -295,14 +310,10 @@ function handleStatusUpdate(message: { payload: Record<string, unknown> }): void
         return;
     }
 
-    const payload = payloadUnknown; // nå er den type-safe
+    const payload = payloadUnknown; // type is now confirmed
 
     statusBar?.setStatus(payload);
 
-    // Eksempel: oppdater en global store
-    // systemStore.setState({ status: payload });
-
-    // Eksempel: hvis error
     if (payload.status === SystemStatus.ERROR && payload.error_message) {
         console.error("Backend error:", payload.error_message);
         vscode.window.showErrorMessage(`Eye Tracking Debugger Error: ${payload.error_message}`);
