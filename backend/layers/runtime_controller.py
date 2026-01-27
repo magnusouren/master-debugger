@@ -495,7 +495,7 @@ class RuntimeController:
         self, 
         experiment_id: str, 
         participant_id: str
-        ) -> SystemStatusMessage:
+    ) -> SystemStatusMessage:
         """
         Start a new experiment session.
         
