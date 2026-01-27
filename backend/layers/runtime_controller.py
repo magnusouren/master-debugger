@@ -28,7 +28,7 @@ from backend.types.code_context import CodeContext
 from backend.types.config import OperationMode, SystemConfig
 from backend.types.eye_tracking import PredictedFeatures, WindowFeatures
 from backend.types.feedback import FeedbackInteraction, FeedbackResponse
-from backend.types.messages import MessageType, SystemStatus, WebSocketMessage
+from backend.types.messages import MessageType, SystemStatus, SystemStatusMessage, WebSocketMessage
 from backend.types.user_state import UserStateEstimate
 
 
@@ -67,6 +67,9 @@ class RuntimeController:
             "feedback_generated": 0,
             "session_start": None,
         }
+
+        # eye tracker connection state
+        self._eye_tracker_connected: str = None
         
         # Callbacks for external communication
         self._websocket_callbacks: List[Callable[[WebSocketMessage], Awaitable[None]]] = []
@@ -209,6 +212,26 @@ class RuntimeController:
         """
         return self._status
     
+    def get_system_status(self) -> SystemStatusMessage:
+        """
+        Get detailed system status message.
+        
+        Returns:
+            SystemStatusMessage with current status details.
+        """
+        return SystemStatusMessage(
+            status=self.get_status(),
+            timestamp=datetime.now(timezone.utc).timestamp(),
+            eye_tracker_connected=self.is_eye_tracker_connected(),
+            vscode_connected=len(self._websocket_callbacks) > 0,
+            operation_mode=self._operation_mode.name,
+            samples_processed=self._stats["samples_processed"],
+            feedback_generated=self._stats["feedback_generated"],
+            experiment_active=self._experiment_id is not None,
+            experiment_id=self._experiment_id,
+            participant_id=self._participant_id,
+        )
+    
     def get_statistics(self) -> Dict[str, Any]:
         """
         Get system statistics.
@@ -243,7 +266,7 @@ class RuntimeController:
         Returns:
             True if connected.
         """
-        pass  # TODO: Implement connection check
+        return self._eye_tracker_connected is not None
     
     # --- VS Code Communication ---
     
@@ -589,26 +612,6 @@ class RuntimeController:
         success = self._logger.export_experiment_logs(filepath)
         return success
 
-        
-    def get_experiment_status(self) -> Dict[str, Any]:
-        """
-        Get current experiment status for frontend display.
-        
-        Returns:
-            Dict with experiment state, ready status, and details.
-        """
-        return {
-            "is_active": self._experiment_id is not None and self._participant_id is not None,
-            "is_ready": self._status == SystemStatus.READY,
-            "experiment_id": self._experiment_id,
-            "participant_id": self._participant_id,
-            "session_id": self._session_id,
-            "can_start": self._status == SystemStatus.READY and not (self._experiment_id and self._participant_id),
-            "can_stop": self._experiment_id is not None and self._participant_id is not None,
-            "uptime_seconds": self._stats.get("uptime_seconds", 0),
-            "samples_processed": self._stats["samples_processed"],
-            "feedback_generated": self._stats["feedback_generated"],
-        }
 
     # --- Internal Methods ---
     
@@ -630,13 +633,13 @@ class RuntimeController:
 
         self._logger.system("runtime_controller_main_loop_started", {}, level="DEBUG")
         while self._status == SystemStatus.READY:
-            await asyncio.sleep(0.1)  # Main loop tick
+            await asyncio.sleep(1)  # Main loop tick
             
             # Update statistics
             self._update_statistics()
 
-            # Broadcast experiment status periodically
-            await self._broadcast_experiment_status()
+            # Broadcast system status periodically
+            await self._broadcast_system_status()
             
             # # Check for feedback generation
             # if self.should_generate_feedback():
@@ -657,14 +660,16 @@ class RuntimeController:
             elapsed = asyncio.get_event_loop().time() - self._stats["session_start"]
             self._stats["uptime_seconds"] = elapsed
 
-    
-    async def _broadcast_experiment_status(self) -> None:
+    async def _broadcast_system_status(self) -> None:
         """
         Broadcast current experiment status to all connected clients.
         """
+        status_msg = self.get_system_status()
         msg = WebSocketMessage(
-            type=MessageType.EXPERIMENT_STATUS_UPDATE,  # new message type
-            payload=self.get_experiment_status(),
-            timestamp=datetime.now(timezone.utc).timestamp()
+            type=MessageType.STATUS_UPDATE,
+            timestamp=datetime.now(timezone.utc).timestamp(),
+            payload=json_safe(status_msg),
+            message_id=None,
+            target_client_id=None
         )
         await self._emit(msg)
