@@ -86,8 +86,8 @@ export class StatusBarManager {
             ? "Connected"
             : "Disconnected";
         const eyeTrackerText = this.currentStatus.eye_tracker_connected
-            ? " | Eye Tracker: Connected"
-            : " | Eye Tracker: Disconnected";
+            ? "Eye Tracker: Connected"
+            : "Eye Tracker: Disconnected";
 
         this.statusBarItem.text = `Eye Tracking Debugger: ${statusIcon} | ${connectionText} | ${modeText} | ${eyeTrackerText}`;
         this.statusBarItem.color = statusColor;
