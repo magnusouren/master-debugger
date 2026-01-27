@@ -6,46 +6,46 @@ A system for providing eye-tracking based debugging assistance in VS Code.
 
 ```
 master-debuger/
-├── backend/                    # Python backend
-│   ├── api/                    # WebSocket and REST API servers
+├── backend/                        # Python backend
+│   ├── api/                        # WebSocket and REST API servers
 │   │   ├── __init__.py
-│   │   ├── websocket_server.py # Real-time communication
-│   │   ├── rest_api.py         # Configuration and status endpoints
-│   │   └── server.py           # Combined server entry point
-│   ├── layers/                 # Processing layers
+│   │   ├── websocket_server.py     # Real-time communication
+│   │   ├── rest_api.py             # Configuration and status endpoints
+│   │   └── server.py               # Combined server entry point
+│   ├── layers/                     # Processing layers
 │   │   ├── __init__.py
 │   │   ├── signal_processing.py    # Raw gaze data → features
 │   │   ├── forecasting_tool.py     # Feature prediction (proactive)
 │   │   ├── reactive_tool.py        # User state estimation
 │   │   ├── feedback_layer.py       # Feedback generation
 │   │   └── runtime_controller.py   # Central orchestrator
-│   ├── services/               # Service implementations
-│   │   ├── llm_client.py       # LLM interaction
-│   ├── types/                  # Type definitions
-│   │   ├── __init__.py
-│   │   ├── eye_tracking.py     # Eye tracking data types
-│   │   ├── user_state.py       # User state types
-│   │   ├── code_context.py     # VS Code context types
-│   │   ├── feedback.py         # Feedback types
-│   │   ├── config.py           # Configuration types
-│   │   └── messages.py         # WebSocket message types
-│   ├── __init__.py
-│   ├── main.py                 # Main entry point
-│   ├── requirements.txt        # Python dependencies
-│   └── config.example.yaml     # Example configuration
-├── vscode-extension/           # VS Code extension frontend
-│   ├── src/
-│   │   ├── extension.ts        # Extension entry point
-│   │   ├── types.ts            # TypeScript type definitions
-│   │   ├── websocket-client.ts # WebSocket client
-│   │   ├── context-collector.ts # Editor context collection
-│   │   ├── feedback-renderer.ts # Feedback display
-│   │   └── status-bar.ts       # Status bar management
+│   ├── services/                   # Service implementations
+│   │   ├── llm_client.py           # LLM interaction
+│   ├── types/                      # Type definitions
+│   │   ├── __init__.py 
+│   │   ├── eye_tracking.py         # Eye tracking data types
+│   │   ├── user_state.py           # User state types
+│   │   ├── code_context.py         # VS Code context types
+│   │   ├── feedback.py             # Feedback types
+│   │   ├── config.py               # Configuration types
+│   │   └── messages.py             # WebSocket message types
+│   ├── __init__.py 
+│   ├── main.py                     # Main entry point
+│   ├── requirements.txt            # Python dependencies
+│   └── config.example.yaml         # Example configuration
+├── vscode-extension/               # VS Code extension frontend
+│   ├── src/    
+│   │   ├── extension.ts            # Extension entry point
+│   │   ├── types.ts                # TypeScript type definitions
+│   │   ├── websocket-client.ts     # WebSocket client
+│   │   ├── context-collector.ts    # Editor context collection
+│   │   ├── feedback-renderer.ts    # Feedback display
+│   │   └── status-bar.ts           # Status bar management
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── README.md
-├── .venv/                      # Python virtual environment
-└── README.md                   # This file
+├── .venv/                          # Python virtual environment
+└── README.md                       # This file
 ```
 
 ## Requirements
