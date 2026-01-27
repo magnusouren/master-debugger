@@ -1,8 +1,11 @@
 from dataclasses import is_dataclass, asdict
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 def json_safe(x: Any) -> Any:
+    if isinstance(x, Path):
+        return str(x)
     if is_dataclass(x):
         return {k: json_safe(v) for k, v in asdict(x).items()}
     if isinstance(x, Enum):
