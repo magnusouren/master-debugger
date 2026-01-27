@@ -301,7 +301,7 @@ class LoggerService:
                 for entry in self.system_logs
             ]
 
-            with open(filepath, "w") as f:
+            with open(filepath, "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["timestamp", "level", "event_type", "data"])
 
