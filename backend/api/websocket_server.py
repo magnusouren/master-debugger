@@ -12,7 +12,7 @@ from dataclasses import asdict
 
 from backend.api.serialization import json_safe
 from backend.services.logger_service import get_logger
-from backend.types.messages import FeedbackMessage, MessageType, SystemStatusMessage, WebSocketMessage
+from backend.types.messages import MessageType, WebSocketMessage
 
 
 
