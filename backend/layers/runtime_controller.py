@@ -479,11 +479,16 @@ class RuntimeController:
             experiment_id: Unique experiment identifier.
             participant_id: Unique participant identifier.
         """
+
+        self._experiment_id = experiment_id
+        self._participant_id = participant_id
+        self._session_id = f"{participant_id}_{experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+
         self._logger.system(
             "experiment_started",
             {
-                "experiment_id": experiment_id,
-                "participant_id": participant_id,
+                "experiment_id": self._experiment_id,
+                "participant_id": self._participant_id,
                 "session_id": self._session_id
             },
             level="INFO",
@@ -492,15 +497,12 @@ class RuntimeController:
         self._logger.experiment(
             "experiment_started",
             {
-                "experiment_id": experiment_id,
-                "participant_id": participant_id,
+                "experiment_id": self._experiment_id,
+                "participant_id": self._participant_id,
                 "session_id": self._session_id
             },
             level="INFO",
         )
-        self._experiment_id = experiment_id
-        self._participant_id = participant_id
-        self._session_id = f"{participant_id}_{experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
 
         # Broadcast experiment status periodically
