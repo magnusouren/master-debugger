@@ -247,7 +247,7 @@ class LoggerService:
                         timestamp_str,
                         entry["level"],
                         entry["event_type"],
-                        json.dumps(entry["data"]),
+                        json.dumps(json_safe(entry["data"])),
                     ])
 
             self._print_log(
@@ -313,7 +313,7 @@ class LoggerService:
                         timestamp_str,
                         entry["level"],
                         entry["event_type"],
-                        json.dumps(entry["data"]),
+                        json.dumps(json_safe(entry["data"])),
                     ])
             
             self._print_log(
