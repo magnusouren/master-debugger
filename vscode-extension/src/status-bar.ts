@@ -6,7 +6,6 @@ import { SystemStatusMessage, SystemStatus } from "./types";
 
 export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
-    private outputChannel: vscode.OutputChannel;
     private currentStatus: SystemStatusMessage | null = null;
     private statusPanel: vscode.WebviewPanel | null = null;
 
@@ -15,8 +14,6 @@ export class StatusBarManager {
             vscode.StatusBarAlignment.Right,
             100
         );
-        this.outputChannel = vscode.window.createOutputChannel("Eye Tracking Debugger Status");
-        context.subscriptions.push(this.outputChannel);
         this.statusBarItem.command = "eyeTrackingDebugger.showStatus";
         context.subscriptions.push(this.statusBarItem);
         this.updateDisplay();
@@ -72,7 +69,6 @@ export class StatusBarManager {
      */
     dispose(): void {
         this.statusBarItem.dispose();
-        this.outputChannel.dispose();
     }
 
     async showStatusDetails(): Promise<void> {
@@ -262,8 +258,11 @@ export class StatusBarManager {
             </div>
 
             <div class="grid" id="grid">
+                <div class="label">Connection</div>
+                <div class="value"><span class="pill" id="connection_pill">–</span></div>
                 <div class="label">Status</div>
                 <div class="value"><span class="pill" id="status_pill">–</span></div>
+
 
                 <div class="label">Time</div>
                 <div class="value" id="time_local">–</div>
@@ -299,6 +298,7 @@ export class StatusBarManager {
 
         <script>
             const statusPill = document.getElementById("status_pill");
+            const connectionPill = document.getElementById("connection_pill");
             const lastUpdated = document.getElementById("last_updated");
 
             function setText(id, value) {
@@ -308,11 +308,11 @@ export class StatusBarManager {
             }
 
             function yesNo(x) {
-                return x ? "Connected" : "Disconnected";
+                return x ? "Connected ✅" : "Disconnected ❌";
             }
 
             function runningStopped(x) {
-                return x ? "Running" : "NOT Running";
+                return x ? "Running ✅" : "NOT Running ❌";
             }
 
             function pillForStatus(status) {
@@ -336,11 +336,49 @@ export class StatusBarManager {
                 }
             }
 
+            function pillForConnection(connected) {
+                if (connected) {
+                    connectionPill.textContent = "CONNECTED";
+                    connectionPill.style.borderColor = "rgba(0,128,0,0.35)";
+                    connectionPill.style.background = "rgba(0,128,0,0.10)";
+                } else {
+                    connectionPill.textContent = "DISCONNECTED";
+                    connectionPill.style.borderColor = "rgba(255,0,0,0.40)";
+                    connectionPill.style.background = "rgba(255,0,0,0.10)";
+                }
+            }
+
             window.addEventListener("message", (event) => {
                 const msg = event.data;
                 if (!msg || msg.type !== "status_update") return;
 
+                pillForConnection(!!msg.payload.vscode_connected);
+
                 const s = msg.payload;
+
+                if (!!s.vscode_connected === false) {
+                    // If disconnected, clear most fields
+                    setText("time_local", "–");
+                    setText("mode", "–");
+                    setText("vscode_connected", "–");
+                    setText("eye_tracker_connected", "–");
+                    setText("experiment_active", "–");
+                    setText("experiment_id", "–");
+                    setText("participant_id", "–");
+                    setText("samples_processed", "–");
+                    setText("feedback_generated", "–");
+
+                    statusPill.textContent = "DISCONNECTED";
+                    statusPill.style.borderColor = "rgba(255,0,0,0.40)";
+                    statusPill.style.background = "rgba(255,0,0,0.10)";
+
+                    const errorBox = document.getElementById("error_box");
+                    errorBox.style.display = "none";
+                    errorBox.textContent = "";
+
+                    lastUpdated.textContent = "Last updated: " + new Date().toLocaleTimeString();
+                    return;
+                }
 
                 pillForStatus(s.status);
                 setText("time_local", s.time_local);
