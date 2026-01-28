@@ -9,6 +9,7 @@ export class StatusBarManager {
     private outputChannel: vscode.OutputChannel;
     private currentStatus: SystemStatusMessage | null = null;
     private showingDetails: boolean = false;
+    private statusPanel: vscode.WebviewPanel | null = null;
 
     constructor(context: vscode.ExtensionContext) {
         this.statusBarItem = vscode.window.createStatusBarItem(
@@ -30,8 +31,8 @@ export class StatusBarManager {
         this.currentStatus = status;
         this.updateDisplay();
 
-        if (this.showingDetails) {
-            this.showStatusDetails();
+        if (this.statusPanel) {
+            this.postStatusToPanel(status);
         }
     }
 
@@ -42,6 +43,7 @@ export class StatusBarManager {
         if (this.currentStatus) {
             this.currentStatus.vscode_connected = connected;
             this.updateDisplay();
+            this.showStatusDetails();
         }
     }
 
@@ -74,40 +76,43 @@ export class StatusBarManager {
         this.outputChannel.dispose();
     }
 
-    /**
-     * Show a detailed read-only view of the current status.
-     */
     async showStatusDetails(): Promise<void> {
         this.showingDetails = true;
 
         if (!this.currentStatus) {
             vscode.window.showInformationMessage("No status available");
-            return; 
+            return;
         }
 
-        const s = this.currentStatus;
-        const lines: string[] = [];
-        lines.push("=== Eye Tracking Debugger Status ===");
-        lines.push(`Status: ${s.status}`);
-        lines.push(`Time: ${new Date(s.timestamp * 1000).toLocaleString()}`);
-        lines.push(`Mode: ${s.operation_mode}`);
-        lines.push(`VSCode: ${ s.vscode_connected ? "Connected" : "Disconnected" }`);
-        lines.push(`Eye Tracker: ${s.eye_tracker_connected ? "Connected" : "Disconnected"}`);
-        lines.push(`Experiment: ${ s.experiment_active ? "Running" : "NOT Running" }`);
-        if (s.experiment_id) lines.push(`Experiment ID: ${s.experiment_id}`);
-        if (s.participant_id) lines.push(`Participant ID: ${s.participant_id}`);
-        lines.push(`Samples processed: ${s.samples_processed}`);
-        lines.push(`Feedback generated: ${s.feedback_generated}`);
-        if (s.error_message) {
-            lines.push("");
-            lines.push("Error:");
-            lines.push(s.error_message);
+        // Reuse existing panel if it exists
+        if (this.statusPanel) {
+            this.statusPanel.reveal(this.statusPanel.viewColumn ?? vscode.ViewColumn.Active, true);
+            this.postStatusToPanel(this.currentStatus);
+            return;
         }
 
-        // Show in bottom panel without stealing focus
-        this.outputChannel.clear();
-        this.outputChannel.appendLine(lines.join("\n"));
-        this.outputChannel.show(true);
+        // Create new panel
+        this.statusPanel = vscode.window.createWebviewPanel(
+            "eyeTrackingDebugger.status",
+            "Eye Tracking Debugger – Status",
+            { viewColumn: vscode.ViewColumn.Active, preserveFocus: true },
+            {
+                enableScripts: true, // needed for postMessage listener
+                retainContextWhenHidden: true, // keeps state when switching tabs
+            }
+        );
+
+        // Clean up on close
+        this.statusPanel.onDidDispose(() => {
+            this.statusPanel = null;
+            this.showingDetails = false;
+        });
+
+        // Set initial HTML
+        this.statusPanel.webview.html = this.getStatusPanelHtml(this.statusPanel.webview);
+
+        // Send initial status
+        this.postStatusToPanel(this.currentStatus);
     }
 
     // --- Private Methods ---
@@ -179,5 +184,192 @@ export class StatusBarManager {
             default:
                 return "gray";
         }
+    }
+
+    private postStatusToPanel(status: SystemStatusMessage): void {
+        if (!this.statusPanel) return;
+
+        // Timestamp fix (backend seconds -> JS ms)
+        const tsMs = status.timestamp > 1e12 ? status.timestamp : status.timestamp * 1000;
+
+        this.statusPanel.webview.postMessage({
+            type: "status_update",
+            payload: {
+                ...status,
+                timestamp_ms: tsMs,
+                time_local: new Date(tsMs).toLocaleString(),
+            },
+        });
+    }
+
+    private getStatusPanelHtml(webview: vscode.Webview): string {
+        // Optional: add a nonce if you later want stricter CSP
+        return `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Status</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                padding: 16px;
+                line-height: 1.4;
+            }
+            .header {
+                display: flex;
+                align-items: baseline;
+                justify-content: space-between;
+                gap: 12px;
+                margin-bottom: 12px;
+            }
+            h2 { margin: 0; font-size: 18px; }
+            .muted { opacity: 0.75; font-size: 12px; }
+            .grid {
+                display: grid;
+                grid-template-columns: 180px 1fr;
+                gap: 8px 12px;
+                margin-top: 12px;
+            }
+            .label { opacity: 0.8; }
+            .value { font-weight: 600; word-break: break-word; }
+            .pill {
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 999px;
+                font-size: 12px;
+                font-weight: 700;
+                border: 1px solid rgba(0,0,0,0.15);
+            }
+            .error {
+                margin-top: 14px;
+                padding: 10px;
+                border-radius: 8px;
+                border: 1px solid rgba(255,0,0,0.35);
+                background: rgba(255,0,0,0.08);
+                white-space: pre-wrap;
+                word-break: break-word;
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+                font-size: 12px;
+            }
+            .row { display: contents; }
+            .divider {
+                margin: 14px 0 10px;
+                border-top: 1px solid rgba(0,0,0,0.12);
+            }
+        </style>
+        </head>
+        <body>
+            <div class="header">
+                <h2>Eye Tracking Debugger – Status</h2>
+                <div class="muted" id="last_updated">Last updated: –</div>
+            </div>
+
+            <div class="grid" id="grid">
+                <div class="label">Status</div>
+                <div class="value"><span class="pill" id="status_pill">–</span></div>
+
+                <div class="label">Time</div>
+                <div class="value" id="time_local">–</div>
+
+                <div class="label">Mode</div>
+                <div class="value" id="mode">–</div>
+
+                <div class="label">VS Code</div>
+                <div class="value" id="vscode_connected">–</div>
+
+                <div class="label">Eye Tracker</div>
+                <div class="value" id="eye_tracker_connected">–</div>
+
+                <div class="label">Experiment</div>
+                <div class="value" id="experiment_active">–</div>
+
+                <div class="label">Experiment ID</div>
+                <div class="value" id="experiment_id">–</div>
+
+                <div class="label">Participant ID</div>
+                <div class="value" id="participant_id">–</div>
+
+                <div class="label">Samples processed</div>
+                <div class="value" id="samples_processed">–</div>
+
+                <div class="label">Feedback generated</div>
+                <div class="value" id="feedback_generated">–</div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div id="error_box" class="error" style="display:none;"></div>
+
+        <script>
+            const statusPill = document.getElementById("status_pill");
+            const lastUpdated = document.getElementById("last_updated");
+
+            function setText(id, value) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.textContent = (value === null || value === undefined || value === "") ? "–" : String(value);
+            }
+
+            function yesNo(x) {
+                return x ? "Connected" : "Disconnected";
+            }
+
+            function runningStopped(x) {
+                return x ? "Running" : "NOT Running";
+            }
+
+            function pillForStatus(status) {
+                const s = String(status || "unknown").toUpperCase();
+                statusPill.textContent = s;
+
+                // light, neutral styling; keep it simple
+                // (you can map colors if you want)
+                statusPill.style.borderColor = "rgba(0,0,0,0.20)";
+                statusPill.style.background = "rgba(0,0,0,0.06)";
+
+                if (s === "ERROR") {
+                    statusPill.style.borderColor = "rgba(255,0,0,0.40)";
+                    statusPill.style.background = "rgba(255,0,0,0.10)";
+                } else if (s === "READY") {
+                    statusPill.style.borderColor = "rgba(0,128,0,0.35)";
+                    statusPill.style.background = "rgba(0,128,0,0.10)";
+                } else if (s === "PROCESSING") {
+                    statusPill.style.borderColor = "rgba(200,160,0,0.45)";
+                    statusPill.style.background = "rgba(200,160,0,0.12)";
+                }
+            }
+
+            window.addEventListener("message", (event) => {
+                const msg = event.data;
+                if (!msg || msg.type !== "status_update") return;
+
+                const s = msg.payload;
+
+                pillForStatus(s.status);
+                setText("time_local", s.time_local);
+                setText("mode", s.operation_mode);
+                setText("vscode_connected", yesNo(!!s.vscode_connected));
+                setText("eye_tracker_connected", yesNo(!!s.eye_tracker_connected));
+                setText("experiment_active", runningStopped(!!s.experiment_active));
+                setText("experiment_id", s.experiment_id);
+                setText("participant_id", s.participant_id);
+                setText("samples_processed", s.samples_processed);
+                setText("feedback_generated", s.feedback_generated);
+
+                const errorBox = document.getElementById("error_box");
+                if (s.error_message) {
+                    errorBox.style.display = "block";
+                    errorBox.textContent = s.error_message;
+                } else {
+                    errorBox.style.display = "none";
+                    errorBox.textContent = "";
+                }
+
+                lastUpdated.textContent = "Last updated: " + new Date().toLocaleTimeString();
+            });
+        </script>
+        </body>
+        </html>`;
     }
 }
