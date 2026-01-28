@@ -252,7 +252,7 @@ class Server:
 
             # Convert payload into your internal CodeContext type
             ctx = CodeContext.from_dict(message.payload)
-            ctx.metadata = {**ctx.metadata, "client_id": client_id}
+            ctx.metadata = {**ctx.metadata, "requester_id": client_id}
             await self._controller.handle_context_update(ctx)
 
         async def on_ping(message: WebSocketMessage, client_id: str) -> None:
