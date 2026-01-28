@@ -8,7 +8,6 @@ export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
     private outputChannel: vscode.OutputChannel;
     private currentStatus: SystemStatusMessage | null = null;
-    private showingDetails: boolean = false;
     private statusPanel: vscode.WebviewPanel | null = null;
 
     constructor(context: vscode.ExtensionContext) {
@@ -77,8 +76,6 @@ export class StatusBarManager {
     }
 
     async showStatusDetails(): Promise<void> {
-        this.showingDetails = true;
-
         if (!this.currentStatus) {
             vscode.window.showInformationMessage("No status available");
             return;
@@ -105,7 +102,6 @@ export class StatusBarManager {
         // Clean up on close
         this.statusPanel.onDidDispose(() => {
             this.statusPanel = null;
-            this.showingDetails = false;
         });
 
         // Set initial HTML
@@ -203,7 +199,7 @@ export class StatusBarManager {
     }
 
     private getStatusPanelHtml(webview: vscode.Webview): string {
-        // Optional: add a nonce if you later want stricter CSP
+        // AI-GENERATED: HTML content for simple status panel
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
