@@ -6,13 +6,17 @@ import { SystemStatusMessage, SystemStatus } from "./types";
 
 export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
+    private outputChannel: vscode.OutputChannel;
     private currentStatus: SystemStatusMessage | null = null;
+    private showingDetails: boolean = false;
 
     constructor(context: vscode.ExtensionContext) {
         this.statusBarItem = vscode.window.createStatusBarItem(
             vscode.StatusBarAlignment.Right,
             100
         );
+        this.outputChannel = vscode.window.createOutputChannel("Eye Tracking Debugger Status");
+        context.subscriptions.push(this.outputChannel);
         this.statusBarItem.command = "eyeTrackingDebugger.showStatus";
         context.subscriptions.push(this.statusBarItem);
         this.updateDisplay();
@@ -25,6 +29,10 @@ export class StatusBarManager {
     setStatus(status: SystemStatusMessage): void {
         this.currentStatus = status;
         this.updateDisplay();
+
+        if (this.showingDetails) {
+            this.showStatusDetails();
+        }
     }
 
     /**
@@ -63,6 +71,43 @@ export class StatusBarManager {
      */
     dispose(): void {
         this.statusBarItem.dispose();
+        this.outputChannel.dispose();
+    }
+
+    /**
+     * Show a detailed read-only view of the current status.
+     */
+    async showStatusDetails(): Promise<void> {
+        this.showingDetails = true;
+
+        if (!this.currentStatus) {
+            vscode.window.showInformationMessage("No status available");
+            return; 
+        }
+
+        const s = this.currentStatus;
+        const lines: string[] = [];
+        lines.push("=== Eye Tracking Debugger Status ===");
+        lines.push(`Status: ${s.status}`);
+        lines.push(`Time: ${new Date(s.timestamp * 1000).toLocaleString()}`);
+        lines.push(`Mode: ${s.operation_mode}`);
+        lines.push(`VSCode: ${ s.vscode_connected ? "Connected" : "Disconnected" }`);
+        lines.push(`Eye Tracker: ${s.eye_tracker_connected ? "Connected" : "Disconnected"}`);
+        lines.push(`Experiment: ${ s.experiment_active ? "Running" : "NOT Running" }`);
+        if (s.experiment_id) lines.push(`Experiment ID: ${s.experiment_id}`);
+        if (s.participant_id) lines.push(`Participant ID: ${s.participant_id}`);
+        lines.push(`Samples processed: ${s.samples_processed}`);
+        lines.push(`Feedback generated: ${s.feedback_generated}`);
+        if (s.error_message) {
+            lines.push("");
+            lines.push("Error:");
+            lines.push(s.error_message);
+        }
+
+        // Show in bottom panel without stealing focus
+        this.outputChannel.clear();
+        this.outputChannel.appendLine(lines.join("\n"));
+        this.outputChannel.show(true);
     }
 
     // --- Private Methods ---

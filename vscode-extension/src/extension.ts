@@ -213,9 +213,13 @@ async function toggleMode(): Promise<void> {
     vscode.window.showInformationMessage("Mode toggle not yet implemented");
 }
 
-function showStatus(): void {
-    // TODO: Implement status display
-    vscode.window.showInformationMessage("Status display not yet implemented");
+async function showStatus(): Promise<void> {
+    // Show detailed status using StatusBarManager
+    if (statusBar) {
+        await statusBar.showStatusDetails();
+    } else {
+        vscode.window.showInformationMessage("No status available");
+    }
 }
 
 function clearFeedback(): void {
