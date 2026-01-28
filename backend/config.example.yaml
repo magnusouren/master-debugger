@@ -41,7 +41,7 @@ reactive_tool:
 
 # Feedback Layer
 feedback_layer:
-  llm_provider: null  # openai, anthropic, local
+  llm_provider: null  # openai, anthropic, local, development (no LLM-calls)
   llm_model: null # e.g., gpt-4, claude-2
   llm_api_key: null # sk-...
   max_feedback_items: 3 

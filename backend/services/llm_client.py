@@ -149,6 +149,51 @@ class OpenAIClient(LLMClient):
                 error=str(e),
             )
 
+class DevelopmentClient(LLMClient):
+    """
+    Development mode LLM client that does not make any calls.
+    """
+
+    def is_configured(self) -> bool:
+        return True
+
+    def get_model_name(self) -> str:
+        return "development-mode"
+
+    async def generate(
+        self,
+        prompt: str,
+        max_tokens: int = 500,
+        temperature: float = 0.3,
+    ) -> LLMResponse:
+        # Return a valid JSON string matching the requested schema
+        content = (
+            '{\n'
+            '  "items": [\n'
+            '    {\n'
+            '      "title": "Mocked Response",\n'
+            '      "message": "This is a mocked response for development purposes.",\n'
+            '      "type": "explanation",\n'
+            '      "priority": "low",\n'
+            '      "code_range": {\n'
+            '        "start": {"line": 1, "character": 0},\n'
+            '        "end": {"line": 2, "character": 0}\n'
+            '      },\n'
+            '      "confidence": 1.0,\n'
+            '      "dismissible": true,\n'
+            '      "actionable": false,\n'
+            '      "action_label": null\n'
+            '    }\n'
+            '  ]\n'
+            '}'
+        )
+        return LLMResponse(
+            content=content,
+            model="development-mode",
+            usage={},
+            latency_ms=0,
+            success=True,
+        )
 
 def create_llm_client(
     provider: Optional[str] = None, # from config: llm_provider
@@ -187,6 +232,13 @@ def create_llm_client(
                 level="WARNING",
             )
             return None
+    elif provider == "development":
+        logger.system(
+            "llm_client_development_mode",
+            {"provider": "development"},
+            level="INFO",
+        )
+        return DevelopmentClient()
 
     logger.system(
         "llm_provider_unsupported",
