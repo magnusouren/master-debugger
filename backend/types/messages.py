@@ -104,7 +104,6 @@ class SystemStatusMessage:
     
     # Component statuses
     eye_tracker_connected: bool = False
-    vscode_connected: bool = False
     
     # Current state
     operation_mode: str = "reactive"
