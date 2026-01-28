@@ -278,6 +278,9 @@ export class StatusBarManager {
                     <div class="label">Experiment</div>
                     <div class="value" id="experiment_active">–</div>
 
+                    <div class="label">LLM Model</div>
+                    <div class="value" id="llm_model">–</div>   
+
                     <div class="label">Experiment ID</div>
                     <div class="value" id="experiment_id">–</div>
 
@@ -343,6 +346,7 @@ export class StatusBarManager {
                     setText("mode", s.operation_mode);
                     setText("eye_tracker_connected", s.eye_tracker_connected ? "Connected" : "Disconnected");
                     setText("experiment_active", s.experiment_active ? "Running" : "Stopped");
+                    setText("llm_model", s.llm_model);
                     setText("experiment_id", s.experiment_id);
                     setText("participant_id", s.participant_id);
                     setText("eye_samples_processed", s.eye_samples_processed);
