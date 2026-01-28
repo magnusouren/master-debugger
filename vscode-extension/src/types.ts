@@ -173,6 +173,7 @@ export interface SystemStatusMessage {
     samples_processed: number;
     feedback_generated: number;
     experiment_active: boolean;
+    llm_model?: string;
     experiment_id?: string;
     participant_id?: string;
     error_message?: string;

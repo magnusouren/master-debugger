@@ -73,6 +73,11 @@ function initializeComponents(context: vscode.ExtensionContext): void {
     feedbackRenderer = new FeedbackRenderer(context);
     statusBar = new StatusBarManager(context);
 
+    // Update UI when connection state changes (e.g., server shutdown)
+    wsClient.onConnectionChange((connected: boolean) => {
+        statusBar?.setConnected(connected);
+    });
+
     // Set up message handlers
     setupMessageHandlers();
 }
@@ -213,9 +218,13 @@ async function toggleMode(): Promise<void> {
     vscode.window.showInformationMessage("Mode toggle not yet implemented");
 }
 
-function showStatus(): void {
-    // TODO: Implement status display
-    vscode.window.showInformationMessage("Status display not yet implemented");
+async function showStatus(): Promise<void> {
+    // Show detailed status using StatusBarManager
+    if (statusBar) {
+        await statusBar.showStatusDetails();
+    } else {
+        vscode.window.showInformationMessage("No status available");
+    }
 }
 
 function clearFeedback(): void {
