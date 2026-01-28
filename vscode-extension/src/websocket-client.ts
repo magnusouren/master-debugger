@@ -249,6 +249,11 @@ export class WebSocketClient {
 
         this.ws = null;
 
+        // Notify handlers that connection is lost
+        for (const h of this.connectionChangeHandlers) {
+            try { h(false); } catch (e) { console.error('connectionChange handler error', e); }
+        }
+
         if (this.shouldReconnect) {
             this.scheduleReconnect();
         }
@@ -311,10 +316,18 @@ export class WebSocketClient {
     private scheduleReconnect(): void {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             console.log("Max reconnect attempts reached");
+            this.shouldReconnect = false;
             vscode.window.showErrorMessage(
                 "Failed to reconnect to Eye Tracking backend after multiple attempts"
             );
             return;
+        }
+
+        // Show warning on first reconnect attempt
+        if (this.reconnectAttempts === 0) {
+            vscode.window.showWarningMessage(
+                "Lost connection to Eye Tracking backend. Attempting to reconnect..."
+            );
         }
 
         const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
