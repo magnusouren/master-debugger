@@ -40,6 +40,10 @@ from .messages import (
     FeedbackMessage,
     SystemStatusMessage,
 )
+from .domain_events import (
+    DomainEventType,
+    DomainEvent,
+)
 
 __all__ = [
     # Eye tracking types
@@ -77,4 +81,7 @@ __all__ = [
     "ContextUpdate",
     "FeedbackMessage",
     "SystemStatusMessage",
+    # Domain event types
+    "DomainEventType",
+    "DomainEvent",
 ]

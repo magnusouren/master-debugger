@@ -14,12 +14,11 @@ Responsibilities:
 - Logging and experiment control
 """
 import contextlib
-from typing import Awaitable, Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime, timezone
 import asyncio
 
 
-from backend.api.serialization import json_safe
 from backend.layers.signal_processing import SignalProcessingLayer
 from backend.layers.forecasting_tool import ForecastingTool
 from backend.layers.reactive_tool import ReactiveTool
@@ -29,7 +28,8 @@ from backend.types.code_context import CodeContext
 from backend.types.config import OperationMode, SystemConfig
 from backend.types.eye_tracking import PredictedFeatures, WindowFeatures
 from backend.types.feedback import FeedbackInteraction, FeedbackResponse
-from backend.types.messages import MessageType, SystemStatus, SystemStatusMessage, WebSocketMessage
+from backend.types.messages import SystemStatus, SystemStatusMessage
+from backend.types.domain_events import DomainEvent, DomainEventType
 from backend.types.user_state import UserStateEstimate
 
 
@@ -73,8 +73,8 @@ class RuntimeController:
         # eye tracker connection state
         self._eye_tracker_connected: bool = False
         
-        # Callbacks for external communication
-        self._websocket_callbacks: List[Callable[[WebSocketMessage], Awaitable[None]]] = []
+        # Domain event handlers for external communication
+        self._event_handlers: List[Callable[[DomainEvent], None]] = []
         
         # Event loop reference
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -326,43 +326,16 @@ class RuntimeController:
         if self.should_generate_feedback():
             feedback = await self.trigger_feedback_generation()
             if feedback:
-                # Send feedback back to VS Code
-                await self.send_feedback(feedback, client_id=context.metadata.get("client_id"))
-
-    async def send_feedback(self, feedback: FeedbackResponse, client_id: Optional[str] = None) -> bool:
-        """
-        Send feedback to VS Code for display.
-        
-        Args:
-            feedback: Feedback to send.
-            client_id: Optional target client ID.
-            
-        Returns:
-            True if sent successfully.
-        """
-        
-        try:
-            msg = WebSocketMessage(
-                type=MessageType.FEEDBACK_DELIVERY,
-                timestamp=datetime.now(timezone.utc).timestamp(),
-                payload=json_safe(feedback),
-                message_id=None, # not a response to a specific message, so no message_id needed
-                target_client_id=client_id
-            )
-            await self._emit(msg)
-            self._logger.system(
-                "feedback_sent",
-                {"item_count": len(feedback.items), "client_id": client_id},
-                level="INFO",
-            )
-            return True
-        except Exception as e:
-            self._logger.system(
-                "feedback_send_error",
-                {"error": str(e), "client_id": client_id},
-                level="ERROR",
-            )
-            return False
+                # Publish feedback ready event
+                self._publish(DomainEvent(
+                    event_type=DomainEventType.FEEDBACK_READY,
+                    payload=feedback,
+                ))
+                self._logger.system(
+                    "feedback_ready_published",
+                    {"item_count": len(feedback.items)},
+                    level="INFO",
+                )
     
     async def handle_feedback_interaction(
         self, interaction: FeedbackInteraction
@@ -375,36 +348,33 @@ class RuntimeController:
         """
         pass  # TODO: Implement interaction handling
     
-    def register_websocket_callback(
-        self, callback: Callable[[WebSocketMessage], None]
+    def register_event_handler(
+        self, handler: Callable[[DomainEvent], None]
     ) -> None:
         """
-        Register callback for WebSocket messages.
+        Register a handler for domain events.
         
         Args:
-            callback: Function to call with messages.
+            handler: Function to call with domain events.
         """
-        self._websocket_callbacks.append(callback)
+        self._event_handlers.append(handler)
         
-    # --- Messaging ---
+    # --- Domain Event Publishing ---
 
-    async def _emit(self, message: WebSocketMessage) -> None:
+    def _publish(self, event: DomainEvent) -> None:
         """
-        Emit a message through registered websocket callbacks.
+        Publish a domain event to all registered handlers.
         
         Args:
-            message: Message to emit.
+            event: Domain event to publish.
         """
-        for callback in self._websocket_callbacks:
+        for handler in self._event_handlers:
             try:
-                if asyncio.iscoroutinefunction(callback):
-                    await callback(message)
-                else:
-                    callback(message)
+                handler(event)
             except Exception as e:
                 self._logger.system(
-                    "websocket_callback_error",
-                    {"error": str(e)},
+                    "event_handler_error",
+                    {"error": str(e), "event_type": event.event_type.value},
                     level="ERROR",
                 )
     
@@ -541,6 +511,17 @@ class RuntimeController:
             level="INFO",
         )
 
+        # Publish domain event for experiment start
+        self._publish(DomainEvent(
+            event_type=DomainEventType.EXPERIMENT_STARTED,
+            payload=self.get_system_status(),
+            metadata={
+                "experiment_id": self._experiment_id,
+                "participant_id": self._participant_id,
+                "session_id": self._session_id,
+            },
+        ))
+
         return self.get_system_status()
 
     def end_experiment(self) -> SystemStatusMessage:
@@ -569,6 +550,17 @@ class RuntimeController:
         self._experiment_is_active = False
 
         self.export_experiment_data()
+
+        # Publish domain event for experiment end (before clearing IDs)
+        self._publish(DomainEvent(
+            event_type=DomainEventType.EXPERIMENT_ENDED,
+            payload=self.get_system_status(),
+            metadata={
+                "experiment_id": self._experiment_id,
+                "participant_id": self._participant_id,
+                "session_id": self._session_id,
+            },
+        ))
 
         self._experiment_id = None
         self._participant_id = None
@@ -619,14 +611,6 @@ class RuntimeController:
     def _setup_layer_callbacks(self) -> None:
         """Set up callbacks between layers for data flow."""
         pass  # TODO: Implement callback setup
-
-    def set_websocket_server(self, server: Any) -> None:
-        """
-        Provide a reference to the WebSocket server so the controller can
-        compute the actual number of connected VS Code clients.
-        """
-        self._websocket_server = server
-
     
     def _validate_system_state(self) -> bool:
         """
@@ -647,8 +631,8 @@ class RuntimeController:
             # Update statistics
             self._update_statistics()
 
-            # Broadcast system status periodically
-            await self._broadcast_system_status()
+            # Publish system status periodically
+            self._broadcast_system_status()
             
             # # Check for feedback generation
             # if self.should_generate_feedback():
@@ -669,16 +653,12 @@ class RuntimeController:
             elapsed = asyncio.get_event_loop().time() - self._stats["session_start"]
             self._stats["uptime_seconds"] = elapsed
 
-    async def _broadcast_system_status(self) -> None:
+    def _broadcast_system_status(self) -> None:
         """
-        Broadcast current system status to all connected clients.
+        Publish current system status as a domain event.
         """
         status_msg = self.get_system_status()
-        msg = WebSocketMessage(
-            type=MessageType.STATUS_UPDATE,
-            timestamp=datetime.now(timezone.utc).timestamp(),
-            payload=json_safe(status_msg),
-            message_id=None,
-            target_client_id=None
-        )
-        await self._emit(msg)
+        self._publish(DomainEvent(
+            event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+            payload=status_msg,
+        ))

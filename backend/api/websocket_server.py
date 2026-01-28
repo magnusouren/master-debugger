@@ -8,17 +8,14 @@ context updates.
 from typing import Optional, Dict, Any, Set, Callable, Awaitable
 import asyncio
 import json
-from dataclasses import asdict
+import uuid
 
 from backend.api.serialization import json_safe
 from backend.services.logger_service import get_logger
 from backend.types.messages import MessageType, WebSocketMessage
 
-
-
 # Type alias for message handlers
 MessageHandler = Callable[[WebSocketMessage, str], Awaitable[None]]
-
 
 class WebSocketServer:
     """
@@ -194,7 +191,6 @@ class WebSocketServer:
             websocket: The WebSocket connection.
             path: Connection path.
         """
-        import uuid
         client_id = str(uuid.uuid4())
         self._clients.add(websocket)
         self._client_info[client_id] = {
