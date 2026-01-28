@@ -294,8 +294,11 @@ export class StatusBarManager {
                 <div class="label">Participant ID</div>
                 <div class="value" id="participant_id">–</div>
 
-                <div class="label">Samples processed</div>
-                <div class="value" id="samples_processed">–</div>
+                <div class="label">Eye Samples processed</div>
+                <div class="value" id="eye_samples_processed">–</div>
+
+                <div class="label">Code Window Samples processed</div>
+                <div class="value" id="code_window_samples_processed">–</div>
 
                 <div class="label">Feedback generated</div>
                 <div class="value" id="feedback_generated">–</div>
@@ -374,7 +377,8 @@ export class StatusBarManager {
                     setText("experiment_active", "–");
                     setText("experiment_id", "–");
                     setText("participant_id", "–");
-                    setText("samples_processed", "–");
+                    setText("eye_samples_processed", "–");
+                    setText("code_window_samples_processed", "–");
                     setText("feedback_generated", "–");
 
                     statusPill.textContent = "DISCONNECTED";
@@ -398,7 +402,8 @@ export class StatusBarManager {
                 setText("llm_model", s.llm_model);
                 setText("experiment_id", s.experiment_id);
                 setText("participant_id", s.participant_id);
-                setText("samples_processed", s.samples_processed);
+                setText("eye_samples_processed", s.eye_samples_processed);
+                setText("code_window_samples_processed", s.code_window_samples_processed);
                 setText("feedback_generated", s.feedback_generated);
 
                 const errorBox = document.getElementById("error_box");

@@ -170,7 +170,8 @@ export interface SystemStatusMessage {
     eye_tracker_connected: boolean;
     vscode_connected: boolean;
     operation_mode: "reactive" | "proactive";
-    samples_processed: number;
+    eye_samples_processed: number;
+    code_window_samples_processed: number;
     feedback_generated: number;
     experiment_active: boolean;
     llm_model?: string;

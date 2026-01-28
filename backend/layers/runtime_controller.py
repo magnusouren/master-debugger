@@ -13,6 +13,7 @@ Responsibilities:
 - Configuring layers for reactive and proactive modes
 - Logging and experiment control
 """
+import contextlib
 from typing import Awaitable, Optional, Dict, Any, List, Callable
 from datetime import datetime, timezone
 import asyncio
@@ -63,7 +64,8 @@ class RuntimeController:
         
         # Statistics
         self._stats: Dict[str, Any] = {
-            "samples_processed": 0,
+            "eye_samples_processed": 0,
+            "code_window_samples_processed": 0,
             "feedback_generated": 0,
             "session_start": None,
         }
@@ -88,6 +90,9 @@ class RuntimeController:
         else:
             self._session_id: Optional[str] = None
         
+        # main loop
+        self._main_loop_task: Optional[asyncio.Task] = None
+
         # Initialize logger
         self._logger = get_logger()
         self._logger.system(
@@ -134,7 +139,7 @@ class RuntimeController:
             )
 
         # Start main loop as background task - store it to prevent garbage collection
-        main = asyncio.create_task(self._run_main_loop())
+        self._main_loop_task = asyncio.create_task(self._run_main_loop())
         
         self._logger.system("runtime_controller_ready",
                             {"status": self._status.name}, level="DEBUG")
@@ -145,7 +150,11 @@ class RuntimeController:
         self._logger.system("runtime_controller_shutdown", {"final_stats": self._stats}, level="INFO")
         self._status = SystemStatus.DISCONNECTED
 
-    
+        if self._main_loop_task:
+            self._main_loop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._main_loop_task
+
     def configure(self, config: SystemConfig) -> None:
         """
         Update system configuration.
@@ -175,6 +184,8 @@ class RuntimeController:
         Args:
             mode: REACTIVE or PROACTIVE mode.
         """
+        self._operation_mode = mode
+
         # Keep the stored configuration in sync with the current operation mode
         if self._config is not None and getattr(self._config, "controller", None) is not None:
             self._config.controller.operation_mode = mode
@@ -226,7 +237,8 @@ class RuntimeController:
             eye_tracker_connected=self.is_eye_tracker_connected(),
             vscode_connected=len(self._websocket_callbacks) > 0, # TODO: improve this if possible
             operation_mode=self._operation_mode.name,
-            samples_processed=self._stats["samples_processed"],
+            eye_samples_processed=self._stats["eye_samples_processed"],
+            code_window_samples_processed=self._stats["code_window_samples_processed"],
             feedback_generated=self._stats["feedback_generated"],
             llm_model=self._feedback_layer.get_llm_client().get_model_name() if self._feedback_layer.get_llm_client() else None,
             experiment_active=self._experiment_is_active,
@@ -281,7 +293,7 @@ class RuntimeController:
             context: Updated code context.
         """
         self._current_code_context = context
-        self._stats["samples_processed"] += 1
+        self._stats["code_window_samples_processed"] += 1
         
         if self._current_code_context.metadata is None:
             self._current_code_context.metadata = {}
@@ -598,7 +610,7 @@ class RuntimeController:
             return False
 
 
-        filepath = f"logs/experiments/experiment_{self._experiment_id}_participant_{self._participant_id}_{self._session_id}.csv"
+        filepath = f"logs/experiments/experiment_{self._session_id}.csv"
         success = self._logger.export_experiment_logs(filepath)
         return success
 

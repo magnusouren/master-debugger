@@ -110,7 +110,8 @@ class SystemStatusMessage:
     operation_mode: str = "reactive"
     
     # Statistics
-    samples_processed: int = 0
+    eye_samples_processed: int = 0
+    code_window_samples_processed: int = 0
     feedback_generated: int = 0
 
     # LLM model in use
