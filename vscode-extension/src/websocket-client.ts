@@ -249,10 +249,6 @@ export class WebSocketClient {
 
         this.ws = null;
 
-        for (const h of this.connectionChangeHandlers) {
-            try { h(false); } catch (e) { console.error('connectionChange handler error', e); }
-        }
-
         if (this.shouldReconnect) {
             this.scheduleReconnect();
         }
@@ -263,9 +259,6 @@ export class WebSocketClient {
         vscode.window.showWarningMessage(
             `Eye Tracking connection error: ${error.message}`
         );
-        for (const h of this.connectionChangeHandlers) {
-            try { h(false); } catch (e) { console.error('connectionChange handler error', e); }
-        }
     }
 
     private handleMessage(data: WebSocket.Data): void {
