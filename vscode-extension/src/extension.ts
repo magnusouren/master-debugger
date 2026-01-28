@@ -73,6 +73,11 @@ function initializeComponents(context: vscode.ExtensionContext): void {
     feedbackRenderer = new FeedbackRenderer(context);
     statusBar = new StatusBarManager(context);
 
+    // Update UI when connection state changes (e.g., server shutdown)
+    wsClient.onConnectionChange((connected: boolean) => {
+        statusBar?.setConnected(connected);
+    });
+
     // Set up message handlers
     setupMessageHandlers();
 }

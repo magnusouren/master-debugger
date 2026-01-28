@@ -14,6 +14,7 @@ export type MessageHandler = (message: WebSocketMessage) => void;
 
 export class WebSocketClient {
     private ws: WebSocket | null = null;
+    private connectionChangeHandlers: Array<(connected: boolean) => void> = [];
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 5;
     private reconnectDelay = 1000;
@@ -27,6 +28,18 @@ export class WebSocketClient {
         private host: string,
         private port: number
     ) {}
+
+    /**
+     * Register a handler to be called when connection state changes.
+     */
+    onConnectionChange(handler: (connected: boolean) => void): void {
+        this.connectionChangeHandlers.push(handler);
+    }
+
+    offConnectionChange(handler: (connected: boolean) => void): void {
+        const idx = this.connectionChangeHandlers.indexOf(handler);
+        if (idx !== -1) this.connectionChangeHandlers.splice(idx, 1);
+    }
 
     /**
      * Connect to the backend WebSocket server.
@@ -214,6 +227,9 @@ export class WebSocketClient {
 
     private handleOpen(): void {
         console.log("WebSocket connection established");
+        for (const h of this.connectionChangeHandlers) {
+            try { h(true); } catch (e) { console.error('connectionChange handler error', e); }
+        }
         
         // Start ping interval to keep connection alive
         this.pingInterval = setInterval(() => {
@@ -233,6 +249,10 @@ export class WebSocketClient {
 
         this.ws = null;
 
+        for (const h of this.connectionChangeHandlers) {
+            try { h(false); } catch (e) { console.error('connectionChange handler error', e); }
+        }
+
         if (this.shouldReconnect) {
             this.scheduleReconnect();
         }
@@ -243,6 +263,9 @@ export class WebSocketClient {
         vscode.window.showWarningMessage(
             `Eye Tracking connection error: ${error.message}`
         );
+        for (const h of this.connectionChangeHandlers) {
+            try { h(false); } catch (e) { console.error('connectionChange handler error', e); }
+        }
     }
 
     private handleMessage(data: WebSocket.Data): void {
