@@ -284,31 +284,26 @@ class RuntimeController:
     # --- VS Code Communication ---
     
     async def handle_context_update(self, context: CodeContext) -> None:
-        """
-        Handle code context update from VS Code.
-        First step in the data flow pipeline in the Control Layer.
-        
-        Args:
-            context: Updated code context.
-        """
-        self._current_code_context = context
         self._stats["code_window_samples_processed"] += 1
-        
-        if self._current_code_context.metadata is None:
-            self._current_code_context.metadata = {}
 
-        self._current_code_context.metadata["experiment_id"] = self._experiment_id
-        self._current_code_context.metadata["participant_id"] = self._participant_id    
-        self._current_code_context.metadata["session_id"] = self._session_id    
+        incoming_meta = context.metadata or {}
+        experiment_meta = {
+            "experiment_id": self._experiment_id,
+            "participant_id": self._participant_id,
+            "session_id": self._session_id,
+        }
+        merged_meta = {**incoming_meta, **experiment_meta}
 
-        
+        context.metadata = merged_meta
+        self._current_code_context = context
+
         self._logger.experiment(
             "context_update_received",
             {
-                "metadata": self._current_code_context.metadata,
+                "metadata": merged_meta,
                 "experiment_id": self._experiment_id,
                 "participant_id": self._participant_id,
-                "session_id": self._session_id
+                "session_id": self._session_id,
             },
             level="DEBUG",
         )
@@ -316,9 +311,9 @@ class RuntimeController:
         self._logger.system(
             "context_update_processed",
             {
-                "file": context.file_path, 
+                "file": context.file_path,
                 "line": context.cursor_position.line,
-                "char": context.cursor_position.character
+                "char": context.cursor_position.character,
             },
             level="INFO",
         )
@@ -326,16 +321,20 @@ class RuntimeController:
         if self.should_generate_feedback():
             feedback = await self.trigger_feedback_generation()
             if feedback:
-                # Publish feedback ready event
+                recipient_id = merged_meta.get("requester_id")
+                event_meta = {"recipient_id": recipient_id} if recipient_id else {}
+
                 self._publish(DomainEvent(
                     event_type=DomainEventType.FEEDBACK_READY,
                     payload=feedback,
+                    metadata=event_meta,
                 ))
+
                 self._logger.system(
                     "feedback_ready_published",
-                    {"item_count": len(feedback.items)},
+                    {"item_count": len(feedback.items), "recipient_id": recipient_id},
                     level="INFO",
-                )
+                )   
     
     async def handle_feedback_interaction(
         self, interaction: FeedbackInteraction
