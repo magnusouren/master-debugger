@@ -39,7 +39,9 @@ export class StatusBarManager {
         if (this.currentStatus) {
             this.currentStatus.vscode_connected = connected;
             this.updateDisplay();
-            this.showStatusDetails();
+            if (this.statusPanel) {
+                this.postStatusToPanel(this.currentStatus);
+            }            
         }
     }
 
@@ -50,6 +52,9 @@ export class StatusBarManager {
         if (this.currentStatus) {
             this.currentStatus.operation_mode = mode;
             this.updateDisplay();
+            if (this.statusPanel) {
+                this.postStatusToPanel(this.currentStatus);
+            }            
         }
     }
 
@@ -182,7 +187,7 @@ export class StatusBarManager {
         if (!this.statusPanel) return;
 
         // Timestamp fix (backend seconds -> JS ms)
-        const tsMs = status.timestamp > 1e12 ? status.timestamp : status.timestamp * 1000;
+        const tsMs = status.timestamp * 1000;
 
         this.statusPanel.webview.postMessage({
             type: "status_update",
@@ -196,11 +201,13 @@ export class StatusBarManager {
 
     private getStatusPanelHtml(webview: vscode.Webview): string {
         // AI-GENERATED: HTML content for simple status panel
+        
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
         <title>Status</title>
         <style>
             body {
@@ -263,7 +270,6 @@ export class StatusBarManager {
                 <div class="label">Status</div>
                 <div class="value"><span class="pill" id="status_pill">–</span></div>
 
-
                 <div class="label">Time</div>
                 <div class="value" id="time_local">–</div>
 
@@ -278,6 +284,9 @@ export class StatusBarManager {
 
                 <div class="label">Experiment</div>
                 <div class="value" id="experiment_active">–</div>
+
+                <div class="label">LLM Model</div>
+                <div class="value" id="llm_model">–</div>
 
                 <div class="label">Experiment ID</div>
                 <div class="value" id="experiment_id">–</div>
@@ -356,7 +365,7 @@ export class StatusBarManager {
 
                 const s = msg.payload;
 
-                if (!!s.vscode_connected === false) {
+                if (!s.vscode_connected) {
                     // If disconnected, clear most fields
                     setText("time_local", "–");
                     setText("mode", "–");
@@ -386,6 +395,7 @@ export class StatusBarManager {
                 setText("vscode_connected", yesNo(!!s.vscode_connected));
                 setText("eye_tracker_connected", yesNo(!!s.eye_tracker_connected));
                 setText("experiment_active", runningStopped(!!s.experiment_active));
+                setText("llm_model", s.llm_model);
                 setText("experiment_id", s.experiment_id);
                 setText("participant_id", s.participant_id);
                 setText("samples_processed", s.samples_processed);
