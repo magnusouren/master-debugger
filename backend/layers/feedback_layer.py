@@ -103,6 +103,9 @@ class FeedbackLayer:
             level="WARNING",
         )
 
+    def get_llm_client(self) -> Optional[LLMClient]:
+        return self._llm_client
+
     def shutdown_llm(self) -> None:
         self._llm_client = None
 

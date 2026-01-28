@@ -228,6 +228,7 @@ class RuntimeController:
             operation_mode=self._operation_mode.name,
             samples_processed=self._stats["samples_processed"],
             feedback_generated=self._stats["feedback_generated"],
+            llm_model=self._feedback_layer.get_llm_client().get_model_name() if self._feedback_layer.get_llm_client() else None,
             experiment_active=self._experiment_is_active,
             experiment_id=self._experiment_id,
             participant_id=self._participant_id,

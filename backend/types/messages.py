@@ -113,6 +113,9 @@ class SystemStatusMessage:
     samples_processed: int = 0
     feedback_generated: int = 0
 
+    # LLM model in use
+    llm_model: Optional[str] = None
+
     # Experiment status
     experiment_active: bool = False
     experiment_id: Optional[str] = None
