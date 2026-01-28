@@ -187,10 +187,30 @@ class Server:
                 target_client_id=recipient_id,
             )
 
+            def _handle_task_result(task: asyncio.Task) -> None:
+                try:
+                    exc = task.exception()
+                except asyncio.CancelledError:
+                    self._logger.system(
+                        "background_task_cancelled",
+                        {"source": "handle_domain_event"},
+                        level="DEBUG",
+                    )
+                    return
+                if exc is not None:
+                    self._logger.system(
+                        "background_task_error",
+                        {
+                            "source": "handle_domain_event",
+                            "error": str(exc),
+                        },
+                        level="ERROR",
+                    )
             if recipient_id:
-                asyncio.create_task(self._websocket_server.send_to_client(recipient_id, msg))
+                task = asyncio.create_task(self._websocket_server.send_to_client(recipient_id, msg))
             else:
-                asyncio.create_task(self._broadcast_websocket_message(msg))
+                task = asyncio.create_task(self._broadcast_websocket_message(msg))
+            task.add_done_callback(_handle_task_result)
 
         self._controller.register_event_handler(handle_domain_event)
 
