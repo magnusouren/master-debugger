@@ -17,6 +17,7 @@ from backend.api.rest_api import HttpMethod, RestAPI
 from backend.services.logger_service import get_logger
 from backend.types.code_context import CodeContext
 from backend.types.messages import MessageType, WebSocketMessage
+from backend.types.domain_events import DomainEvent, DomainEventType
 
 
 class Server:
@@ -158,45 +159,82 @@ class Server:
         
     
     def _wire_components(self) -> None:
-    # Controller -> WebSocket (outbound)
-        async def send_outbound(msg: WebSocketMessage) -> None:
-            # broadcast by default; you can add targeting later
+        # Controller -> WebSocket (outbound) via domain events
+        def handle_domain_event(event: DomainEvent) -> None:
+            event_to_message_type = {
+                DomainEventType.FEEDBACK_READY: MessageType.FEEDBACK_DELIVERY,
+                DomainEventType.SYSTEM_STATUS_UPDATED: MessageType.STATUS_UPDATE,
+                DomainEventType.EXPERIMENT_STARTED: MessageType.STATUS_UPDATE,
+                DomainEventType.EXPERIMENT_ENDED: MessageType.STATUS_UPDATE,
+            }
 
-            # target specific clients if needed
-            if msg.target_client_id:
+            message_type = event_to_message_type.get(event.event_type)
+            if message_type is None:
+                self._logger.system(
+                    "unknown_domain_event_type",
+                    {"event_type": getattr(event.event_type, "value", str(event.event_type))},
+                    level="WARNING",
+                )
+                return
+
+            recipient_id = (event.metadata or {}).get("recipient_id")
+
+            msg = WebSocketMessage(
+                type=message_type,
+                timestamp=event.timestamp,
+                payload=json_safe(event.payload),
+                message_id=None,
+                target_client_id=recipient_id,
+            )
+
+            def _handle_task_result(task: asyncio.Task) -> None:
                 try:
-                    await self._websocket_server.send_to_client(msg.target_client_id, msg)
-                    return
-                except Exception as e:
+                    exc = task.exception()
+                except asyncio.CancelledError:
                     self._logger.system(
-                        "error_sending_to_client",
-                        {"client_id": msg.target_client_id, "error": str(e)},
-                        level="ERROR",
+                        "background_task_cancelled",
+                        {"source": "handle_domain_event"},
+                        level="DEBUG",
                     )
                     return
-                
-            # broadcast to all clients
-            try:
-                await self._websocket_server.broadcast(msg)
-                self._logger.system(
-                    "message_broadcast",
-                    {"message_type": msg.type.value},
-                    level="DEBUG",
-                )
-            except Exception as e:
-                self._logger.system(
-                    "error_broadcasting_message",
-                    {"error": str(e)},
-                    level="ERROR",
-                )
+                if exc is not None:
+                    self._logger.system(
+                        "background_task_error",
+                        {
+                            "source": "handle_domain_event",
+                            "error": str(exc),
+                        },
+                        level="ERROR",
+                    )
+            if recipient_id:
+                task = asyncio.create_task(self._websocket_server.send_to_client(recipient_id, msg))
+            else:
+                task = asyncio.create_task(self._broadcast_websocket_message(msg))
+            task.add_done_callback(_handle_task_result)
 
-        self._controller.register_websocket_callback(send_outbound)
+        self._controller.register_event_handler(handle_domain_event)
 
         # WebSocket -> Controller (inbound)
         self._setup_websocket_handlers()
 
         # REST routes -> Controller (inbound)
         self._setup_api_routes()
+    
+    async def _broadcast_websocket_message(self, msg: WebSocketMessage) -> None:
+        """Broadcast a WebSocket message to all connected clients."""
+        try:
+            await self._websocket_server.broadcast(msg)
+            self._logger.system(
+                "message_broadcast",
+                {"message_type": msg.type.value},
+                level="DEBUG",
+            )
+        except Exception as e:
+            self._logger.system(
+                "error_broadcasting_message",
+                {"error": str(e)},
+                level="ERROR",
+            )
     
     def _setup_api_routes(self) -> None:
         """Set up REST API routes with controller handlers."""
@@ -234,7 +272,7 @@ class Server:
 
             # Convert payload into your internal CodeContext type
             ctx = CodeContext.from_dict(message.payload)
-            ctx.metadata = {**ctx.metadata, "client_id": client_id}
+            ctx.metadata = {**ctx.metadata, "requester_id": client_id}
             await self._controller.handle_context_update(ctx)
 
         async def on_ping(message: WebSocketMessage, client_id: str) -> None:
