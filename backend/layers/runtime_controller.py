@@ -14,7 +14,6 @@ Responsibilities:
 - Logging and experiment control
 """
 import contextlib
-from pyexpat import features
 from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime, timezone
 import asyncio
