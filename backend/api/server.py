@@ -257,6 +257,12 @@ class Server:
             self._controller.end_experiment,
         )
 
+        self._rest_api.register_route(
+            "/feedback/manual_send",
+            HttpMethod.GET,
+            self._controller.manual_send_feedback,
+        )
+
         # TODO - add more routes as needed
     
     def _setup_websocket_handlers(self) -> None:
