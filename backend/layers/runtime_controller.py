@@ -14,6 +14,7 @@ Responsibilities:
 - Logging and experiment control
 """
 import contextlib
+from pyexpat import features
 from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime, timezone
 import asyncio
@@ -450,7 +451,16 @@ class RuntimeController:
         Args:
             features: Computed window features.
         """
-        pass  # TODO: Implement feature handling
+        self._stats["eye_samples_processed"] = self._stats.get("eye_samples_processed", 0) + 1
+
+        if self._operation_mode == OperationMode.REACTIVE:
+            # Baseline: observed features -> reactive
+            self._reactive_tool.add_features(features)
+            return
+
+        # Proactive: observed features to forecasting
+        self._forecasting.add_features(features)
+
     
     def _on_predicted_features(self, predicted: PredictedFeatures) -> None:
         """
@@ -459,7 +469,13 @@ class RuntimeController:
         Args:
             predicted: Predicted features.
         """
-        pass  # TODO: Implement prediction handling
+
+        # Nothing to do in reactive mode
+        if self._operation_mode == OperationMode.REACTIVE:
+            return
+        
+        # In proactive mode, pass predicted features to Reactive Tool
+        self._reactive_tool.add_features(predicted)
     
     def _on_user_state_estimate(self, estimate: UserStateEstimate) -> None:
         """
@@ -468,7 +484,25 @@ class RuntimeController:
         Args:
             estimate: User state estimate.
         """
-        pass  # TODO: Implement state estimate handling
+        self._current_user_state = estimate
+
+        self._logger.system(
+            "user_state_estimate_updated",
+            {
+                "score": estimate.user_state_score,
+                "details": estimate.details,
+            },
+            level="DEBUG",
+        )
+
+        self._logger.experiment(
+            "user_state_estimate_logged",
+            {
+                "score": estimate.user_state_score,
+                "details": estimate.details,
+            },
+            level="DEBUG",
+        )
     
     # --- Logging and Experiment Control ---
     
@@ -609,7 +643,24 @@ class RuntimeController:
     
     def _setup_layer_callbacks(self) -> None:
         """Set up callbacks between layers for data flow."""
-        pass  # TODO: Implement callback setup
+        
+        # Signal Processing calls back to Runtime Controller
+        self._signal_processing.register_window_features_callback(
+            self._on_window_features
+        )
+
+        # Forecasting Tool calls back to Runtime Controller
+        self._forecasting.register_predicted_features_callback(
+            self._on_predicted_features
+        )
+
+        # Reactive Tool calls back to Runtime Controller
+        self._reactive_tool.register_user_state_callback(
+            self._on_user_state_estimate
+        )
+
+        self._logger.system("layer_callbacks_configured", {}, level="DEBUG")
+
     
     def _validate_system_state(self) -> bool:
         """
