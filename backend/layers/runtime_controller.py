@@ -451,7 +451,7 @@ class RuntimeController:
         Args:
             features: Computed window features.
         """
-        self._stats["eye_samples_processed"] = self._stats.get("eye_samples_processed", 0) + 1
+        # TODO - log some stats
 
         if self._operation_mode == OperationMode.REACTIVE:
             # Baseline: observed features -> reactive
@@ -469,6 +469,7 @@ class RuntimeController:
         Args:
             predicted: Predicted features.
         """
+        # TODO - log some stats
 
         # Nothing to do in reactive mode
         if self._operation_mode == OperationMode.REACTIVE:
@@ -484,6 +485,7 @@ class RuntimeController:
         Args:
             estimate: User state estimate.
         """
+        # TODO - log some stats
         self._current_user_state = estimate
 
         self._logger.system(
