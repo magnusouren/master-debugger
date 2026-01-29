@@ -125,6 +125,14 @@ function registerCommands(context: vscode.ExtensionContext): void {
             clearFeedback
         )
     );
+
+    // Trigger feedback send command
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            "eyeTrackingDebugger.triggerFeedbackSend",
+            triggerFeedbackSend
+        )
+    );
 }
 
 /**
@@ -231,6 +239,19 @@ function clearFeedback(): void {
     // TODO: Implement feedback clearing
     feedbackRenderer?.clearAll();
     vscode.window.showInformationMessage("Feedback cleared");
+}
+
+async function triggerFeedbackSend(): Promise<void> {
+    // TODO - call API /feedback/manual_send to trigger feedback send
+    console.log("Triggering manual feedback send");
+
+    const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
+    const host = config.get<string>("backendHost") || "localhost";
+    const port = config.get<number>("apiPort") || 8080;
+
+    await fetch(`http://${host}:${port}/feedback/manual_send`, {
+        method: "GET",
+    });
 }
 
 // --- Event Handlers ---
