@@ -489,8 +489,11 @@ class RuntimeController:
         self._logger.system(
             "user_state_estimate_updated",
             {
-                "score": estimate.user_state_score,
-                "details": estimate.details,
+                "score": estimate.score,
+                "contributing_features": estimate.contributing_features,
+                "model_version": estimate.model_version,
+                "model_type": estimate.model_type,
+                "metadata": estimate.metadata,
             },
             level="DEBUG",
         )
@@ -498,8 +501,11 @@ class RuntimeController:
         self._logger.experiment(
             "user_state_estimate_logged",
             {
-                "score": estimate.user_state_score,
-                "details": estimate.details,
+                "score": estimate.score,
+                "contributing_features": estimate.contributing_features,
+                "model_version": estimate.model_version,
+                "model_type": estimate.model_type,
+                "metadata": estimate.metadata,
             },
             level="DEBUG",
         )
@@ -647,17 +653,17 @@ class RuntimeController:
         """Set up callbacks between layers for data flow."""
         
         # Signal Processing calls back to Runtime Controller
-        self._signal_processing.register_window_features_callback(
+        self._signal_processing.register_output_callback(
             self._on_window_features
         )
 
         # Forecasting Tool calls back to Runtime Controller
-        self._forecasting.register_predicted_features_callback(
+        self._forecasting.register_output_callback(
             self._on_predicted_features
         )
 
         # Reactive Tool calls back to Runtime Controller
-        self._reactive_tool.register_user_state_callback(
+        self._reactive_tool.register_output_callback(
             self._on_user_state_estimate
         )
 
