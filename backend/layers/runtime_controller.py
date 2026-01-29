@@ -450,7 +450,16 @@ class RuntimeController:
         Args:
             features: Computed window features.
         """
-        pass  # TODO: Implement feature handling
+        # TODO - log some stats
+
+        if self._operation_mode == OperationMode.REACTIVE:
+            # Baseline: observed features -> reactive
+            self._reactive_tool.add_features(features)
+            return
+
+        # Proactive: observed features to forecasting
+        self._forecasting.add_features(features)
+
     
     def _on_predicted_features(self, predicted: PredictedFeatures) -> None:
         """
@@ -459,7 +468,14 @@ class RuntimeController:
         Args:
             predicted: Predicted features.
         """
-        pass  # TODO: Implement prediction handling
+        # TODO - log some stats
+
+        # Nothing to do in reactive mode
+        if self._operation_mode == OperationMode.REACTIVE:
+            return
+        
+        # In proactive mode, pass predicted features to Reactive Tool
+        self._reactive_tool.add_features(predicted)
     
     def _on_user_state_estimate(self, estimate: UserStateEstimate) -> None:
         """
@@ -468,7 +484,34 @@ class RuntimeController:
         Args:
             estimate: User state estimate.
         """
-        pass  # TODO: Implement state estimate handling
+        # TODO - log some stats
+        self._current_user_state = estimate
+
+        self._logger.system(
+            "user_state_estimate_updated",
+            {
+                "score": estimate.score,
+                "contributing_features": estimate.contributing_features,
+                "model_version": estimate.model_version,
+                "model_type": estimate.model_type,
+                "metadata": estimate.metadata,
+            },
+            level="DEBUG",
+        )
+
+        self._logger.experiment(
+            "user_state_estimate_logged",
+            {
+                "score": estimate.score,
+                "contributing_features": estimate.contributing_features,
+                "model_version": estimate.model_version,
+                "model_type": estimate.model_type,
+                "metadata": estimate.metadata,
+            },
+            level="DEBUG",
+        )
+
+        # TODO - use user state for feedback timing decisions
     
     # --- Logging and Experiment Control ---
     
@@ -609,7 +652,24 @@ class RuntimeController:
     
     def _setup_layer_callbacks(self) -> None:
         """Set up callbacks between layers for data flow."""
-        pass  # TODO: Implement callback setup
+        
+        # Signal Processing calls back to Runtime Controller
+        self._signal_processing.register_output_callback(
+            self._on_window_features
+        )
+
+        # Forecasting Tool calls back to Runtime Controller
+        self._forecasting.register_output_callback(
+            self._on_predicted_features
+        )
+
+        # Reactive Tool calls back to Runtime Controller
+        self._reactive_tool.register_output_callback(
+            self._on_user_state_estimate
+        )
+
+        self._logger.system("layer_callbacks_configured", {}, level="DEBUG")
+
     
     def _validate_system_state(self) -> bool:
         """
