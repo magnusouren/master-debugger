@@ -35,6 +35,10 @@
       {
         "command": "eyeTrackingDebugger.clearFeedback",
         "title": "Eye Tracking: Clear All Feedback"
+      },
+      {
+        "command": "eyeTrackingDebugger.triggerFeedbackSend",
+        "title": "Eye Tracking: Trigger Feedback Send"
       }
     ],
     "configuration": {
