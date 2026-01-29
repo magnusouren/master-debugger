@@ -503,6 +503,8 @@ class RuntimeController:
             },
             level="DEBUG",
         )
+
+        # TODO - use user state for feedback timing decisions
     
     # --- Logging and Experiment Control ---
     
