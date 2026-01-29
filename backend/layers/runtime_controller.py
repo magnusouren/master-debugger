@@ -62,9 +62,17 @@ class RuntimeController:
         self._current_user_state: Optional[UserStateEstimate] = None
         self._current_code_context: Optional[CodeContext] = None
         
+        # Feedback pipeline state
+        self._context_version: int = 0
+        self._pending_feedback: Optional[FeedbackResponse] = None
+        self._pending_feedback_version: int = 0
+        self._last_delivered_version: int = 0
+        self._feedback_generation_task: Optional[asyncio.Task] = None
+        
         # Statistics
         self._stats: Dict[str, Any] = {
             "eye_samples_processed": 0,
+            "code_window_samples_received": 0,
             "code_window_samples_processed": 0,
             "feedback_generated": 0,
             "session_start": None,
@@ -138,6 +146,9 @@ class RuntimeController:
                 level="INFO",
             )
 
+        # Set up callbacks between layers
+        self._setup_layer_callbacks()
+
         # Start main loop as background task - store it to prevent garbage collection
         self._main_loop_task = asyncio.create_task(self._run_main_loop())
         
@@ -149,6 +160,12 @@ class RuntimeController:
         """Shutdown all system components gracefully."""
         self._logger.system("runtime_controller_shutdown", {"final_stats": self._stats}, level="INFO")
         self._status = SystemStatus.DISCONNECTED
+
+        # Cancel feedback generation task if running
+        if self._feedback_generation_task and not self._feedback_generation_task.done():
+            self._feedback_generation_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._feedback_generation_task
 
         if self._main_loop_task:
             self._main_loop_task.cancel()
@@ -284,7 +301,7 @@ class RuntimeController:
     # --- VS Code Communication ---
     
     async def handle_context_update(self, context: CodeContext) -> None:
-        self._stats["code_window_samples_processed"] += 1
+        self._stats["code_window_samples_received"] += 1
 
         incoming_meta = context.metadata or {}
         experiment_meta = {
@@ -296,6 +313,10 @@ class RuntimeController:
 
         context.metadata = merged_meta
         self._current_code_context = context
+        
+        # Increment context version to track this update
+        self._context_version += 1
+        current_version = self._context_version
 
         self._logger.experiment(
             "context_update_received",
@@ -304,37 +325,45 @@ class RuntimeController:
                 "experiment_id": self._experiment_id,
                 "participant_id": self._participant_id,
                 "session_id": self._session_id,
+                "context_version": current_version,
             },
             level="DEBUG",
         )
 
         self._logger.system(
-            "context_update_processed",
+            "context_update_received",
             {
                 "file": context.file_path,
                 "line": context.cursor_position.line,
                 "char": context.cursor_position.character,
+                "context_version": current_version,
             },
             level="INFO",
         )
 
-        if self.should_generate_feedback():
-            feedback = await self.trigger_feedback_generation()
-            if feedback:
-                recipient_id = merged_meta.get("requester_id")
-                event_meta = {"recipient_id": recipient_id} if recipient_id else {}
+        # Cancel any ongoing feedback generation task (new context invalidates old)
+        if self._feedback_generation_task is not None and not self._feedback_generation_task.done():
+            self._feedback_generation_task.cancel()
+            self._logger.system(
+                "feedback_generation_cancelled",
+                {"reason": "new_context_arrived", "cancelled_version": current_version - 1},
+                level="DEBUG",
+            )
 
-                self._publish(DomainEvent(
-                    event_type=DomainEventType.FEEDBACK_READY,
-                    payload=feedback,
-                    metadata=event_meta,
-                ))
+        # Start async feedback generation for this context version
+        if self._can_start_feedback_generation():
+            self._feedback_generation_task = asyncio.create_task(
+                self._generate_feedback_for_version(current_version, context)
+            )   
 
-                self._logger.system(
-                    "feedback_ready_published",
-                    {"item_count": len(feedback.items), "recipient_id": recipient_id},
-                    level="INFO",
-                )   
+    def manual_send_feedback(self) -> bool:
+        """
+        Manual trigger to deliver the latest available feedback immediately.
+
+        Returns:
+            True if something was delivered, False otherwise.
+        """
+        return self._try_deliver_feedback(force=True)
     
     async def handle_feedback_interaction(
         self, interaction: FeedbackInteraction
@@ -379,14 +408,15 @@ class RuntimeController:
     
     # --- Feedback Control ---
     
-    def should_generate_feedback(self) -> bool:
+    def _can_start_feedback_generation(self) -> bool:
         """
-        Determine if feedback should be generated based on current state.
-
-        TODO - implement cooldowns, user state checks, etc.
+        Determine if feedback generation can be started.
+        
+        This checks preconditions for starting a new feedback generation task.
+        Actual delivery decisions (cooldown, threshold) are checked at delivery time.
         
         Returns:
-            True if feedback should be generated.
+            True if feedback generation can be started.
         """
         if self._status != SystemStatus.READY:
             return False
@@ -394,43 +424,204 @@ class RuntimeController:
         if self._current_code_context is None:
             return False
 
-        return True 
+        return True
     
-    async def trigger_feedback_generation(self) -> Optional[FeedbackResponse]:
+    def _should_deliver_feedback(self) -> bool:
         """
-        Trigger feedback generation if conditions are met.
+        Determine if feedback should be delivered based on current state.
+        
+        Checks:
+        - System is ready
+        - Pending feedback exists and hasn't been delivered yet
+        - User state threshold is met (if configured)
+        - Cooldown period has elapsed
         
         Returns:
-            Generated feedback or None.
+            True if feedback should be delivered.
         """
+        if self._status != SystemStatus.READY:
+            return False
 
-        if self._current_code_context is None:
+        # No pending feedback or already delivered
+        if self._pending_feedback is None:
+            return False
+        
+        if self._pending_feedback_version <= self._last_delivered_version:
+            return False
+
+        # Check cooldown
+        current_time = asyncio.get_event_loop().time()
+        cooldown = self._config.controller.feedback_cooldown_seconds
+        if current_time - self._last_feedback_time < cooldown:
             self._logger.system(
-                "feedback_generation_no_context",
-                {},
+                "feedback_delivery_cooldown",
+                {
+                    "remaining": cooldown - (current_time - self._last_feedback_time),
+                    "pending_version": self._pending_feedback_version,
+                },
                 level="DEBUG",
             )
-            return None
+            return False
 
+        # Check user state threshold (if user state is available)
+        if self._current_user_state is not None:
+            threshold = self._config.controller.min_score_for_feedback
+            if self._current_user_state.score.score < threshold:
+                self._logger.system(
+                    "feedback_delivery_threshold_not_met",
+                    {
+                        "score": self._current_user_state.score.score,
+                        "threshold": threshold,
+                        "pending_version": self._pending_feedback_version,
+                    },
+                    level="DEBUG",
+                )
+                return False
 
-        feedback = await self._feedback_layer.generate_feedback_cached(
-            context=self._current_code_context,
-            user_state=self._current_user_state,
-            feedback_types=None, # TODO - decide if different types needed
+        return True
+    
+    def _try_deliver_feedback(self, force: bool = False) -> bool:
+        """
+        Attempt to deliver the latest pending feedback.
+
+        If force=True, bypass threshold/cooldown checks and deliver the latest
+        pending feedback if available.
+        """
+        if force:
+            if self._status != SystemStatus.READY:
+                return False
+            if self._pending_feedback is None:
+                return False
+
+            feedback = self._pending_feedback
+            version = self._pending_feedback_version
+
+            # Optional: if you still want to prevent re-sending same version manually,
+            # keep this check. If manual should re-send, remove it.
+            # if version <= self._last_delivered_version:
+            #     return False
+
+        else:
+            if not self._should_deliver_feedback():
+                return False
+            feedback = self._pending_feedback
+            version = self._pending_feedback_version
+
+        # Mark as delivered before publishing (prevents duplicates)
+        self._last_delivered_version = max(self._last_delivered_version, version)
+        self._last_feedback_time = asyncio.get_event_loop().time()
+
+        recipient_id = None
+        if self._current_code_context and self._current_code_context.metadata:
+            recipient_id = self._current_code_context.metadata.get("requester_id")
+
+        event_meta = {"recipient_id": recipient_id} if recipient_id else {}
+        event_meta["feedback_version"] = version
+        event_meta["trigger"] = "manual" if force else "user_state"
+
+        self._publish(DomainEvent(
+            event_type=DomainEventType.FEEDBACK_READY,
+            payload=feedback,
+            metadata=event_meta,
+        ))
+
+        self._logger.system(
+            "feedback_delivered",
+            {
+                "item_count": len(feedback.items),
+                "recipient_id": recipient_id,
+                "feedback_version": version,
+                "trigger": event_meta["trigger"],
+            },
+            level="INFO",
         )
 
-        if feedback is not None:
-            self._last_feedback_time = asyncio.get_event_loop().time()
-            self._stats["feedback_generated"] = self._stats.get("feedback_generated",0) + 1
-            return feedback
-        else:
+        return True
+    
+    async def _generate_feedback_for_version(
+        self, 
+        version: int, 
+        context: CodeContext
+    ) -> None:
+        """
+        Generate feedback for a specific context version.
+        
+        This runs as a background task. The result is only stored if the
+        version still matches the latest context version (i.e., no newer
+        context has arrived during generation).
+        
+        Args:
+            version: The context version this generation is for.
+            context: The code context to generate feedback for.
+        """
+        try:
             self._logger.system(
-                "feedback_generation_no_feedback",
-                {},
+                "feedback_generation_started",
+                {"version": version},
                 level="DEBUG",
             )
-            return None
-    
+
+            feedback = await self._feedback_layer.generate_feedback_cached(
+                context=context,
+                user_state=self._current_user_state,
+                feedback_types=None,
+            )
+
+            # Check if this version is still current
+            if version != self._context_version:
+                self._logger.system(
+                    "feedback_generation_stale",
+                    {
+                        "generated_version": version,
+                        "current_version": self._context_version,
+                    },
+                    level="DEBUG",
+                )
+                return
+
+            if feedback is not None:
+                self._pending_feedback = feedback
+                self._pending_feedback_version = version
+                self._stats["feedback_generated"] = self._stats.get("feedback_generated", 0) + 1
+
+                self._logger.system(
+                    "feedback_generation_completed",
+                    {
+                        "version": version,
+                        "item_count": len(feedback.items),
+                    },
+                    level="INFO",
+                )
+
+                self._logger.experiment(
+                    "feedback_generated",
+                    {
+                        "version": version,
+                        "item_count": len(feedback.items),
+                    },
+                    level="INFO",
+                )
+            else:
+                self._logger.system(
+                    "feedback_generation_empty",
+                    {"version": version},
+                    level="DEBUG",
+                )
+
+        except asyncio.CancelledError:
+            self._logger.system(
+                "feedback_generation_cancelled",
+                {"version": version},
+                level="DEBUG",
+            )
+            raise
+        except Exception as e:
+            self._logger.system(
+                "feedback_generation_error",
+                {"version": version, "error": str(e)},
+                level="ERROR",
+            )
+        
 
     def get_feedback_cooldown_remaining(self) -> float:
         """
@@ -481,10 +672,12 @@ class RuntimeController:
         """
         Handle user state estimate from Reactive Tool.
         
+        This is the trigger for feedback delivery. Feedback is only delivered
+        when user state indicates it is appropriate.
+        
         Args:
             estimate: User state estimate.
         """
-        # TODO - log some stats
         self._current_user_state = estimate
 
         self._logger.system(
@@ -511,7 +704,8 @@ class RuntimeController:
             level="DEBUG",
         )
 
-        # TODO - use user state for feedback timing decisions
+        # Attempt to deliver feedback if conditions are met
+        self._try_deliver_feedback(force=False)
     
     # --- Logging and Experiment Control ---
     
