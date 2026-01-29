@@ -69,7 +69,7 @@ class RuntimeController:
         self._last_delivered_version: int = 0
         self._feedback_generation_task: Optional[asyncio.Task] = None
         
-        # Statistics
+        # Statistics TODO - figure out what to track
         self._stats: Dict[str, Any] = {
             "eye_samples_processed": 0,
             "code_window_samples_received": 0,
@@ -129,31 +129,13 @@ class RuntimeController:
         if not llm_ready:
             self._logger.system("llm_not_configured", {"fallback": "heuristics"}, level="WARNING")
 
-        if not self._experiment_id or not self._participant_id:
-            self._logger.system(
-                "runtime_controller_ready_no_experiment",
-                {"warning": "Running without experiment context"},
-                level="WARNING",
-            )
-        else:
-            self._logger.system(
-                "runtime_controller_ready_with_experiment",
-                {
-                    "experiment_id": self._experiment_id,
-                    "participant_id": self._participant_id,
-                    "session_id": self._session_id
-                },
-                level="INFO",
-            )
-
         # Set up callbacks between layers
         self._setup_layer_callbacks()
 
         # Start main loop as background task - store it to prevent garbage collection
         self._main_loop_task = asyncio.create_task(self._run_main_loop())
         
-        self._logger.system("runtime_controller_ready",
-                            {"status": self._status.name}, level="DEBUG")
+        self._logger.system("runtime_controller_ready", self.get_system_status(), level="INFO")
         return True
     
     async def shutdown(self) -> None:
@@ -249,7 +231,7 @@ class RuntimeController:
             SystemStatusMessage with current status details.
         """
         return SystemStatusMessage(
-            status=self.get_status(),
+            status=self.get_status().value,
             timestamp=datetime.now(timezone.utc).timestamp(),
             eye_tracker_connected=self.is_eye_tracker_connected(),
             operation_mode=self._operation_mode.name,
