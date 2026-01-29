@@ -100,7 +100,7 @@ To test the extension:
 
 ### Data Flow
 
-1. **Eye Tracker → Signal Processing**: Raw gaze data (60 Hz) is processed into window-based features (2-10 Hz)
+1. **Eye Tracker → Signal Processing**: Raw gaze data (120 Hz) is processed into window-based features (2-10 Hz)
 
 2. **Signal Processing → Reactive Tool**: Features are analyzed to estimate user state (stress, cognitive load, etc.)
 

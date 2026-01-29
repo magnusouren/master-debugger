@@ -3,7 +3,7 @@
 
 # Signal Processing Layer
 signal_processing:
-  input_sampling_rate_hz: 60.0
+  input_sampling_rate_hz: 120.0
   window_length_seconds: 1.0
   window_overlap_ratio: 0.5
   output_frequency_hz: 5.0

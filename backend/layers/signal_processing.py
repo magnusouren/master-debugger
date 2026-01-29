@@ -1,7 +1,7 @@
 """
 Signal Processing Layer
 
-Input: Raw eye-tracking data (60 Hz)
+Input: Raw eye-tracking data (120 Hz)
 Output: Window-based features at a lower frequency (e.g., 2–10 Hz)
 Configuration: Selected metrics, window length, output frequency
 

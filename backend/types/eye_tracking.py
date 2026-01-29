@@ -27,7 +27,7 @@ class RawGazeData:
     """Container for raw gaze data from the eye tracker."""
     samples: List[GazeSample] = field(default_factory=list)
     device_id: Optional[str] = None
-    sampling_rate_hz: float = 60.0
+    sampling_rate_hz: float = 120.0
     start_timestamp: Optional[float] = None
     end_timestamp: Optional[float] = None
 

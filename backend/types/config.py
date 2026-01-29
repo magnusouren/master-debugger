@@ -104,7 +104,7 @@ class OperationMode(Enum):
 class SignalProcessingConfig:
     """Configuration for Signal Processing layer."""
     # Input settings
-    input_sampling_rate_hz: float = 60.0
+    input_sampling_rate_hz: float = 120.0
     
     # Window settings
     window_length_seconds: float = 1.0
