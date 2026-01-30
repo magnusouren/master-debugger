@@ -62,6 +62,11 @@ class LoggerService:
         self.system_level = LogLevel[system_level.upper()]
         
         self.max_entries = max_entries
+
+        # --- Console dedup state (system prints only) ---
+        self._last_print_signature: Optional[str] = None
+        self._last_print_line: Optional[str] = None
+        self._last_print_repeat_count: int = 0
     
     def experiment(
         self,
@@ -397,27 +402,56 @@ class LoggerService:
         return level_obj.value >= threshold.value
     
     def _print_log(self, entry: LogEntry) -> None:
-        """
-        Pretty print a system log entry to console.
-        
-        Args:
-            entry: Log entry to print.
-        """
         timestamp = datetime.fromtimestamp(entry.timestamp, tz=timezone.utc).strftime("%H:%M:%S")
-        
-        # Color codes for terminal
+
         colors = {
-            "DEBUG": "\033[36m",      # Cyan
-            "INFO": "\033[32m",       # Green
-            "WARNING": "\033[33m",    # Yellow
-            "ERROR": "\033[31m",      # Red
+            "DEBUG": "\033[36m",
+            "INFO": "\033[32m",
+            "WARNING": "\033[33m",
+            "ERROR": "\033[31m",
         }
         reset = "\033[0m"
-        
         color = colors.get(entry.level, "")
-        data_str = json.dumps(json_safe(entry.data)) if entry.data else ""
-        
-        print(f"{color}[{timestamp}] [{entry.level}] {entry.event_type}{reset} {data_str}")
+
+        data_obj = json_safe(entry.data) if entry.data else None
+        data_str = json.dumps(data_obj) if data_obj else ""
+
+        base_line = f"{color}[{timestamp}] [{entry.level}] {entry.event_type}{reset} {data_str}"
+
+        signature = json.dumps(
+            {
+                "level": entry.level,
+                "event_type": entry.event_type,
+                "data": data_obj,
+            },
+            sort_keys=True,
+        )
+
+        # First line
+        if self._last_print_signature is None:
+            print(base_line, end="", flush=True)
+            self._last_print_signature = signature
+            self._last_print_line = base_line
+            self._last_print_repeat_count = 1
+            return
+
+        # Same as previous → update same line
+        if signature == self._last_print_signature:
+            self._last_print_repeat_count += 1
+            updated = f"{base_line} ×{self._last_print_repeat_count}"
+            # Pad if shorter than previous (important!)
+            padded = updated.ljust(len(self._last_print_line))
+            print(f"\r{padded}", end="", flush=True)
+            self._last_print_line = padded
+            return
+
+        # New message → end previous line
+        print()
+        print(base_line, end="", flush=True)
+
+        self._last_print_signature = signature
+        self._last_print_line = base_line
+        self._last_print_repeat_count = 1
 
 
 # Global logger instance
