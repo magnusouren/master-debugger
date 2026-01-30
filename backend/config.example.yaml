@@ -6,7 +6,7 @@ signal_processing:
   input_sampling_rate_hz: 120.0
   window_length_seconds: 1.0
   window_overlap_ratio: 0.5
-  output_frequency_hz: 5.0
+  output_frequency_hz: 2.0
   enabled_metrics:
     - fixation_duration
     - saccade_amplitude
@@ -44,7 +44,7 @@ feedback_layer:
   llm_provider: null  # openai, anthropic, local, development (no LLM-calls)
   llm_model: null # e.g., gpt-4, claude-2
   llm_api_key: null # sk-...
-  max_feedback_items: 3 
+  max_feedback_items: 2 
   max_message_length: 200 
   enable_cache: true
   cache_ttl_seconds: 300.0
@@ -66,3 +66,11 @@ controller:
   log_file_path: logs/eye_tracking_debugger.log
   experiment_id: null
   participant_id: null
+
+# Eye Tracker
+eye_tracker:
+  mode: SIMULATED  # SIMULATED or TOBII
+  device_id: null  # null for auto-select, or specific device serial/address
+  batch_size: 12  # Number of samples per batch (default 12 for ~120Hz)
+  flush_interval_ms: 16  # Max time between flushes in milliseconds
+  simulated_sampling_rate_hz: 120.0  # Sampling rate for simulated mode

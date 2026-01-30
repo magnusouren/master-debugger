@@ -239,6 +239,28 @@ class Server:
     def _setup_api_routes(self) -> None:
         """Set up REST API routes with controller handlers."""
 
+        # ---- Handlers ----
+        async def handle_connect_eye_tracker(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            device_id = request_data.get("json", {}).get("device_id", None)
+            # Await the connection and return the result
+            try:
+               ok = await self._controller.connect_eye_tracker(device_id)
+               return {"status": "connected" if ok else "failed"}
+            except Exception as error:
+                return {"status": "error", "error": str(error)}
+        
+        
+        async def handle_disconnect_eye_tracker(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            # Await the disconnection
+            try:
+                ok = await self._controller.disconnect_eye_tracker()
+                return {"status": "disconnected" if ok else "failed"}
+            except Exception as error:
+                return {"status": "error", "error": str(error)}
+
+
+        # ---- Register Routes ----
+
         self._rest_api.register_route(
             "/status",
             HttpMethod.GET,
@@ -262,6 +284,19 @@ class Server:
             HttpMethod.GET,
             self._controller.manual_send_feedback,
         )
+
+        self._rest_api.register_route(
+            "/eye_tracker/connect",
+            HttpMethod.POST,
+            handle_connect_eye_tracker,
+        )
+
+        self._rest_api.register_route(
+            "/eye_tracker/disconnect",
+            HttpMethod.POST,
+            handle_disconnect_eye_tracker,
+        )
+
 
         # TODO - add more routes as needed
     

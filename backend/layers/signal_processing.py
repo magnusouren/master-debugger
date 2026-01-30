@@ -12,6 +12,8 @@ representation of the selected metrics.
 """
 from typing import Optional, List, Callable
 from collections import deque
+from backend.services.logger_service import get_logger
+
 
 from backend.types import (
     RawGazeData,
@@ -38,6 +40,7 @@ class SignalProcessingLayer:
         self._output_callbacks: List[Callable[[WindowFeatures], None]] = []
         self._last_output_time: float = 0.0
         self._is_running: bool = False
+        self._logger = get_logger()
     
     def configure(self, config: SignalProcessingConfig) -> None:
         """
@@ -46,7 +49,21 @@ class SignalProcessingLayer:
         Args:
             config: New configuration to apply.
         """
-        pass  # TODO: Implement configuration update
+        self._config = config
+        self._logger.system(
+            "signal_processing_config_updated",
+            {
+                "input_sampling_rate_hz": config.input_sampling_rate_hz,
+                "window_length_seconds": config.window_length_seconds,
+                "window_overlap_ratio": config.window_overlap_ratio,
+                "output_frequency_hz": config.output_frequency_hz,
+                "enabled_metrics": config.enabled_metrics,
+                "min_valid_sample_ratio": config.min_valid_sample_ratio,
+                "interpolate_missing": config.interpolate_missing,
+                "max_gap_to_interpolate_ms": config.max_gap_to_interpolate_ms,
+            },
+            level="DEBUG"
+        )
     
     def start(self) -> None:
         """Start processing incoming samples."""
@@ -67,7 +84,7 @@ class SignalProcessingLayer:
         Args:
             sample: Raw gaze sample from eye tracker.
         """
-        pass  # TODO: Implement sample ingestion
+        self._sample_buffer.append(sample)
     
     def add_samples(self, samples: List[GazeSample]) -> None:
         """
@@ -76,7 +93,13 @@ class SignalProcessingLayer:
         Args:
             samples: List of raw gaze samples.
         """
-        pass  # TODO: Implement batch sample ingestion
+        if not samples:
+            return
+        
+        for sample in samples:
+            self.add_sample(sample)
+
+        
     
     def process_raw_data(self, raw_data: RawGazeData) -> List[WindowFeatures]:
         """

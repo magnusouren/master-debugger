@@ -111,7 +111,7 @@ class SignalProcessingConfig:
     window_overlap_ratio: float = 0.5
     
     # Output settings
-    output_frequency_hz: float = 5.0  # 2-10 Hz as per requirements
+    output_frequency_hz: float = 2.0  # 2-10 Hz as per requirements
     
     # Metrics to extract (TODO: define specific metrics)
     enabled_metrics: List[str] = field(default_factory=lambda: [
@@ -195,6 +195,21 @@ class FeedbackLayerConfig:
 
 
 @dataclass
+class EyeTrackerConfig:
+    """Configuration for Eye Tracker adapter."""
+    # Mode selection
+    mode: str = "SIMULATED"  # "SIMULATED" or "TOBII"
+    device_id: Optional[str] = None  # Specific device ID or None for auto-select
+    
+    # Batching settings
+    batch_size: int = 12  # Number of samples per batch
+    flush_interval_ms: int = 16  # Max time between flushes in ms
+    
+    # Simulated mode settings
+    simulated_sampling_rate_hz: float = 120.0
+
+
+@dataclass
 class ControllerConfig:
     """Configuration for Runtime Controller."""
     # Mode
@@ -230,6 +245,7 @@ class SystemConfig:
     reactive_tool: ReactiveToolConfig = field(default_factory=ReactiveToolConfig)
     feedback_layer: FeedbackLayerConfig = field(default_factory=FeedbackLayerConfig)
     controller: ControllerConfig = field(default_factory=ControllerConfig)
+    eye_tracker: EyeTrackerConfig = field(default_factory=EyeTrackerConfig)
 
     @classmethod
     def from_file(cls, path: str) -> "SystemConfig":

@@ -39,6 +39,14 @@
       {
         "command": "eyeTrackingDebugger.triggerFeedbackSend",
         "title": "Eye Tracking: Trigger Feedback Send"
+      },
+      {
+        "command": "eyeTrackingDebugger.connectEyeTracker",
+        "title": "Eye Tracking: Connect Eye Tracker"
+      },
+      {
+        "command": "eyeTrackingDebugger.disconnectEyeTracker",
+        "title": "Eye Tracking: Disconnect Eye Tracker"
       }
     ],
     "configuration": {
