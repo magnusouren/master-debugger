@@ -346,8 +346,8 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
         Returns:
             GazeSample object.
         """
-        # Extract timestamp (microseconds to seconds)
-        timestamp = gaze_data.get("device_time_stamp", 0) / 1_000_000.0
+        # Use system time for timestamp (seconds since epoch)
+        timestamp = time.time()
         
         # Extract left eye data
         left_eye = gaze_data.get("left_gaze_point_on_display_area", (None, None))
