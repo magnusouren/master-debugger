@@ -102,6 +102,15 @@ To test the extension:
 2. Press `F5` to launch the Extension Development Host
 3. Use the command palette to run Eye Tracking commands
 
+### Usage per now (30th of January 2026)
+
+1. Start the backend server
+2. Launch the VS Code extension
+3. Connect the extension to the backend via the command palette ("Eye Tracking: Connect to Backend")
+4. Connect the eye tracker via the command palette ("Eye Tracking: Connect Eye Tracker")
+5. Open a code file in the editor
+6. Trigger feedback generation ("Eye Tracking: Trigger Feedback Send")
+
 ## Architecture
 
 ### Data Flow
