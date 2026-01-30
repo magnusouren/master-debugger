@@ -4,7 +4,7 @@ from .forecasting_tool import ForecastingTool
 from .reactive_tool import ReactiveTool
 from .feedback_layer import FeedbackLayer
 from .runtime_controller import RuntimeController
-from ..services.llm_client import LLMClient, OpenAIClient, create_llm_client
+from ..services.llm_client import LLMClient, OpenAILLMClient, create_llm_client
 
 __all__ = [
     "SignalProcessingLayer",
@@ -13,6 +13,6 @@ __all__ = [
     "FeedbackLayer",
     "RuntimeController",
     "LLMClient",
-    "OpenAIClient",
+    "OpenAILLMClient",
     "create_llm_client",
 ]
