@@ -66,3 +66,11 @@ controller:
   log_file_path: logs/eye_tracking_debugger.log
   experiment_id: null
   participant_id: null
+
+# Eye Tracker
+eye_tracker:
+  mode: SIMULATED  # SIMULATED or TOBII
+  device_id: null  # null for auto-select, or specific device serial/address
+  batch_size: 12  # Number of samples per batch (default 12 for ~120Hz)
+  flush_interval_ms: 16  # Max time between flushes in milliseconds
+  simulated_sampling_rate_hz: 120.0  # Sampling rate for simulated mode
