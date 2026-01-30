@@ -402,7 +402,7 @@ class LoggerService:
         return level_obj.value >= threshold.value
     
     def _print_log(self, entry: LogEntry) -> None:
-        timestamp = datetime.fromtimestamp(entry.timestamp).strftime("%H:%M:%S")
+        timestamp = datetime.fromtimestamp(entry.timestamp, tz=timezone.utc).strftime("%H:%M:%S")
 
         colors = {
             "DEBUG": "\033[36m",
@@ -427,7 +427,7 @@ class LoggerService:
             sort_keys=True,
         )
 
-        # Første linje
+        # First line
         if self._last_print_signature is None:
             print(base_line, end="", flush=True)
             self._last_print_signature = signature
@@ -435,17 +435,17 @@ class LoggerService:
             self._last_print_repeat_count = 1
             return
 
-        # Samme som forrige → oppdater samme linje
+        # Same as previous → update same line
         if signature == self._last_print_signature:
             self._last_print_repeat_count += 1
             updated = f"{base_line} ×{self._last_print_repeat_count}"
-            # Pad hvis kortere enn forrige (viktig!)
+            # Pad if shorter than previous (important!)
             padded = updated.ljust(len(self._last_print_line))
             print(f"\r{padded}", end="", flush=True)
             self._last_print_line = padded
             return
 
-        # Ny melding → avslutt forrige linje
+        # New message → end previous line
         print()
         print(base_line, end="", flush=True)
 
