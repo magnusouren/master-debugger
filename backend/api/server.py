@@ -241,7 +241,6 @@ class Server:
 
         # ---- Handlers ----
         async def handle_connect_eye_tracker(request_data: Dict[str, Any]) -> Dict[str, Any]:
-            print(request_data)
             device_id = request_data.get("json", {}).get("device_id", None)
             # Await the connection and return the result
             try:
