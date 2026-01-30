@@ -24,9 +24,11 @@ from backend.layers.forecasting_tool import ForecastingTool
 from backend.layers.reactive_tool import ReactiveTool
 from backend.layers.feedback_layer import FeedbackLayer
 from backend.services.logger_service import get_logger
+from backend.services.eye_tracker.factory import create_eye_tracker_adapter
+from backend.services.eye_tracker.base import EyeTrackerAdapter
 from backend.types.code_context import CodeContext
 from backend.types.config import OperationMode, SystemConfig
-from backend.types.eye_tracking import PredictedFeatures, WindowFeatures
+from backend.types.eye_tracking import PredictedFeatures, WindowFeatures, GazeSample
 from backend.types.feedback import FeedbackInteraction, FeedbackResponse
 from backend.types.messages import SystemStatus, SystemStatusMessage
 from backend.types.domain_events import DomainEvent, DomainEventType
@@ -87,6 +89,9 @@ class RuntimeController:
         # Event loop reference
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         
+        # Eye tracker adapter
+        self._eye_tracker_adapter: Optional[EyeTrackerAdapter] = None
+        
         # Experiment tracking
         self._experiment_is_active: bool = False
         self._experiment_id: Optional[str] = self._config.controller.experiment_id
@@ -125,6 +130,12 @@ class RuntimeController:
         self._status = SystemStatus.READY
         self._stats["session_start"] = asyncio.get_event_loop().time()
         
+        # Get event loop reference
+        self._loop = asyncio.get_event_loop()
+        
+        # Initialize eye tracker adapter
+        self._eye_tracker_adapter = create_eye_tracker_adapter(self._config, loop=self._loop)
+        
         llm_ready = self._feedback_layer.initialize_llm()
         if not llm_ready:
             self._logger.system("llm_not_configured", {"fallback": "heuristics"}, level="WARNING")
@@ -136,12 +147,21 @@ class RuntimeController:
         self._main_loop_task = asyncio.create_task(self._run_main_loop())
         
         self._logger.system("runtime_controller_ready", self.get_system_status(), level="INFO")
+
+        # DEV - connect eye tracker automatically for testing
+        await self.connect_eye_tracker()
+
         return True
     
     async def shutdown(self) -> None:
         """Shutdown all system components gracefully."""
         self._logger.system("runtime_controller_shutdown", {"final_stats": self._stats}, level="INFO")
         self._status = SystemStatus.DISCONNECTED
+
+        # Disconnect eye tracker
+        if self._eye_tracker_adapter:
+            with contextlib.suppress(Exception):
+                await self.disconnect_eye_tracker()
 
         # Cancel feedback generation task if running
         if self._feedback_generation_task and not self._feedback_generation_task.done():
@@ -257,19 +277,118 @@ class RuntimeController:
     
     async def connect_eye_tracker(self, device_id: Optional[str] = None) -> bool:
         """
-        Connect to the Tobii eye tracker.
+        Connect to the eye tracker.
         
         Args:
             device_id: Optional specific device to connect to.
+                      If None, uses config default or auto-selects first device.
             
         Returns:
             True if connection successful.
         """
-        pass  # TODO: Implement eye tracker connection
+        if not self._eye_tracker_adapter:
+            self._logger.system(
+                "eye_tracker_adapter_not_initialized",
+                {},
+                level="ERROR"
+            )
+            return False
+        
+        # Use config default if no device_id provided
+        if device_id is None:
+            device_id = self._config.eye_tracker.device_id
+        
+        try:
+            # Attempt connection
+            ok = await self._eye_tracker_adapter.connect(device_id=device_id)
+            self._eye_tracker_connected = ok
+            
+            if ok:
+                # Start signal processing
+                self._signal_processing.start()
+                
+                # Start streaming
+                await self._eye_tracker_adapter.start_streaming()
+                
+                device_info = self._eye_tracker_adapter.get_device_info()
+                self._logger.system(
+                    "eye_tracker_connected",
+                    device_info,
+                    level="INFO"
+                )
+                
+                # Publish status update
+                self._publish(DomainEvent(
+                    event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+                    payload=self.get_system_status(),
+                ))
+            else:
+                self._logger.system(
+                    "eye_tracker_connection_failed",
+                    {"device_id": device_id},
+                    level="WARNING"
+                )
+                
+                # Publish status update
+                self._publish(DomainEvent(
+                    event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+                    payload=self.get_system_status(),
+                ))
+            
+            return ok
+            
+        except Exception as e:
+            self._logger.system(
+                "eye_tracker_connection_error",
+                {"error": str(e), "device_id": device_id},
+                level="ERROR"
+            )
+            self._eye_tracker_connected = False
+            
+            # Publish status update
+            self._publish(DomainEvent(
+                event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+                payload=self.get_system_status(),
+            ))
+            
+            return False
     
     async def disconnect_eye_tracker(self) -> None:
         """Disconnect from the eye tracker."""
-        pass  # TODO: Implement eye tracker disconnection
+        if not self._eye_tracker_adapter:
+            return
+        
+        try:
+            # Stop streaming
+            await self._eye_tracker_adapter.stop_streaming()
+            
+            # Disconnect
+            await self._eye_tracker_adapter.disconnect()
+            
+            # Stop signal processing
+            self._signal_processing.stop()
+            
+            self._eye_tracker_connected = False
+            
+            self._logger.system(
+                "eye_tracker_disconnected",
+                {},
+                level="INFO"
+            )
+            
+            # Publish status update
+            self._publish(DomainEvent(
+                event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+                payload=self.get_system_status(),
+            ))
+            
+        except Exception as e:
+            self._logger.system(
+                "eye_tracker_disconnection_error",
+                {"error": str(e)},
+                level="ERROR"
+            )
+            self._eye_tracker_connected = False
     
     def is_eye_tracker_connected(self) -> bool:
         """
@@ -616,6 +735,53 @@ class RuntimeController:
     
     # --- Data Flow Callbacks ---
     
+    def _on_gaze_samples(self, samples: List[GazeSample]) -> None:
+        """
+        Handle batches of gaze samples from eye tracker adapter.
+        
+        Args:
+            samples: Batch of gaze samples from eye tracker.
+        """
+        if not samples:
+            return
+        
+        # Update statistics
+        self._stats["eye_samples_processed"] += len(samples)
+        
+        # Forward to signal processing layer
+        self._signal_processing.add_samples(samples)
+        
+        self._logger.system(
+            "gaze_samples_received",
+            {
+                "count": len(samples),
+                "total_processed": self._stats["eye_samples_processed"]
+            },
+            level="DEBUG"
+        )
+    
+    def _on_eye_tracker_error(self, error: Exception) -> None:
+        """
+        Handle errors from eye tracker adapter.
+        
+        Args:
+            error: Exception that occurred in eye tracker.
+        """
+        self._logger.system(
+            "eye_tracker_error",
+            {"error": str(error), "type": type(error).__name__},
+            level="ERROR"
+        )
+        
+        # Update connection state
+        self._eye_tracker_connected = False
+        
+        # Publish status update
+        self._publish(DomainEvent(
+            event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+            payload=self.get_system_status(),
+        ))
+    
     def _on_window_features(self, features: WindowFeatures) -> None:
         """
         Handle new window features from Signal Processing.
@@ -828,6 +994,11 @@ class RuntimeController:
     
     def _setup_layer_callbacks(self) -> None:
         """Set up callbacks between layers for data flow."""
+        
+        # Eye tracker adapter calls back to Runtime Controller
+        if self._eye_tracker_adapter:
+            self._eye_tracker_adapter.set_samples_callback(self._on_gaze_samples)
+            self._eye_tracker_adapter.set_error_callback(self._on_eye_tracker_error)
         
         # Signal Processing calls back to Runtime Controller
         self._signal_processing.register_output_callback(
