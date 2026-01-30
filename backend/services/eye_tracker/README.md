@@ -42,12 +42,12 @@ The eye tracker adapter service follows a clean architecture pattern with:
 Add to your `config.yaml`:
 
 ```yaml
-controller:
-  # Eye Tracker Settings
-  eye_tracker_mode: SIMULATED  # SIMULATED or TOBII
-  eye_tracker_device_id: null  # null for auto-select, or specific device serial/address
-  eye_tracker_batch_size: 12  # Number of samples per batch
-  eye_tracker_flush_interval_ms: 16  # Max time between flushes
+eye_tracker:
+  mode: SIMULATED  # SIMULATED or TOBII
+  device_id: null  # null for auto-select, or specific device serial/address
+  batch_size: 12  # Number of samples per batch (default 12 for ~120Hz)
+  flush_interval_ms: 16  # Max time between flushes in milliseconds
+  simulated_sampling_rate_hz: 120.0  # Sampling rate for simulated mode
 ```
 
 ### Connecting to Eye Tracker
