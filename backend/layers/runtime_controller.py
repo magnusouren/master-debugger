@@ -148,9 +148,6 @@ class RuntimeController:
         
         self._logger.system("runtime_controller_ready", self.get_system_status(), level="INFO")
 
-        # DEV - connect eye tracker automatically for testing
-        await self.connect_eye_tracker()
-
         return True
     
     async def shutdown(self) -> None:
