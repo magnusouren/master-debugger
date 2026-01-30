@@ -111,7 +111,7 @@ class SignalProcessingConfig:
     window_overlap_ratio: float = 0.5
     
     # Output settings
-    output_frequency_hz: float = 5.0  # 2-10 Hz as per requirements
+    output_frequency_hz: float = 2.0  # 2-10 Hz as per requirements
     
     # Metrics to extract (TODO: define specific metrics)
     enabled_metrics: List[str] = field(default_factory=lambda: [
