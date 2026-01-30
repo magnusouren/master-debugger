@@ -133,6 +133,22 @@ function registerCommands(context: vscode.ExtensionContext): void {
             triggerFeedbackSend
         )
     );
+
+    // Connect to eye tracker command
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            "eyeTrackingDebugger.connectEyeTracker",
+            connectToEyeTracker
+        )
+    );
+
+    // Disconnect from eye tracker command
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            "eyeTrackingDebugger.disconnectEyeTracker",
+            disconnectFromEyeTracker
+        )
+    );
 }
 
 /**
@@ -234,6 +250,37 @@ async function showStatus(): Promise<void> {
         vscode.window.showInformationMessage("No status available");
     }
 }
+
+async function connectToEyeTracker(): Promise<void> {
+    // Let the user enter identifier of the eye tracker to connect to
+    const eyeTrackerId = await vscode.window.showInputBox({
+        prompt: "Enter Eye Tracker Identifier",
+        placeHolder: "e.g., Tobii Pro X3-120",
+    });
+
+    const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
+    const host = config.get<string>("backendHost") || "localhost";
+    const port = config.get<number>("apiPort") || 8080;
+
+    await fetch(`http://${host}:${port}/eye_tracker/connect`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ device_id: eyeTrackerId }),
+    });
+}
+
+async function disconnectFromEyeTracker(): Promise<void> {
+    const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
+    const host = config.get<string>("backendHost") || "localhost";
+    const port = config.get<number>("apiPort") || 8080;
+
+    await fetch(`http://${host}:${port}/eye_tracker/disconnect`, {
+        method: "POST",
+    });
+}
+
 
 function clearFeedback(): void {
     // TODO: Implement feedback clearing
