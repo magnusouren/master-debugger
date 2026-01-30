@@ -748,14 +748,6 @@ class RuntimeController:
         # Forward to signal processing layer
         self._signal_processing.add_samples(samples)
         
-        self._logger.system(
-            "gaze_samples_received",
-            {
-                "count": len(samples),
-                "total_processed": self._stats["eye_samples_processed"]
-            },
-            level="DEBUG"
-        )
     
     def _on_eye_tracker_error(self, error: Exception) -> None:
         """
