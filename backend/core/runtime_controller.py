@@ -867,6 +867,10 @@ class RuntimeController:
         # start processing layers if not already running
         self._signal_processing.start()
 
+        # Start forecasting if in proactive mode
+        if self._operation_mode == OperationMode.PROACTIVE:
+            self._forecasting.enable()
+
         self._logger.system(
             "experiment_started",
             {
@@ -930,6 +934,9 @@ class RuntimeController:
         # Stop processing layers and reset state
         self._signal_processing.stop()
         self._signal_processing.reset()
+
+        # Stop forecasting
+        self._forecasting.disable()
 
         # Publish domain event for experiment end (before clearing IDs)
         self._publish(DomainEvent(

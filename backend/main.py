@@ -186,7 +186,7 @@ def main() -> int:
         {
             "websocket_url": f"ws://{args.host}:{args.ws_port}",
             "api_url": f"http://{args.host}:{args.api_port}",
-            "mode": args.mode,
+            "mode": args.mode, # TODO - make this correct, its not set from arg but from config
             "debug": args.debug,
         },
     )
