@@ -143,7 +143,7 @@ class ForecastingTool:
     ) -> Optional[PredictedFeatures]:
         """
         Generate a prediction for a specific time horizon.
-        STUB IMPLEMENTATION
+        TODO: STUB IMPLEMENTATION
         
         Args:
             horizon_seconds: How far into the future to predict.
@@ -154,13 +154,13 @@ class ForecastingTool:
 
         windowFeature = self._prepare_input_sequence()
 
-        # TODO - STUB IMPLEMENTATION
-        # add horizon_seconds to each feature window end time
-
         if not windowFeature:
             return None
         
         prediction = self._run_model_inference(windowFeature)
+
+        prediction.prediction_timestamp = prediction.target_window_end + horizon_seconds
+        prediction.horizon_seconds = horizon_seconds
 
         return prediction
     
