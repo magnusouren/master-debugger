@@ -927,8 +927,9 @@ class RuntimeController:
 
         self.export_experiment_data()
 
-        # Stop processing layers
+        # Stop processing layers and reset state
         self._signal_processing.stop()
+        self._signal_processing.reset()
 
         # Publish domain event for experiment end (before clearing IDs)
         self._publish(DomainEvent(
