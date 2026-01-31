@@ -803,7 +803,7 @@ class RuntimeController:
             return
         
         # In proactive mode, pass predicted features to Reactive Tool
-        self._reactive_tool.add_features(predicted)
+        self._reactive_tool.add_features(predicted.to_window_features())
     
     def _on_user_state_estimate(self, estimate: UserStateEstimate) -> None:
         """
