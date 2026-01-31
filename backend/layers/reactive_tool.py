@@ -19,7 +19,6 @@ from enum import Enum
 
 from backend.types import (
     WindowFeatures,
-    PredictedFeatures,
     UserStateScore,
     UserStateEstimate,
     ReactiveToolConfig,
@@ -97,7 +96,7 @@ class ReactiveTool:
         pass  # TODO: Implement model loading
     
     def add_features(
-        self, features: Union[WindowFeatures, PredictedFeatures]
+        self, features: WindowFeatures
     ) -> None:
         """
         Add new features to the sliding window.
