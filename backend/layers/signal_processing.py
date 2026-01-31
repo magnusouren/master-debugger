@@ -90,21 +90,23 @@ class SignalProcessingLayer:
         """
         self.add_samples([sample])
     
-    def add_samples(self, batch: List[object]) -> None:
+    def add_samples(self, samples: List[GazeSample]) -> None:
         """
         Add raw gaze samples to the processing buffer and emit WindowFeatures
         whenever a complete time window is available.
+
+        AI Generated for POC purposes - may require adjustments.
 
         Each call may emit zero or more WindowFeatures objects.
         """
         if not self._is_running:
             return
 
-        if not batch:
+        if not samples:
             return
 
         # 1. Append incoming samples (assumed time-ordered)
-        for sample in batch:
+        for sample in samples:
             self._sample_buffer.append(sample)
 
         # 2. Initialize window end timestamp on first data
@@ -131,12 +133,13 @@ class SignalProcessingLayer:
             sample_count = len(window_samples)
             valid_sample_ratio = min(
                 sample_count / (self._config.input_sampling_rate_hz * self._config.window_length_seconds), 1.0
-            )
+            ) # Note : this is calculated before any interpolation or cleaning
 
             # 6. Compute features (implementation-specific)
             features = self._compute_window_features(window_samples)
 
             # 7. Emit WindowFeatures
+            # TODO: What if valid_sample_ratio < min_valid_sample_ratio?
             window_features = WindowFeatures(
                 window_start=window_start,
                 window_end=window_end,
@@ -153,10 +156,14 @@ class SignalProcessingLayer:
 
 
             # 10. Advance window
-            self._next_window_end_ts += self._config.window_length_seconds * (1.0 - self._config.window_overlap_ratio)
+            advance_seconds = self._config.window_length_seconds * (1.0 - self._config.window_overlap_ratio)
+            output_frequency_hz = getattr(self._config, "output_frequency_hz", None)
+            if output_frequency_hz is not None and output_frequency_hz > 0:
+                advance_seconds = 1.0 / output_frequency_hz
+            self._next_window_end_ts += advance_seconds
 
             # 11. Prune old samples (keep only what's needed)
-            prune_before_ts = window_start
+            prune_before_ts = self._next_window_end_ts - self._config.window_length_seconds
             while self._sample_buffer and self._sample_buffer[0].timestamp < prune_before_ts:
                 self._sample_buffer.popleft()
 
@@ -202,7 +209,15 @@ class SignalProcessingLayer:
         Args:
             callback: The callback function to remove.
         """
-        self._output_callbacks.remove(callback)
+
+        if callback in self._output_callbacks:
+            self._output_callbacks.remove(callback)
+        else:
+            self._logger.system(
+                "signal_processing_callback_not_found",
+                {"callback": str(callback)},
+                level="WARNING"
+            )
 
     def call_callbacks(self, features: WindowFeatures) -> None:
         """
@@ -212,7 +227,14 @@ class SignalProcessingLayer:
             features: The WindowFeatures to pass to callbacks.
         """
         for callback in self._output_callbacks:
-            callback(features)
+            try:
+                callback(features)
+            except Exception as e:
+                self._logger.system(
+                    "signal_processing_callback_error",
+                    {"error": str(e)},
+                    level="ERROR"
+                )
     
     # --- Internal methods ---
     
@@ -275,7 +297,7 @@ class SignalProcessingLayer:
 
         valid_samples = [
             s for s in samples
-            if s.left_eye_valid and s.right_eye_valid  # TODO : Define validity criteria
+            if s.left_eye_valid or s.right_eye_valid  # TODO : Define validity criteria
         ]
 
         if not self._config.interpolate_missing:
