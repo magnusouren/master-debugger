@@ -97,21 +97,26 @@ class ForecastingTool:
         pass  # TODO: Implement model unloading
     
     def add_features(self, features: WindowFeatures) -> None:
-        """
-        Add new window features to the history buffer.
-        
-        Args:
-            features: Computed window features from Signal Processing.
-        """
+        # 1. Add new features to history buffer
         self._feature_history.append(features)
-        # Maintain history size based on configuration
-        while len(self._feature_history) > self._config.history_size:
+
+        # 2. Calculate cutoff time for history retention
+        cutoff_time = features.window_end - self._config.history_window_seconds
+
+        # 3. Remove all windows older than cutoff
+        while (
+            self._feature_history
+            and self._feature_history[0].window_end < cutoff_time
+        ):
             self._feature_history.popleft()
-        
-        # Optionally trigger prediction update
+
+        # 4. Trigger prediction if allowed
         if self._is_enabled and self._should_update_prediction():
             prediction = self.predict()
-            if prediction:
+            if (
+                prediction
+                and prediction.confidence >= self._config.min_confidence_threshold
+            ):
                 for callback in self._output_callbacks:
                     callback(prediction)
     
@@ -151,10 +156,6 @@ class ForecastingTool:
 
         # TODO - STUB IMPLEMENTATION
         # add horizon_seconds to each feature window end time
-
-        for wf in windowFeature:
-            wf.window_end += horizon_seconds * 1000
-            wf.window_start += horizon_seconds * 1000
 
         if not windowFeature:
             return None
