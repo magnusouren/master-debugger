@@ -77,13 +77,12 @@ class PredictedFeatures:
     confidence: float = 0.0
     uncertainty: Dict[str, float] = field(default_factory=dict)
 
-    @staticmethod
-    def to_window_features(predicted: 'PredictedFeatures') -> WindowFeatures:
+    def to_window_features(self) -> WindowFeatures:
         """Convert PredictedFeatures to WindowFeatures format."""
         return WindowFeatures(
-            window_start=predicted.target_window_start,
-            window_end=predicted.target_window_end,
-            features=predicted.features,
+            window_start=self.target_window_start,
+            window_end=self.target_window_end,
+            features=self.features.copy(),
             sample_count=0,  # Not applicable for predictions
-            valid_sample_ratio=0  # Not applicable for predictions
+            valid_sample_ratio=0.0  # Not applicable for predictions
         )
