@@ -864,6 +864,9 @@ class RuntimeController:
         self._experiment_is_active = True
         self._session_id = f"{participant_id}_{experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
+        # start processing layers if not already running
+        self._signal_processing.start()
+
         self._logger.system(
             "experiment_started",
             {
@@ -923,6 +926,9 @@ class RuntimeController:
         self._experiment_is_active = False
 
         self.export_experiment_data()
+
+        # Stop processing layers
+        self._signal_processing.stop()
 
         # Publish domain event for experiment end (before clearing IDs)
         self._publish(DomainEvent(
