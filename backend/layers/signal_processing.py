@@ -146,6 +146,7 @@ class SignalProcessingLayer:
                 features=features,
                 sample_count=sample_count,
                 valid_sample_ratio=valid_sample_ratio,
+                enabled_metrics=list(self._config.enabled_metrics)
             )
 
             # 8. Log collected features
@@ -341,7 +342,7 @@ class SignalProcessingLayer:
             return {
                 "pupil_window_sample_count": 0,
                 "pupil_valid_ratio": 0.0,
-                "pupil_window_sample_count": None,
+                "pupil_mean": 0,
                 "pupil_std": None,
                 "pupil_range": None,
                 "pupil_slope": None,
