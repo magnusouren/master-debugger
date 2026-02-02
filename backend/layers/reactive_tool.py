@@ -14,7 +14,7 @@ Model progression:
 - Later: sequence-based models
 """
 import math
-from typing import Optional, List, Callable, Tuple, Union
+from typing import Optional, List, Callable
 from collections import deque
 from enum import Enum
 
