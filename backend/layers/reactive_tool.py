@@ -33,6 +33,42 @@ class ModelType(Enum):
     ML_CLASSIFIER = "ml_classifier"
     SEQUENCE_MODEL = "sequence_model"
 
+METRIC_KEYGROUPS = {
+    "pupil_diameter": {
+        "load": {
+            "mean": "pupil_mean",
+            "slope": "pupil_slope",
+            "vel": "pupil_mean_abs_vel",
+            "std": "pupil_std",
+            "range": "pupil_range",
+        },
+        "quality": {
+            "valid_ratio": "pupil_valid_ratio",
+            "count": "pupil_window_sample_count",
+        },
+    },
+    "data_quality": {
+        "quality": {
+            # primary confidence signals
+            "valid_ratio_any": "dq_valid_ratio_any",
+            "valid_ratio_both": "dq_valid_ratio_both",
+
+            # secondary / fallback
+            "valid_ratio_left": "dq_valid_ratio_left",
+            "valid_ratio_right": "dq_valid_ratio_right",
+
+            # informational / diagnostic (not used directly in scoring yet)
+            "sample_count": "dq_sample_count",
+            "longest_invalid_run_ms": "dq_longest_invalid_run_ms",
+            "gap_count_over_100ms": "dq_gap_count_over_100ms",
+            "mean_dt_ms": "dq_mean_dt_ms",
+            "dt_jitter_ms": "dq_dt_jitter_ms",
+        }
+    },
+    # TODO - add more later:
+    # "gaze_dispersion": {"load": {"dispersion": "gaze_dispersion"}, ...},
+}
+
 
 class ReactiveTool:
     """
@@ -114,13 +150,11 @@ class ReactiveTool:
         # Remove old windows
         while self._feature_window and self._feature_window[0].window_end < cutoff_ts:
             self._feature_window.popleft()
-            
-        if not self._is_running:
-            return None
 
-        return self.estimate()
+        if self._is_running:
+            self.estimate()
     
-    def estimate(self) -> Optional[UserStateScore]:
+    def estimate(self) -> Optional[UserStateEstimate]:
         """
         Compute current user state score from the sliding window.
         """
@@ -155,21 +189,31 @@ class ReactiveTool:
             state_type=UserStateType.COGNITIVE_LOAD,
         )
 
-        self._score_history.append(score)
+        estimate = UserStateEstimate(
+            timestamp=windows[-1].window_end,
+            score=result,
+            contributing_features=self._extract_contributing_features(windows),
+            model_version=None,
+            model_type=self._model_type.value,
+            metadata={
+                "raw_score": raw_score,
+                "feature_window_size": len(windows),
+                "avg_valid_sample_ratio": self._avg_valid_ratio(windows),
+            },
+        )
 
-        # Drop low-confidence estimates
-        if confidence < self._config.min_confidence_for_action:
-            return None
+        self._current_estimate = estimate
 
-        self._current_estimate = result
+        # TODO - Should all estimates be broadcasted?
+        # Only fire callbacks when actionable
+        if confidence >= self._config.min_confidence_for_action:
+            for cb in list(self._output_callbacks):
+                try:
+                    cb(estimate)
+                except Exception:
+                    pass
 
-        for cb in list(self._output_callbacks):
-            try:
-                cb(result)
-            except Exception:
-                pass
-
-        return result
+        return estimate
     
     def get_current_score(self) -> Optional[UserStateScore]:
         """
@@ -184,13 +228,13 @@ class ReactiveTool:
     
     def get_score_history(self, n_samples: int = 10) -> List[float]:
         """
-        Get recent history of state scores.
+        Get recent history of scores.
         
         Args:
             n_samples: Number of recent samples to return.
             
         Returns:
-            List of recent score values.
+            List of recent scores.
         """
         return list(self._score_history)[-n_samples:]
     
@@ -231,47 +275,56 @@ class ReactiveTool:
     
     def _estimate_rule_based(self, windows: List[WindowFeatures]) -> float:
         """
-        Rule-based scalar score in [0,1] using available pupil-based signals.
+        Estimate user state using rule-based heuristics.
+
+        Args:
+            windows: List of recent feature windows.
+        Returns:
+            Computed user state score.
         """
 
-        # Use real load-ish metrics
-        pupil_mean_series = self._metric_series(windows, "pupil_mean")
-        pupil_slope_series = self._metric_series(windows, "pupil_slope")
-        pupil_vel_series = self._metric_series(windows, "pupil_mean_abs_vel")
 
-        # If you have no usable metrics, return neutral
-        if not (pupil_mean_series or pupil_slope_series or pupil_vel_series):
+        enabled = self._enabled(windows)
+
+        # If pupil metrics aren't enabled, we can't do pupil-based load
+        if "pupil_diameter" not in enabled:
             return 0.5
 
-        # Summaries
-        pupil_mean = sum(pupil_mean_series) / len(pupil_mean_series) if pupil_mean_series else 0.0
-        pupil_slope = sum(pupil_slope_series) / len(pupil_slope_series) if pupil_slope_series else 0.0
-        pupil_vel = sum(pupil_vel_series) / len(pupil_vel_series) if pupil_vel_series else 0.0
+        load_keys = METRIC_KEYGROUPS["pupil_diameter"]["load"]
+        mean_series = self._metric_series(windows, load_keys["mean"])
+        slope_series = self._metric_series(windows, load_keys["slope"])
+        vel_series = self._metric_series(windows, load_keys["vel"])
+        std_series = self._metric_series(windows, load_keys["std"])
+        range_series = self._metric_series(windows, load_keys["range"])
 
-        # Ramps (placeholders! calibrate later)
-        # pupil_mean: your example is ~4.29
+        if not (mean_series or slope_series or vel_series or std_series or range_series):
+            return 0.5
+
+        pupil_mean = sum(mean_series) / len(mean_series) if mean_series else 0.0
+        pupil_slope = sum(slope_series) / len(slope_series) if slope_series else 0.0
+        pupil_vel = sum(vel_series) / len(vel_series) if vel_series else 0.0
+        pupil_std = sum(std_series) / len(std_series) if std_series else 0.0
+        pupil_range = sum(range_series) / len(range_series) if range_series else 0.0
+
         mean_component  = self._ramp(pupil_mean,  lo=3.8, hi=4.6)
-
-        # pupil_slope: your example is ~0.22 (which is huge compared to my earlier placeholder)
-        # so set a broader ramp for now:
         slope_component = self._ramp(pupil_slope, lo=0.00, hi=0.30)
-
-        # mean abs velocity: your example ~9.85
-        # scale ramp around typical range you see:
         vel_component   = self._ramp(pupil_vel,   lo=5.0,  hi=15.0)
+        std_component   = self._ramp(pupil_std,   lo=0.1,  hi=0.5)
+        range_component = self._ramp(pupil_range, lo=1.0,  hi=3.0)
 
-        # Combine into one score
         score = (
-            0.55 * mean_component +
-            0.25 * slope_component +
-            0.20 * vel_component
+            0.4 * mean_component +
+            0.2 * slope_component +
+            0.2 * vel_component +
+            0.1 * std_component +
+            0.1 * range_component
         )
 
         return float(max(0.0, min(1.0, score)))
     
     def _estimate_ml_classifier(
         self, features: List[WindowFeatures]
-    ) -> UserStateScore:
+    ) -> Optional[float]:
         """
         Estimate user state using ML classifier.
         
@@ -285,7 +338,7 @@ class ReactiveTool:
     
     def _estimate_sequence_model(
         self, features: List[WindowFeatures]
-    ) -> UserStateScore:
+    ) -> Optional[float]:
         """
         Estimate user state using sequence model.
         
@@ -335,12 +388,55 @@ class ReactiveTool:
         return float(max(0.0, min(1.0, smoothed)))
         
     def _compute_confidence(self, windows: List[WindowFeatures], score: float) -> float:
-        valid_ratios = [wf.valid_sample_ratio for wf in windows if wf.sample_count > 0]
-        dq = sum(valid_ratios) / len(valid_ratios) if valid_ratios else 0.0
+        """
+        Compute confidence in the current estimate.
+        
+        Args:
+            windows: Recent feature windows.
+            score: Current user state score.
 
-        qty = self._ramp(len(windows), lo=3, hi=12)
-    
-        recent = list(self._score_history)[-10:]
+        Returns:
+            Confidence value between 0.0 and 1.0.
+        """
+        enabled = self._enabled(windows)
+
+        # TODO - add more factors later
+        ratio_keys = []
+        if "data_quality" in enabled:
+            dq = METRIC_KEYGROUPS["data_quality"]["quality"]
+            ratio_keys.extend([
+                dq["valid_ratio_any"],
+                dq["valid_ratio_both"],
+                dq["valid_ratio_left"],
+                dq["valid_ratio_right"],
+        ])
+        if "pupil_diameter" in enabled:
+            ratio_keys.extend([
+                METRIC_KEYGROUPS["pupil_diameter"]["quality"]["valid_ratio"],
+            ])
+
+        # collect data quality ratios
+        ratios = []
+        for wf in windows:
+            v = None
+            if wf.features:
+                for k in ratio_keys:
+                    if k in wf.features and wf.features[k] is not None:
+                        v = wf.features[k]
+                        break
+            if v is None:
+                v = wf.valid_sample_ratio
+            if v is None:
+                continue
+            try:
+                ratios.append(float(v))
+            except (TypeError, ValueError):
+                continue
+
+        dq = sum(ratios) / len(ratios) if ratios else 0.0
+        qty = self._ramp(float(len(windows)), lo=3.0, hi=12.0)
+
+        recent = [v for v in list(self._score_history)[-10:] if v is not None]
         if len(recent) >= 3:
             mean = sum(recent) / len(recent)
             var = sum((x - mean) ** 2 for x in recent) / (len(recent) - 1)
@@ -350,7 +446,7 @@ class ReactiveTool:
             stability = 0.5
 
         conf = 0.5 * dq + 0.3 * qty + 0.2 * stability
-        return max(0.0, min(1.0, conf))
+        return float(max(0.0, min(1.0, conf)))
     
     def _extract_contributing_features(
         self, features: List[WindowFeatures]
@@ -364,45 +460,80 @@ class ReactiveTool:
         Returns:
             Dictionary of feature contributions.
         """
-        pass  # TODO: Implement feature contribution extraction
+        contribs = {}
 
+        enabled = self._enabled(features)
+        if "pupil_diameter" in enabled:
+            load_keys = METRIC_KEYGROUPS["pupil_diameter"]["load"]
+            mean_series = self._metric_series(features, load_keys["mean"])
+            slope_series = self._metric_series(features, load_keys["slope"])
+            vel_series = self._metric_series(features, load_keys["vel"])
+            std_series = self._metric_series(features, load_keys["std"])
+            range_series = self._metric_series(features, load_keys["range"])
+
+            if mean_series:
+                contribs["pupil_mean"] = sum(mean_series) / len(mean_series)
+            if slope_series:
+                contribs["pupil_slope"] = sum(slope_series) / len(slope_series)
+            if vel_series:
+                contribs["pupil_mean_abs_vel"] = sum(vel_series) / len(vel_series)
+            if std_series:
+                contribs["pupil_std"] = sum(std_series) / len(std_series)
+            if range_series:
+                contribs["pupil_range"] = sum(range_series) / len(range_series)
+        
+        return contribs
 
     # ----------------------------
     # Utilities - AI GENERATED CODE
     # ----------------------------
 
+
+    def _enabled(self, windows: List[WindowFeatures]) -> List[str]:
+        """
+        Get list of enabled metrics from the latest window.
+        Args:
+            windows: List of recent feature windows.
+        
+        Returns:
+            List of enabled metric names.
+        """
+        enabled = windows[-1].enabled_metrics if windows and windows[-1].enabled_metrics else []
+        return enabled
+
     def _metric_series(self, windows: List[WindowFeatures], key: str) -> List[float]:
+        """
+        Extract time series for a specific metric key from windows.
+
+        Args:
+            windows: List of recent feature windows.
+            key: Metric key to extract.
+        
+        Returns:
+            List of metric values.
+        """
+
         out: List[float] = []
         for wf in windows:
-            if not wf.features:
+            if not wf.features or key not in wf.features:
                 continue
-            if key not in wf.features:
+            v = wf.features[key]
+            if v is None:
                 continue
             try:
-                out.append(float(wf.features[key]))
+                fv = float(v)
             except (TypeError, ValueError):
                 continue
+            if not math.isfinite(fv):
+                continue
+            out.append(fv)
         return out
 
-
-    def _mean_and_slope(self, series: List[float]) -> Tuple[float, float]:
-        if not series:
-            return 0.0, 0.0
-        mean = sum(series) / len(series)
-        if len(series) < 2:
-            return mean, 0.0
-        slope = (series[-1] - series[0]) / (len(series) - 1)
-        return float(mean), float(slope)
-
-
     def _ramp(self, x: float, lo: float, hi: float) -> float:
-
-        if x is None or lo is None or hi is None:
-        # swap for your logger if you have it
-            print(f"[RAMP_NONE] x={x} lo={lo} hi={hi}")
-            return 0.0
-
-
+        """
+        Linear ramp function from lo to hi.
+        Returns 0.0 if x <= lo, 1.0 if x >= hi, linear in between.
+        """
         if hi <= lo:
             return 1.0 if x >= hi else 0.0
         if x <= lo:
@@ -413,6 +544,15 @@ class ReactiveTool:
 
 
     def _avg_valid_ratio(self, windows: List[WindowFeatures]) -> float:
+        """
+        Compute average valid sample ratio across windows.
+        
+        Args:
+            windows: List of recent feature windows.
+        
+        Returns:
+            Average valid sample ratio (0.0 to 1.0).
+        """
         vals = [wf.valid_sample_ratio for wf in windows if wf.sample_count > 0]
         if not vals:
             return 0.0
