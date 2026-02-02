@@ -152,7 +152,7 @@ class ForecastingConfig:
 class ReactiveToolConfig:
     """Configuration for Reactive Tool."""
     # Sliding window settings
-    window_size_seconds: float = 3.0
+    window_size_seconds: float = 60.0
     
     # Model settings
     model_type: str = "rule_based"  # "rule_based", "ml_classifier", "sequence_model"

@@ -341,7 +341,7 @@ class SignalProcessingLayer:
             return {
                 "pupil_window_sample_count": 0,
                 "pupil_valid_ratio": 0.0,
-                "pupil_mean": None,
+                "pupil_window_sample_count": None,
                 "pupil_std": None,
                 "pupil_range": None,
                 "pupil_slope": None,

@@ -11,6 +11,7 @@ Predictions are produced using a trained model based on historical or
 previously collected eye-tracking data. The output format is identical 
 to the Signal Processing output to ensure compatibility with downstream logic.
 """
+import traceback
 from typing import Optional, List, Callable
 from collections import deque
 
@@ -123,8 +124,11 @@ class ForecastingTool:
                     except Exception as e:
                         self._logger.system(
                             "forecasting_tool_callback_error",
-                            {"error": str(e)},
-                            level="ERROR"
+                            {
+                                "error": str(e),
+                                "traceback": traceback.format_exc(),
+                            },
+                            level="ERROR",
                         )
     
     def predict(self) -> Optional[PredictedFeatures]:
