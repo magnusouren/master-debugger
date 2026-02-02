@@ -542,9 +542,22 @@ class RuntimeController:
 
         # No pending feedback or already delivered
         if self._pending_feedback is None:
+            self._logger.system(
+                "no_pending_feedback_to_deliver",
+                {},
+                level="DEBUG",
+            )
             return False
         
         if self._pending_feedback_version <= self._last_delivered_version:
+            self._logger.system(
+                "feedback_already_delivered",
+                {
+                    "pending_version": self._pending_feedback_version,
+                    "last_delivered_version": self._last_delivered_version,
+                },
+                level="DEBUG",
+            )
             return False
 
         # Check cooldown
@@ -575,7 +588,15 @@ class RuntimeController:
                     level="DEBUG",
                 )
                 return False
-
+            self._logger.system(
+                "feedback_delivery_threshold_met",
+                {
+                    "score": self._current_user_state.score.score,
+                    "threshold": threshold,
+                    "pending_version": self._pending_feedback_version,
+                },
+                level="DEBUG",
+            )
         return True
     
     def _try_deliver_feedback(self, force: bool = False) -> bool:
@@ -838,7 +859,7 @@ class RuntimeController:
                 "model_type": estimate.model_type,
                 "metadata": estimate.metadata,
             },
-            level="DEBUG",
+            level="INFO",
         )
 
         # Attempt to deliver feedback if conditions are met
@@ -870,6 +891,9 @@ class RuntimeController:
         # Start forecasting if in proactive mode
         if self._operation_mode == OperationMode.PROACTIVE:
             self._forecasting.enable()
+
+        # Start reactive tool
+        self._reactive_tool.start()
 
         self._logger.system(
             "experiment_started",
@@ -937,6 +961,10 @@ class RuntimeController:
 
         # Stop forecasting
         self._forecasting.disable()
+
+        # Stop reactive tool
+        self._reactive_tool.stop()
+        self._reactive_tool.reset()
 
         # Publish domain event for experiment end (before clearing IDs)
         self._publish(DomainEvent(
