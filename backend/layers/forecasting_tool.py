@@ -118,7 +118,14 @@ class ForecastingTool:
                 and prediction.confidence >= self._config.min_confidence_threshold
             ):
                 for callback in self._output_callbacks:
-                    callback(prediction)
+                    try:
+                        callback(prediction)
+                    except Exception as e:
+                        self._logger.system(
+                            "forecasting_tool_callback_error",
+                            {"error": str(e)},
+                            level="ERROR"
+                        )
     
     def predict(self) -> Optional[PredictedFeatures]:
         """
@@ -152,15 +159,12 @@ class ForecastingTool:
             Predicted features or None if prediction not possible.
         """
 
-        windowFeature = self._prepare_input_sequence()
+        window_feature = self._prepare_input_sequence()
 
-        if not windowFeature:
+        if not window_feature:
             return None
         
-        prediction = self._run_model_inference(windowFeature)
-
-        prediction.prediction_timestamp = prediction.target_window_end + horizon_seconds
-        prediction.horizon_seconds = horizon_seconds
+        prediction = self._run_model_inference(window_feature)
 
         return prediction
     
@@ -176,7 +180,7 @@ class ForecastingTool:
             {"method": "get_prediction_confidence"},
             level="WARNING"
         )
-        pass  # TODO: Implement confidence calculation
+        return 0.0  # TODO: Implement confidence retrieval
     
     def register_output_callback(
         self, callback: Callable[[PredictedFeatures], None]
@@ -250,7 +254,7 @@ class ForecastingTool:
             stubbed_prediction.uncertainty = self._estimate_uncertainty(stubbed_prediction)
             stubbed_results.append(stubbed_prediction)
 
-        # return averaged prediction as example
+        # Return the middle prediction as a stub
         return stubbed_results[len(stubbed_results) // 2]
     
     def _estimate_uncertainty(
