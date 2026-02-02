@@ -543,17 +543,38 @@ class ReactiveTool:
         return float((x - lo) / (hi - lo))
 
 
-    def _avg_valid_ratio(self, windows: List[WindowFeatures]) -> float:
-        """
-        Compute average valid sample ratio across windows.
-        
-        Args:
-            windows: List of recent feature windows.
-        
-        Returns:
-            Average valid sample ratio (0.0 to 1.0).
-        """
-        vals = [wf.valid_sample_ratio for wf in windows if wf.sample_count > 0]
+    def _avg_valid_ratio(self, windows: List["WindowFeatures"]) -> float:
+        vals = []
+
+        for wf in windows:
+            feats = getattr(wf, "features", None) or {}
+
+            # Get sample count for weighting
+            n = feats.get("dq_sample_count", 0) or 0
+            if n <= 0:
+                continue
+
+            # Choose which ratio you consider "valid" in the system
+            ratio = feats.get("dq_valid_ratio_any", None)
+
+            # Some metrics can be None → skip
+            if ratio is None:
+                continue
+
+            # clamp for safety (can be useful for numerical edge cases)
+            try:
+                r = float(ratio)
+            except (TypeError, ValueError):
+                continue
+
+            if r < 0.0:
+                r = 0.0
+            elif r > 1.0:
+                r = 1.0
+
+            vals.append(r)
+
         if not vals:
             return 0.0
+
         return float(sum(vals) / len(vals))
