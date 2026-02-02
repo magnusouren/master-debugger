@@ -115,11 +115,8 @@ class SignalProcessingConfig:
     
     # Metrics to extract (TODO: define specific metrics)
     enabled_metrics: List[str] = field(default_factory=lambda: [
-        "fixation_duration",
-        "saccade_amplitude",
         "pupil_diameter",
-        "blink_rate",
-        "gaze_dispersion",
+        "data_quality"
     ])
     
     # Data quality settings
