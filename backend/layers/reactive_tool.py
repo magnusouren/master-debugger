@@ -277,6 +277,9 @@ class ReactiveTool:
         """
         Estimate user state using rule-based heuristics.
 
+        TODO - expand with more metrics later.
+        TODO - make the normalization ramps configurable later. (eg. via calibration values)
+
         Args:
             windows: List of recent feature windows.
         Returns:
@@ -291,6 +294,8 @@ class ReactiveTool:
             return 0.5
 
         load_keys = METRIC_KEYGROUPS["pupil_diameter"]["load"]
+
+        # Extract relevant metric series from windows
         mean_series = self._metric_series(windows, load_keys["mean"])
         slope_series = self._metric_series(windows, load_keys["slope"])
         vel_series = self._metric_series(windows, load_keys["vel"])
@@ -300,18 +305,21 @@ class ReactiveTool:
         if not (mean_series or slope_series or vel_series or std_series or range_series):
             return 0.5
 
+        # Compute averages over the window 
         pupil_mean = sum(mean_series) / len(mean_series) if mean_series else 0.0
         pupil_slope = sum(slope_series) / len(slope_series) if slope_series else 0.0
         pupil_vel = sum(vel_series) / len(vel_series) if vel_series else 0.0
         pupil_std = sum(std_series) / len(std_series) if std_series else 0.0
         pupil_range = sum(range_series) / len(range_series) if range_series else 0.0
 
+        # Normalize values into [0,1] using ramps defined by thresholds
         mean_component  = self._ramp(pupil_mean,  lo=3.8, hi=4.6)
         slope_component = self._ramp(pupil_slope, lo=0.00, hi=0.30)
         vel_component   = self._ramp(pupil_vel,   lo=5.0,  hi=15.0)
         std_component   = self._ramp(pupil_std,   lo=0.1,  hi=0.5)
         range_component = self._ramp(pupil_range, lo=1.0,  hi=3.0)
 
+        # Combine components with weights
         score = (
             0.4 * mean_component +
             0.2 * slope_component +
