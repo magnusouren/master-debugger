@@ -15,7 +15,6 @@ class MessageType(Enum):
     # From VS Code to Backend
     CONTEXT_UPDATE = "context_update"
     CONTEXT_REQUEST = "context_request"
-    FEEDBACK_INTERACTION = "feedback_interaction"
     
     # From Backend to VS Code
     FEEDBACK_DELIVERY = "feedback_delivery"
