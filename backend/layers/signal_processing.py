@@ -13,7 +13,7 @@ representation of the selected metrics.
 import math
 from typing import Any, Dict, Optional, List, Callable
 from collections import deque
-from backend.services.logger_service import get_logger
+from backend.services.logger_service import LoggerService
 
 
 from backend.types import (
@@ -29,19 +29,30 @@ class SignalProcessingLayer:
     Processes raw eye-tracking data into window-based features.
     """
     
-    def __init__(self, config: Optional[SignalProcessingConfig] = None):
+    def __init__(
+        self,
+        config: Optional[SignalProcessingConfig] = None,
+        logger: Optional[LoggerService] = None,
+    ):
         """
         Initialize the Signal Processing layer.
         
         Args:
             config: Configuration for signal processing parameters.
+            logger: Logger instance for recording events.
         """
         self._config = config or SignalProcessingConfig()
         self._sample_buffer: deque[GazeSample] = deque()
         self._output_callbacks: List[Callable[[WindowFeatures], None]] = []
         self._last_output_time: float = 0.0
         self._is_running: bool = False
-        self._logger = get_logger()
+        
+        # Use provided logger or create fallback
+        if logger is None:
+            from backend.services.logger_service import get_logger
+            logger = get_logger()
+        self._logger = logger
+        
         self._next_window_end_ts: Optional[float] = None
     
     def configure(self, config: SignalProcessingConfig) -> None:

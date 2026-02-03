@@ -49,13 +49,26 @@ class RuntimeController:
         """
         self._config = config or SystemConfig()
         
-        # Initialize layers
+        # Initialize logger first (shared by all layers)
+        self._logger = get_logger()
+        
+        # Initialize layers with shared logger
         self._signal_processing = SignalProcessingLayer(
-            self._config.signal_processing
+            self._config.signal_processing,
+            logger=self._logger
         )
-        self._forecasting = ForecastingTool(self._config.forecasting)
-        self._reactive_tool = ReactiveTool(self._config.reactive_tool)
-        self._feedback_layer = FeedbackLayer(self._config.feedback_layer)
+        self._forecasting = ForecastingTool(
+            self._config.forecasting,
+            logger=self._logger
+        )
+        self._reactive_tool = ReactiveTool(
+            self._config.reactive_tool,
+            logger=self._logger
+        )
+        self._feedback_layer = FeedbackLayer(
+            self._config.feedback_layer,
+            logger=self._logger
+        )
         
         # State
         self._status: SystemStatus = SystemStatus.INITIALIZING
@@ -106,8 +119,7 @@ class RuntimeController:
         # main loop
         self._main_loop_task: Optional[asyncio.Task] = None
 
-        # Initialize logger
-        self._logger = get_logger()
+        # Log initialization complete
         self._logger.system(
             "runtime_controller_initialized",
             {

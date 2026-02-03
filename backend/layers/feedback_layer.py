@@ -25,7 +25,7 @@ import uuid
 from backend.types.code_context import CodeContext, CodePosition, CodeRange
 from backend.types.config import FeedbackLayerConfig
 from backend.services.llm_client import LLMClient, create_llm_client, LLMResponse
-from backend.services.logger_service import get_logger
+from backend.services.logger_service import LoggerService
 from backend.types.feedback import FeedbackItem, FeedbackMetadata, FeedbackPriority, FeedbackResponse, FeedbackType
 from backend.types.user_state import UserStateEstimate
 
@@ -37,7 +37,11 @@ class _CacheEntry:
 
 
 class FeedbackLayer:
-    def __init__(self, config: Optional[FeedbackLayerConfig] = None):
+    def __init__(
+        self,
+        config: Optional[FeedbackLayerConfig] = None,
+        logger: Optional[LoggerService] = None,
+    ):
         self._config = config or FeedbackLayerConfig()
 
         # TTL cache
@@ -57,8 +61,11 @@ class FeedbackLayer:
         self._cache_hits = 0
         self._cache_misses = 0
         
-        # Initialize logger
-        self._logger = get_logger()
+        # Use provided logger or create fallback
+        if logger is None:
+            from backend.services.logger_service import get_logger
+            logger = get_logger()
+        self._logger = logger
 
     def configure(self, config: FeedbackLayerConfig) -> None:
         self._config = config
