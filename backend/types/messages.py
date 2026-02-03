@@ -115,6 +115,9 @@ class SystemStatusMessage:
     # LLM model in use
     llm_model: Optional[str] = None
 
+    # Cooldown information
+    feedback_cooldown_left_s: int = 0
+
     # Experiment status
     experiment_active: bool = False
     experiment_id: Optional[str] = None

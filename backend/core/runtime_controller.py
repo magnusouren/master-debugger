@@ -268,6 +268,7 @@ class RuntimeController:
             code_window_samples_processed=self._stats["code_window_samples_processed"],
             feedback_generated=self._stats["feedback_generated"],
             llm_model=self._feedback_layer.get_llm_client().get_model_name() if self._feedback_layer.get_llm_client() else None,
+            feedback_cooldown_left_s=int(self.get_feedback_cooldown_remaining()),
             experiment_active=self._experiment_is_active,
             experiment_id=self._experiment_id,
             participant_id=self._participant_id,
@@ -789,7 +790,14 @@ class RuntimeController:
         """
         current_time = asyncio.get_event_loop().time()
         cooldown = self._config.controller.feedback_cooldown_seconds
-        elapsed = current_time - self._last_feedback_time
+        
+        last_feedback_time = self._last_feedback_time
+
+        if last_feedback_time == 0.0:
+            last_feedback_time = self._stats.get("session_start", current_time)
+        
+        elapsed = current_time - last_feedback_time
+
         remaining = max(0.0, cooldown - elapsed)
         return remaining
     
