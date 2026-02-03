@@ -90,7 +90,14 @@ export class FeedbackRenderer {
         feedbackId: string,
         interactionType: FeedbackInteraction["interaction_type"]
     ): void {
-        // TODO: Implement interaction recording
+        if (this.interactionCallback) {
+            const interaction: FeedbackInteraction = {
+                feedback_id: feedbackId,
+                interaction_type: interactionType,
+                timestamp: Math.floor(Date.now() / 1000),
+            };
+            this.interactionCallback(interaction);
+        }
     }
 
     /**

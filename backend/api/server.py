@@ -18,6 +18,7 @@ from backend.services.logger_service import get_logger
 from backend.types.code_context import CodeContext
 from backend.types.messages import MessageType, WebSocketMessage
 from backend.types.domain_events import DomainEvent, DomainEventType
+from backend.types.feedback import FeedbackInteraction
 
 
 class Server:
@@ -258,6 +259,23 @@ class Server:
             except Exception as error:
                 return {"status": "error", "error": str(error)}
 
+        async def handle_feedback_interaction(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            success = False
+            try:
+                interaction_data = request_data.get("json", {})
+                interaction = FeedbackInteraction.from_dict(interaction_data)
+                success = await self._controller.handle_feedback_interaction(interaction)
+                return {"status": "received" if success else "failed"}
+            except Exception as e:
+                self._logger.system(
+                    "error_handling_feedback_interaction",
+                    {
+                        "error": str(e),
+                        "traceback": repr(e)
+                    },
+                    level="ERROR",
+                )
+                return {"status": "error", "error": str(e)}
 
         # ---- Register Routes ----
 
@@ -295,6 +313,12 @@ class Server:
             "/eye_tracker/disconnect",
             HttpMethod.POST,
             handle_disconnect_eye_tracker,
+        )
+
+        self._rest_api.register_route(
+            "/feedback/interaction",
+            HttpMethod.POST,
+            handle_feedback_interaction,
         )
 
 

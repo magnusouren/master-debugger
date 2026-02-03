@@ -100,7 +100,15 @@ class FeedbackInteraction:
     Received from VS Code extension.
     """
     feedback_id: str
-    interaction_type: str  # "dismissed", "accepted", "clicked", "hovered"
-    timestamp: float
-    duration_ms: Optional[float] = None  # How long feedback was visible
+    interaction_type: str  # "dismissed", "accepted"
+    timestamp: float  # When interaction occurred
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> 'FeedbackInteraction':
+        return FeedbackInteraction(
+            feedback_id=data.get("feedback_id", ""),
+            interaction_type=data.get("interaction_type", ""),
+            timestamp=data.get("timestamp", 0.0),
+            metadata=data.get("metadata", {}),
+        )

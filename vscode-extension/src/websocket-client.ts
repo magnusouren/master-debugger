@@ -173,16 +173,7 @@ export class WebSocketClient {
         return this.send(message);
     }
 
-    /**
-     * Send feedback interaction to the backend.
-     */
-    sendFeedbackInteraction(interaction: FeedbackInteraction): boolean {
-        const message = this.createMessage(MessageType.FEEDBACK_INTERACTION, {
-            ...interaction,
-        } as unknown as Record<string, unknown>);
-        return this.send(message);
-    }
-
+    
     /**
      * Register a handler for a specific message type.
      */

@@ -14,6 +14,7 @@ import {
     FeedbackDeliveryPayload,
     ContextRequestPayload,
     SystemStatus,
+    FeedbackInteraction,
 } from "./types";
 import { isStatusUpdatePayload } from "./utils/typeguard";
 import { fetchStatus } from "./api";
@@ -27,6 +28,11 @@ let statusBar: StatusBarManager | null = null;
 let contextUpdateTimer: NodeJS.Timeout | null = null;
 const CONTEXT_UPDATE_DEBOUNCE_MS = 500;
 
+// Configuration for backend connection
+const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
+const host = config.get<string>("backendHost") || "localhost";
+const port = config.get<number>("apiPort") || 8080;
+
 /**
  * Extension activation.
  */
@@ -38,14 +44,17 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Register commands
     registerCommands(context);
-
+    
     // Set up event listeners
     setupEventListeners(context);
 
     // Auto-connect if configured
-    const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
-    if (config.get<boolean>("autoConnect")) {
+    if (config.get<boolean>("autoConnectBackend")) {
         connectToBackend();
+    }
+
+    if (config.get<boolean>("autoConnectEyeTracker")) {
+        connectToEyeTracker();
     }
 }
 
@@ -72,6 +81,13 @@ function initializeComponents(context: vscode.ExtensionContext): void {
     contextCollector = new ContextCollector();
     feedbackRenderer = new FeedbackRenderer(context);
     statusBar = new StatusBarManager(context);
+
+    // Configure callbacks
+    feedbackRenderer.setInteractionCallback(
+        (interaction) => {
+            handleFeedbackInteraction(interaction);
+        }
+    );
 
     // Update UI when connection state changes (e.g., server shutdown)
     wsClient.onConnectionChange((connected: boolean) => {
@@ -207,10 +223,6 @@ async function connectToBackend(): Promise<void> {
 
         // Fetch system status from REST API and update status bar
         try {
-            const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
-            const host = config.get<string>("backendHost") || "localhost";
-            // Use API port for HTTP /status requests (default 8080)
-            const port = config.get<number>("apiPort") || 8080;
             const statusPayload = await fetchStatus(host, port);
 
             if (isStatusUpdatePayload(statusPayload)) {
@@ -252,33 +264,34 @@ async function showStatus(): Promise<void> {
 }
 
 async function connectToEyeTracker(): Promise<void> {
-    // Let the user enter identifier of the eye tracker to connect to
-    const eyeTrackerId = await vscode.window.showInputBox({
-        prompt: "Enter Eye Tracker Identifier",
-        placeHolder: "e.g., Tobii Pro X3-120",
-    });
+    // // Let the user enter identifier of the eye tracker to connect to
+    // const eyeTrackerId = await vscode.window.showInputBox({
+    //     prompt: "Enter Eye Tracker Identifier",
+    //     placeHolder: "e.g., Tobii Pro X3-120",
+    // });
 
-    const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
-    const host = config.get<string>("backendHost") || "localhost";
-    const port = config.get<number>("apiPort") || 8080;
-
-    await fetch(`http://${host}:${port}/eye_tracker/connect`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ device_id: eyeTrackerId }),
-    });
+    try {
+        await fetch(`http://${host}:${port}/eye_tracker/connect`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ device_id: "" }),
+        });
+        vscode.window.showInformationMessage("Eye tracker connection initiated");
+    } catch (error) {
+        console.error("Failed to connect to eye tracker:", error);
+    }
 }
 
 async function disconnectFromEyeTracker(): Promise<void> {
-    const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
-    const host = config.get<string>("backendHost") || "localhost";
-    const port = config.get<number>("apiPort") || 8080;
-
-    await fetch(`http://${host}:${port}/eye_tracker/disconnect`, {
-        method: "POST",
-    });
+    try {
+        await fetch(`http://${host}:${port}/eye_tracker/disconnect`, {
+            method: "POST",
+        });
+    } catch (error) {
+        console.error("Failed to disconnect from eye tracker:", error);
+    }
 }
 
 
@@ -289,16 +302,13 @@ function clearFeedback(): void {
 }
 
 async function triggerFeedbackSend(): Promise<void> {
-    // TODO - call API /feedback/manual_send to trigger feedback send
-    console.log("Triggering manual feedback send");
-
-    const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
-    const host = config.get<string>("backendHost") || "localhost";
-    const port = config.get<number>("apiPort") || 8080;
-
-    await fetch(`http://${host}:${port}/feedback/manual_send`, {
-        method: "GET",
-    });
+    try {
+        await fetch(`http://${host}:${port}/feedback/manual_send`, {
+            method: "GET",
+        });
+    } catch (error) {
+        console.error("Failed to trigger manual feedback send:", error);
+    }
 }
 
 // --- Event Handlers ---
@@ -365,9 +375,6 @@ function onConfigurationChanged(event: vscode.ConfigurationChangeEvent): void {
 }
 
 function updateConfiguration(): void {
-    const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
-    const host = config.get<string>("backendHost") || "localhost";
-    const port = config.get<number>("websocketPort") || 8765;
     wsClient?.updateSettings(host, port);
 }
 
@@ -411,4 +418,20 @@ function handleError(message: { payload: Record<string, unknown> }): void {
     // TODO: Implement error handling
     const errorMessage = message.payload["message"] as string || "Unknown error";
     vscode.window.showErrorMessage(`Eye Tracking Error: ${errorMessage}`);
+}
+
+async function handleFeedbackInteraction(
+    feedbackInteraction: FeedbackInteraction
+) {
+    try {
+        await fetch(`http://${host}:${port}/feedback/interaction`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(feedbackInteraction),
+        });
+    } catch (error) {
+        console.error("Failed to send feedback interaction:", error);
+    }
 }

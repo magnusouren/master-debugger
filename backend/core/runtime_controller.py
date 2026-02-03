@@ -268,6 +268,7 @@ class RuntimeController:
             code_window_samples_processed=self._stats["code_window_samples_processed"],
             feedback_generated=self._stats["feedback_generated"],
             llm_model=self._feedback_layer.get_llm_client().get_model_name() if self._feedback_layer.get_llm_client() else None,
+            feedback_cooldown_left_s=int(self.get_feedback_cooldown_remaining()),
             experiment_active=self._experiment_is_active,
             experiment_id=self._experiment_id,
             participant_id=self._participant_id,
@@ -315,16 +316,16 @@ class RuntimeController:
             if ok:
                 # Start signal processing
                 self._signal_processing.start()
-                
-                # Start streaming
-                await self._eye_tracker_adapter.start_streaming()
-                
+
                 device_info = self._eye_tracker_adapter.get_device_info()
                 self._logger.system(
                     "eye_tracker_connected",
                     device_info,
                     level="INFO"
                 )
+                
+                # Start streaming
+                await self._eye_tracker_adapter.start_streaming()
                 
                 # Publish status update
                 self._publish(DomainEvent(
@@ -477,14 +478,42 @@ class RuntimeController:
     
     async def handle_feedback_interaction(
         self, interaction: FeedbackInteraction
-    ) -> None:
+    ) -> bool:
         """
         Handle user interaction with feedback.
         
         Args:
             interaction: User interaction data.
         """
-        pass  # TODO: Implement interaction handling
+
+        category_msg = ""
+        if interaction.interaction_type == "dismissed":
+            category_msg = "feedback_dismissed_by_user"
+        elif interaction.interaction_type == "accepted":
+            category_msg = "feedback_accepted_by_user"
+        else:
+            category_msg = f"feedback_interaction_unknown_type: {interaction.interaction_type}"
+        
+        self._logger.system(
+            category_msg,
+            {
+                "feedback_id": interaction.feedback_id,
+                "action_taken": interaction.interaction_type,
+                "timestamp": interaction.timestamp,
+            },
+            level="INFO",
+        )
+        self._logger.experiment(
+            category_msg,
+            {
+                "feedback_id": interaction.feedback_id,
+                "action_taken": interaction.interaction_type,
+                "timestamp": interaction.timestamp,
+            },
+            level="INFO",
+        )
+
+        return True
     
     def register_event_handler(
         self, handler: Callable[[DomainEvent], None]
@@ -572,14 +601,12 @@ class RuntimeController:
             )
             return False
 
-        # Check cooldown
-        current_time = asyncio.get_event_loop().time()
-        cooldown = self._config.controller.feedback_cooldown_seconds
-        if current_time - self._last_feedback_time < cooldown:
+      
+        if self.get_feedback_cooldown_remaining() > 0.0:
             self._logger.system(
                 "feedback_delivery_cooldown",
                 {
-                    "remaining": cooldown - (current_time - self._last_feedback_time),
+                    "remaining": self.get_feedback_cooldown_remaining(),
                     "pending_version": self._pending_feedback_version,
                 },
                 level="DEBUG",
@@ -761,7 +788,18 @@ class RuntimeController:
         Returns:
             Remaining seconds in cooldown.
         """
-        pass # TODO: Implement cooldown logic
+        current_time = asyncio.get_event_loop().time()
+        cooldown = self._config.controller.feedback_cooldown_seconds
+        
+        last_feedback_time = self._last_feedback_time
+
+        if last_feedback_time == 0.0:
+            last_feedback_time = self._stats.get("session_start", current_time)
+        
+        elapsed = current_time - last_feedback_time
+
+        remaining = max(0.0, cooldown - elapsed)
+        return remaining
     
     # --- Data Flow Callbacks ---
     

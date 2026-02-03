@@ -106,10 +106,10 @@ export interface CodeContext {
 export interface FeedbackMetadata {
     generated_at: number;
     generation_time_ms: number;
-    model_used?: string;
     cached: boolean;
-    cache_key?: string;
     feedback_id: string;
+    model_used?: string;
+    cache_key?: string;
     session_id?: string;
     extra?: Record<string, unknown>;
 }
@@ -135,9 +135,8 @@ export interface FeedbackItem {
  */
 export interface FeedbackInteraction {
     feedback_id: string;
-    interaction_type: "dismissed" | "accepted" | "clicked" | "hovered";
+    interaction_type: "dismissed" | "accepted";
     timestamp: number;
-    duration_ms?: number;
     metadata?: Record<string, unknown>;
 }
 
@@ -173,6 +172,7 @@ export interface SystemStatusMessage {
     code_window_samples_processed: number;
     feedback_generated: number;
     experiment_active: boolean;
+    feedback_cooldown_left_s: number;
     llm_model?: string;
     experiment_id?: string;
     participant_id?: string;
