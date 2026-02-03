@@ -521,21 +521,40 @@ class FeedbackLayer:
         )
 
         # Code to show: prefer file_content; otherwise fall back to selection/visible content if present
-        full_code = (
-            context.file_content
-            or (context.visible_range.content if context.visible_range and context.visible_range.content else None)
-            or (context.selection.content if context.selection and context.selection.content else None)
-            or ""
-        )
+        # Also compute the absolute 1-based line number of the first line in `full_code`
+        if context.file_content:
+            full_code = context.file_content
+            base_line_one_based = 1
+        elif context.visible_range and context.visible_range.content:
+            full_code = context.visible_range.content
+            # VS Code uses 0-based line numbers; convert to 1-based
+            base_line_one_based = context.visible_range.start.line + 1
+        elif context.selection and context.selection.content:
+            full_code = context.selection.content
+            # VS Code uses 0-based line numbers; convert to 1-based
+            base_line_one_based = context.selection.start.line + 1
+        else:
+            full_code = ""
+            base_line_one_based = 1
 
         # Extract window around cursor (VS Code uses 0-based line indexing)
-        # Convert cursor.line from 0-based to 1-based for our helpers
-        cursor_line_one_based = cursor.line + 1 if cursor else 1
-        code_excerpt, excerpt_start_line = self._extract_window(full_code, cursor_line_one_based, radius=60)
-        
-        # Add line numbers to the excerpt
-        numbered_code = self._with_line_numbers(code_excerpt, excerpt_start_line)
+        # Convert cursor.line from absolute 0-based to a 1-based line relative to `full_code`
+        if cursor:
+            cursor_abs_line_one_based = cursor.line + 1
+            cursor_line_one_based_relative = cursor_abs_line_one_based - base_line_one_based + 1
+            # Clamp to at least 1 to avoid invalid indices in helpers
+            if cursor_line_one_based_relative < 1:
+                cursor_line_one_based_relative = 1
+        else:
+            cursor_line_one_based_relative = 1
 
+        code_excerpt, excerpt_start_line_relative = self._extract_window(
+            full_code, cursor_line_one_based_relative, radius=60
+        )
+
+        # Add line numbers to the excerpt, using absolute 1-based file line numbers
+        excerpt_start_line_absolute = base_line_one_based + excerpt_start_line_relative - 1
+        numbered_code = self._with_line_numbers(code_excerpt, excerpt_start_line_absolute)
         # TODO - give more details about user state for better personalized feedback
         # Optional user_state snippet (kept generic so it doesn't break if UserStateEstimate changes)
         user_state_text = "(none)"
