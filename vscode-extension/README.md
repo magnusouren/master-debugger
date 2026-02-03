@@ -48,5 +48,6 @@ Configure in VS Code settings:
 - `eyeTrackingDebugger.backendHost`: Backend server host (default: "localhost")
 - `eyeTrackingDebugger.websocketPort`: WebSocket port (default: 8765)
 - `eyeTrackingDebugger.apiPort`: REST API port (default: 8080)
-- `eyeTrackingDebugger.autoConnect`: Auto-connect on startup (default: false)
+- `eyeTrackingDebugger.autoConnectBackend`: Auto-connect on startup (default: false)
+- `eyeTrackingDebugger.autoConnectEyeTracker`: Auto-connect eye tracker on startup (default: false)
 - `eyeTrackingDebugger.showInlineHints`: Show inline hints (default: true)

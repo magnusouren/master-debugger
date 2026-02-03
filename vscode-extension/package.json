@@ -67,11 +67,6 @@
           "default": 8080,
           "description": "REST API server port"
         },
-        "eyeTrackingDebugger.autoConnect": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically connect to backend on startup"
-        },
         "eyeTrackingDebugger.showInlineHints": {
           "type": "boolean",
           "default": true,
@@ -80,7 +75,7 @@
         "eyeTrackingDebugger.autoConnectBackend": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically connect to eye tracker on backend connection"
+          "description": "Automatically connect to backend on backend connection"
         },
         "eyeTrackingDebugger.autoConnectEyeTracker": {
           "type": "boolean",
