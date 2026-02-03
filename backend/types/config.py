@@ -113,11 +113,10 @@ class SignalProcessingConfig:
     # Output settings
     output_frequency_hz: float = 2.0  # 2-10 Hz as per requirements
 
-    # Metrics to extract (TODO: define specific metrics)
+    # Metrics to extract
     enabled_metrics: List[str] = field(default_factory=lambda: [
         "fixation_duration",
         "saccade_amplitude",
-        "pupil_diameter",
         "gaze_dispersion",
         "pupil_diameter",
         "blink_rate",
@@ -134,6 +133,10 @@ class SignalProcessingConfig:
     max_pupil_diameter_mm: float = 9.0  # Physiological maximum
     min_gaze_coordinate: float = -0.5  # Allow some margin outside [0,1] normalized range
     max_gaze_coordinate: float = 1.5  # Allow some margin outside [0,1] normalized range
+
+    # I-VT saccade/fixation detection
+    saccade_velocity_threshold: float = 5.0  # normalized screen units per second
+    min_fixation_duration_ms: float = 60.0   # minimum fixation duration in ms
 
 
 @dataclass

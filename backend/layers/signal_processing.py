@@ -11,7 +11,7 @@ missing values and invalid samples and outputs a stable, structured
 representation of the selected metrics.
 """
 import math
-from typing import Any, Dict, Optional, List, Callable
+from typing import Any, Dict, Optional, List, Callable, Tuple
 from collections import deque
 from backend.services.logger_service import LoggerService
 
@@ -305,7 +305,7 @@ class SignalProcessingLayer:
                     )
                 elif metric == "blink_rate":
                     features.update(
-                        self._extract_blink_rate(cleaned_samples)
+                        self._extract_blink_rate(samples)
                     )
                 else:
                     self._logger.system(
@@ -459,6 +459,74 @@ class SignalProcessingLayer:
             List of interpolated samples.
         """
         pass  # TODO: Implement interpolation
+
+    # -- Gaze position / I-VT helpers --
+
+    def _get_gaze_positions(self, samples: List[GazeSample]) -> List[Tuple[float, float, float]]:
+        """Extract binocular gaze positions as (timestamp, x, y) from valid samples."""
+        positions: List[Tuple[float, float, float]] = []
+        for s in samples:
+            l_ok = s.left_eye_valid and s.left_eye_x is not None and s.left_eye_y is not None
+            r_ok = s.right_eye_valid and s.right_eye_x is not None and s.right_eye_y is not None
+
+            if l_ok and r_ok:
+                x = (float(s.left_eye_x) + float(s.right_eye_x)) / 2.0  # type: ignore[arg-type]
+                y = (float(s.left_eye_y) + float(s.right_eye_y)) / 2.0  # type: ignore[arg-type]
+            elif l_ok:
+                x = float(s.left_eye_x)  # type: ignore[arg-type]
+                y = float(s.left_eye_y)  # type: ignore[arg-type]
+            elif r_ok:
+                x = float(s.right_eye_x)  # type: ignore[arg-type]
+                y = float(s.right_eye_y)  # type: ignore[arg-type]
+            else:
+                continue
+
+            positions.append((s.timestamp, x, y))
+        return positions
+
+    def _segment_by_ivt(
+        self,
+        positions: List[Tuple[float, float, float]],
+    ) -> List[Tuple[bool, List[Tuple[float, float, float]]]]:
+        """
+        Segment gaze positions into fixations and saccades using I-VT
+        (velocity-threshold classification).
+
+        Returns a list of (is_saccade, positions_in_segment) tuples in
+        chronological order.
+        """
+        threshold = self._config.saccade_velocity_threshold
+
+        if len(positions) < 2:
+            return [(False, positions)] if positions else []
+
+        # Label each sample based on the velocity from the *previous* sample.
+        # labels[i] for i >= 1 corresponds to the velocity between positions[i-1]
+        # and positions[i].  The first position inherits the label of the first
+        # velocity measurement.
+        labels: List[bool] = []
+        for i in range(1, len(positions)):
+            dt = positions[i][0] - positions[i - 1][0]
+            if dt <= 0:
+                labels.append(False)
+                continue
+            dx = positions[i][1] - positions[i - 1][1]
+            dy = positions[i][2] - positions[i - 1][2]
+            vel = math.sqrt(dx * dx + dy * dy) / dt
+            labels.append(vel >= threshold)
+
+        labels.insert(0, labels[0])  # first position inherits first label
+
+        # Extract contiguous segments
+        segments: List[Tuple[bool, List[Tuple[float, float, float]]]] = []
+        seg_start = 0
+        for i in range(1, len(labels)):
+            if labels[i] != labels[seg_start]:
+                segments.append((labels[seg_start], positions[seg_start:i]))
+                seg_start = i
+        segments.append((labels[seg_start], positions[seg_start:]))
+
+        return segments
 
     # -- Metric extraction methods --
     
@@ -649,40 +717,189 @@ class SignalProcessingLayer:
         Extract gaze dispersion metrics (spread/variability of gaze points).
 
         Higher dispersion indicates less stable gaze, potentially more confusion or searching.
-
-        TODO: Implement gaze dispersion calculation (std, range, etc.)
         """
-        return {}
+        positions = self._get_gaze_positions(samples)
+        n = len(positions)
+
+        if n < 2:
+            return {
+                "gaze_disp_sample_count": n,
+                "gaze_disp_x_std": None,
+                "gaze_disp_y_std": None,
+                "gaze_disp_total": None,
+                "gaze_disp_max_dist": None,
+            }
+
+        xs = [p[1] for p in positions]
+        ys = [p[2] for p in positions]
+
+        mean_x = sum(xs) / n
+        mean_y = sum(ys) / n
+
+        var_x = sum((x - mean_x) ** 2 for x in xs) / n
+        var_y = sum((y - mean_y) ** 2 for y in ys) / n
+
+        return {
+            "gaze_disp_sample_count": n,
+            "gaze_disp_x_std": math.sqrt(var_x),
+            "gaze_disp_y_std": math.sqrt(var_y),
+            "gaze_disp_total": math.sqrt(var_x + var_y),
+            "gaze_disp_max_dist": max(
+                math.sqrt((x - mean_x) ** 2 + (y - mean_y) ** 2)
+                for x, y in zip(xs, ys)
+            ),
+        }
 
     def _extract_fixation_metrics(self, samples: List[GazeSample]) -> Dict[str, Any]:
         """
-        Extract fixation-related metrics.
+        Extract fixation metrics using I-VT (velocity threshold) algorithm.
 
-        Fixations are periods when the eye is relatively stationary.
-        Longer fixations may indicate processing difficulty.
-
-        TODO: Implement fixation detection algorithm (e.g., I-VT velocity-based)
+        Fixations are periods of relatively stationary gaze.  Longer fixations
+        may indicate processing difficulty.
         """
-        return {}
+        positions = self._get_gaze_positions(samples)
+
+        if len(positions) < 2:
+            return {
+                "fixation_count": 0,
+                "fixation_mean_duration_ms": None,
+                "fixation_max_duration_ms": None,
+                "fixation_mean_dispersion": None,
+            }
+
+        segments = self._segment_by_ivt(positions)
+        min_dur_ms = self._config.min_fixation_duration_ms
+
+        durations: List[float] = []
+        dispersions: List[float] = []
+
+        for is_saccade, seg_positions in segments:
+            if is_saccade or len(seg_positions) < 2:
+                continue
+
+            dur_ms = (seg_positions[-1][0] - seg_positions[0][0]) * 1000.0
+            if dur_ms < min_dur_ms:
+                continue
+
+            durations.append(dur_ms)
+
+            # Spatial dispersion within this fixation
+            n = len(seg_positions)
+            mx = sum(p[1] for p in seg_positions) / n
+            my = sum(p[2] for p in seg_positions) / n
+            disp = math.sqrt(
+                sum((p[1] - mx) ** 2 for p in seg_positions) / n +
+                sum((p[2] - my) ** 2 for p in seg_positions) / n
+            )
+            dispersions.append(disp)
+
+        count = len(durations)
+        return {
+            "fixation_count": count,
+            "fixation_mean_duration_ms": sum(durations) / count if count > 0 else None,
+            "fixation_max_duration_ms": max(durations) if count > 0 else None,
+            "fixation_mean_dispersion": sum(dispersions) / len(dispersions) if dispersions else None,
+        }
 
     def _extract_saccade_metrics(self, samples: List[GazeSample]) -> Dict[str, Any]:
         """
-        Extract saccade-related metrics.
+        Extract saccade metrics using I-VT (velocity threshold) algorithm.
 
-        Saccades are rapid eye movements between fixations.
-        Larger saccades may indicate more scattered attention.
-
-        TODO: Implement saccade detection algorithm
+        Saccades are rapid eye movements between fixations.  Amplitude is the
+        Euclidean distance (normalized screen units) from the end of the
+        preceding fixation to the start of the following fixation.  Only
+        complete saccades (with a fixation on both sides) are counted.
         """
-        return {}
+        positions = self._get_gaze_positions(samples)
+
+        if len(positions) < 2:
+            return {
+                "saccade_count": 0,
+                "saccade_mean_amplitude": None,
+                "saccade_max_amplitude": None,
+                "saccade_mean_duration_ms": None,
+            }
+
+        segments = self._segment_by_ivt(positions)
+
+        amplitudes: List[float] = []
+        durations: List[float] = []
+
+        # Walk segments tracking the cumulative position index so we can
+        # reference the boundary samples of neighbouring fixations.
+        pos_idx = 0
+        prev_fixation_end_idx: Optional[int] = None
+
+        for is_saccade, seg_positions in segments:
+            seg_len = len(seg_positions)
+
+            if not is_saccade:
+                prev_fixation_end_idx = pos_idx + seg_len - 1
+            else:
+                next_fixation_start_idx = pos_idx + seg_len  # first sample after saccade
+
+                if prev_fixation_end_idx is not None and next_fixation_start_idx < len(positions):
+                    start = positions[prev_fixation_end_idx]
+                    end = positions[next_fixation_start_idx]
+
+                    dx = end[1] - start[1]
+                    dy = end[2] - start[2]
+                    amplitudes.append(math.sqrt(dx * dx + dy * dy))
+
+                    # Duration: from saccade onset to next fixation start
+                    durations.append(
+                        (positions[next_fixation_start_idx][0] - positions[pos_idx][0]) * 1000.0
+                    )
+
+            pos_idx += seg_len
+
+        count = len(amplitudes)
+        return {
+            "saccade_count": count,
+            "saccade_mean_amplitude": sum(amplitudes) / count if count > 0 else None,
+            "saccade_max_amplitude": max(amplitudes) if count > 0 else None,
+            "saccade_mean_duration_ms": sum(durations) / count if count > 0 else None,
+        }
     
+    # Made the function, but we are not using it for calculating in reactive tool currently.
     def _extract_blink_rate(self, samples: List[GazeSample]) -> Dict[str, Any]:
         """
-        Extract blink rate metrics.
+        Extract blink metrics by detecting validity gaps in both eyes.
 
-        Saccades are rapid eye movements between fixations.
-        Larger saccades may indicate more scattered attention.
-
-        TODO: Implement saccade detection algorithm
+        A blink is a period where both eyes report invalid, lasting between
+        100–400 ms (physiological blink range).  This method must receive the
+        raw (uncleaned) samples so that validity transitions are visible.
         """
-        return {}
+        if not samples:
+            return {
+                "blink_count": 0,
+                "blink_rate_per_min": 0.0,
+                "blink_mean_duration_ms": None,
+            }
+
+        blink_durations: List[float] = []
+        in_blink = False
+        blink_start: float = 0.0
+
+        for s in samples:
+            both_invalid = not (s.left_eye_valid or s.right_eye_valid)
+
+            if both_invalid and not in_blink:
+                in_blink = True
+                blink_start = s.timestamp
+            elif not both_invalid and in_blink:
+                dur_ms = (s.timestamp - blink_start) * 1000.0
+                if 100.0 <= dur_ms <= 400.0:
+                    blink_durations.append(dur_ms)
+                in_blink = False
+
+        # Extrapolate rate to per-minute based on observed window duration
+        window_duration_s = samples[-1].timestamp - samples[0].timestamp
+        window_duration_min = window_duration_s / 60.0 if window_duration_s > 0 else 1.0
+
+        count = len(blink_durations)
+        return {
+            "blink_count": count,
+            "blink_rate_per_min": count / window_duration_min if window_duration_min > 0 else 0.0,
+            "blink_mean_duration_ms": sum(blink_durations) / count if count > 0 else None,
+        }

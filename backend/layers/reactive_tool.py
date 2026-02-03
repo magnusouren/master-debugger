@@ -66,8 +66,29 @@ METRIC_KEYGROUPS = {
             "dt_jitter_ms": "dq_dt_jitter_ms",
         }
     },
-    # TODO - add more later:
-    # "gaze_dispersion": {"load": {"dispersion": "gaze_dispersion"}, ...},
+    "fixation_duration": {
+        "load": {
+            "mean_duration_ms": "fixation_mean_duration_ms",
+            "max_duration_ms": "fixation_max_duration_ms",
+            "count": "fixation_count",
+            "mean_dispersion": "fixation_mean_dispersion",
+        },
+    },
+    "saccade_amplitude": {
+        "load": {
+            "mean_amplitude": "saccade_mean_amplitude",
+            "max_amplitude": "saccade_max_amplitude",
+            "count": "saccade_count",
+            "mean_duration_ms": "saccade_mean_duration_ms",
+        },
+    },
+    "gaze_dispersion": {
+        "load": {
+            "total": "gaze_disp_total",
+            "x_std": "gaze_disp_x_std",
+            "y_std": "gaze_disp_y_std",
+        },
+    },
 }
 
 
@@ -289,7 +310,10 @@ class ReactiveTool:
         """
         Estimate user state using rule-based heuristics.
 
-        TODO - expand with more metrics later.
+        Each enabled metric group contributes a normalised [0,1] sub-score
+        with a base weight.  Weights are re-normalised at runtime so the
+        estimate degrades gracefully when some metrics are unavailable.
+
         TODO - make the normalization ramps configurable later. (eg. via calibration values)
 
         Args:
@@ -297,48 +321,73 @@ class ReactiveTool:
         Returns:
             Computed user state score.
         """
-
-
         enabled = self._enabled(windows)
 
-        # If pupil metrics aren't enabled, we can't do pupil-based load
-        if "pupil_diameter" not in enabled:
+        # components: metric_name -> (sub_score, base_weight)
+        components: dict = {}
+
+        # --- Pupil diameter (base weight 0.50) ---
+        if "pupil_diameter" in enabled:
+            load_keys = METRIC_KEYGROUPS["pupil_diameter"]["load"]
+
+            mean_series  = self._metric_series(windows, load_keys["mean"])
+            slope_series = self._metric_series(windows, load_keys["slope"])
+            vel_series   = self._metric_series(windows, load_keys["vel"])
+            std_series   = self._metric_series(windows, load_keys["std"])
+            range_series = self._metric_series(windows, load_keys["range"])
+
+            if mean_series or slope_series or vel_series or std_series or range_series:
+                pupil_mean  = sum(mean_series)  / len(mean_series)  if mean_series  else 0.0
+                pupil_slope = sum(slope_series) / len(slope_series) if slope_series else 0.0
+                pupil_vel   = sum(vel_series)   / len(vel_series)   if vel_series   else 0.0
+                pupil_std   = sum(std_series)   / len(std_series)   if std_series   else 0.0
+                pupil_range = sum(range_series) / len(range_series) if range_series else 0.0
+
+                pupil_score = (
+                    0.4 * self._ramp(pupil_mean,  lo=3.8,  hi=4.6)  +
+                    0.2 * self._ramp(pupil_slope, lo=0.00, hi=0.30) +
+                    0.2 * self._ramp(pupil_vel,   lo=5.0,  hi=15.0) +
+                    0.1 * self._ramp(pupil_std,   lo=0.1,  hi=0.5)  +
+                    0.1 * self._ramp(pupil_range, lo=1.0,  hi=3.0)
+                )
+                components["pupil"] = (pupil_score, 0.50)
+
+        # --- Fixation duration (base weight 0.25) ---
+        # Longer mean fixation → higher cognitive load
+        if "fixation_duration" in enabled:
+            dur_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
+            )
+            if dur_series:
+                mean_dur = sum(dur_series) / len(dur_series)
+                components["fixation"] = (self._ramp(mean_dur, lo=150.0, hi=500.0), 0.25)
+
+        # --- Saccade amplitude (base weight 0.15) ---
+        # Larger mean saccade amplitude → more scattered attention
+        if "saccade_amplitude" in enabled:
+            amp_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_amplitude"]
+            )
+            if amp_series:
+                mean_amp = sum(amp_series) / len(amp_series)
+                components["saccade"] = (self._ramp(mean_amp, lo=0.03, hi=0.20), 0.15)
+
+        # --- Gaze dispersion (base weight 0.10) ---
+        # Higher total dispersion → less focused gaze
+        if "gaze_dispersion" in enabled:
+            disp_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["gaze_dispersion"]["load"]["total"]
+            )
+            if disp_series:
+                mean_disp = sum(disp_series) / len(disp_series)
+                components["dispersion"] = (self._ramp(mean_disp, lo=0.02, hi=0.10), 0.10)
+
+        if not components:
             return 0.5
 
-        load_keys = METRIC_KEYGROUPS["pupil_diameter"]["load"]
-
-        # Extract relevant metric series from windows
-        mean_series = self._metric_series(windows, load_keys["mean"])
-        slope_series = self._metric_series(windows, load_keys["slope"])
-        vel_series = self._metric_series(windows, load_keys["vel"])
-        std_series = self._metric_series(windows, load_keys["std"])
-        range_series = self._metric_series(windows, load_keys["range"])
-
-        if not (mean_series or slope_series or vel_series or std_series or range_series):
-            return 0.5
-
-        # Compute averages over the window 
-        pupil_mean = sum(mean_series) / len(mean_series) if mean_series else 0.0
-        pupil_slope = sum(slope_series) / len(slope_series) if slope_series else 0.0
-        pupil_vel = sum(vel_series) / len(vel_series) if vel_series else 0.0
-        pupil_std = sum(std_series) / len(std_series) if std_series else 0.0
-        pupil_range = sum(range_series) / len(range_series) if range_series else 0.0
-
-        # Normalize values into [0,1] using ramps defined by thresholds
-        mean_component  = self._ramp(pupil_mean,  lo=3.8, hi=4.6)
-        slope_component = self._ramp(pupil_slope, lo=0.00, hi=0.30)
-        vel_component   = self._ramp(pupil_vel,   lo=5.0,  hi=15.0)
-        std_component   = self._ramp(pupil_std,   lo=0.1,  hi=0.5)
-        range_component = self._ramp(pupil_range, lo=1.0,  hi=3.0)
-
-        # Combine components with weights
-        score = (
-            0.4 * mean_component +
-            0.2 * slope_component +
-            0.2 * vel_component +
-            0.1 * std_component +
-            0.1 * range_component
-        )
+        # Re-normalise weights so they sum to 1.0
+        total_weight = sum(w for _, w in components.values())
+        score = sum(v * (w / total_weight) for v, w in components.values())
 
         return float(max(0.0, min(1.0, score)))
     
@@ -501,7 +550,31 @@ class ReactiveTool:
                 contribs["pupil_std"] = sum(std_series) / len(std_series)
             if range_series:
                 contribs["pupil_range"] = sum(range_series) / len(range_series)
-        
+
+        if "fixation_duration" in enabled:
+            load_keys = METRIC_KEYGROUPS["fixation_duration"]["load"]
+            dur_series = self._metric_series(features, load_keys["mean_duration_ms"])
+            if dur_series:
+                contribs["fixation_mean_duration_ms"] = sum(dur_series) / len(dur_series)
+            count_series = self._metric_series(features, load_keys["count"])
+            if count_series:
+                contribs["fixation_count"] = sum(count_series) / len(count_series)
+
+        if "saccade_amplitude" in enabled:
+            load_keys = METRIC_KEYGROUPS["saccade_amplitude"]["load"]
+            amp_series = self._metric_series(features, load_keys["mean_amplitude"])
+            if amp_series:
+                contribs["saccade_mean_amplitude"] = sum(amp_series) / len(amp_series)
+            count_series = self._metric_series(features, load_keys["count"])
+            if count_series:
+                contribs["saccade_count"] = sum(count_series) / len(count_series)
+
+        if "gaze_dispersion" in enabled:
+            load_keys = METRIC_KEYGROUPS["gaze_dispersion"]["load"]
+            disp_series = self._metric_series(features, load_keys["total"])
+            if disp_series:
+                contribs["gaze_disp_total"] = sum(disp_series) / len(disp_series)
+
         return contribs
 
     # ----------------------------
