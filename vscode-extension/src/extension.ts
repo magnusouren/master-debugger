@@ -270,19 +270,28 @@ async function connectToEyeTracker(): Promise<void> {
     //     placeHolder: "e.g., Tobii Pro X3-120",
     // });
 
-    await fetch(`http://${host}:${port}/eye_tracker/connect`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ device_id: "" }),
-    });
+    try {
+        await fetch(`http://${host}:${port}/eye_tracker/connect`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ device_id: "" }),
+        });
+        vscode.window.showInformationMessage("Eye tracker connection initiated");
+    } catch (error) {
+        console.error("Failed to connect to eye tracker:", error);
+    }
 }
 
 async function disconnectFromEyeTracker(): Promise<void> {
-    await fetch(`http://${host}:${port}/eye_tracker/disconnect`, {
-        method: "POST",
-    });
+    try {
+        await fetch(`http://${host}:${port}/eye_tracker/disconnect`, {
+            method: "POST",
+        });
+    } catch (error) {
+        console.error("Failed to disconnect from eye tracker:", error);
+    }
 }
 
 
