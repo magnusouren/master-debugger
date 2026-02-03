@@ -438,6 +438,50 @@ class FeedbackLayer:
         for k in expired:
             self._cache.pop(k, None)
 
+    def _extract_window(self, code: str, cursor_line_one_based: int, radius: int = 60) -> Tuple[str, int]:
+        """
+        Extract a window of code around the cursor line.
+        
+        :param code: Full file content
+        :param cursor_line_one_based: Cursor line (1-based)
+        :param radius: Number of lines before/after cursor to include
+        :return: (excerpt_code, excerpt_start_line_one_based)
+        """
+        lines = code.splitlines()
+        total_lines = len(lines)
+        
+        # Convert to 0-based for indexing
+        cursor_idx = cursor_line_one_based - 1
+        cursor_idx = max(0, min(cursor_idx, total_lines - 1))
+        
+        # Calculate window boundaries
+        start_idx = max(0, cursor_idx - radius)
+        end_idx = min(total_lines, cursor_idx + radius + 1)
+        
+        # Extract window
+        window_lines = lines[start_idx:end_idx]
+        excerpt = "\n".join(window_lines)
+        
+        # Return excerpt and its starting line (1-based)
+        return excerpt, start_idx + 1
+
+    def _with_line_numbers(self, code: str, start_line_one_based: int) -> str:
+        """
+        Prefix each line with stable line numbers in format: L000123| <code>
+        
+        :param code: Code excerpt to number
+        :param start_line_one_based: Starting line number (1-based) for this excerpt
+        :return: Line-numbered code
+        """
+        lines = code.splitlines()
+        numbered_lines = []
+        
+        for idx, line in enumerate(lines):
+            line_num = start_line_one_based + idx
+            numbered_lines.append(f"L{line_num:06d}| {line}")
+        
+        return "\n".join(numbered_lines)
+
     def _build_llm_prompt(
         self,
         context: CodeContext,
@@ -477,12 +521,20 @@ class FeedbackLayer:
         )
 
         # Code to show: prefer file_content; otherwise fall back to selection/visible content if present
-        code = (
+        full_code = (
             context.file_content
             or (context.visible_range.content if context.visible_range and context.visible_range.content else None)
             or (context.selection.content if context.selection and context.selection.content else None)
             or ""
         )
+
+        # Extract window around cursor (VS Code uses 0-based line indexing)
+        # Convert cursor.line from 0-based to 1-based for our helpers
+        cursor_line_one_based = cursor.line + 1 if cursor else 1
+        code_excerpt, excerpt_start_line = self._extract_window(full_code, cursor_line_one_based, radius=60)
+        
+        # Add line numbers to the excerpt
+        numbered_code = self._with_line_numbers(code_excerpt, excerpt_start_line)
 
         # TODO - give more details about user state for better personalized feedback
         # Optional user_state snippet (kept generic so it doesn't break if UserStateEstimate changes)
@@ -526,6 +578,13 @@ class FeedbackLayer:
             "- Do NOT invent errors not supported by code/diagnostics.\n"
             "- Prefer specific edits (what/where/how) over generic advice.\n\n"
 
+            "IMPORTANT - Line Number Usage:\n"
+            "- Each code line is prefixed like: L000123| <code>\n"
+            "- VS Code positions are 0-based. Therefore, convert the prefix number L to code_range line by: line = L - 1.\n"
+            "- Set code_range.start.line and code_range.end.line using that conversion.\n"
+            "- If you are unsure about exact column positions, set start.character = 0 and end.character = 0.\n"
+            "- Example: 'L000042| def foo():' => code_range.start.line = 41.\n\n"
+
             "Context:\n"
             f"- language_id: {context.language_id}\n"
             f"- file_path: {context.file_path}\n"
@@ -540,9 +599,9 @@ class FeedbackLayer:
             "Diagnostics (DiagnosticInfo.severity is one of: error, warning, info, hint):\n"
             f"{diag_text}\n\n"
 
-            "Code (from context.file_content if available):\n"
+            "Code (excerpt around cursor with line numbers):\n"
             f"<BEGIN_CODE language={context.language_id}>\n"
-            f"{code}\n"
+            f"{numbered_code}\n"
             "<END_CODE>\n"
         )
 
