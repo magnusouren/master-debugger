@@ -74,6 +74,10 @@ class SignalProcessingLayer:
                 "min_valid_sample_ratio": config.min_valid_sample_ratio,
                 "interpolate_missing": config.interpolate_missing,
                 "max_gap_to_interpolate_ms": config.max_gap_to_interpolate_ms,
+                "min_pupil_diameter_mm": config.min_pupil_diameter_mm,
+                "max_pupil_diameter_mm": config.max_pupil_diameter_mm,
+                "min_gaze_coordinate": config.min_gaze_coordinate,
+                "max_gaze_coordinate": config.max_gaze_coordinate,
             },
             level="DEBUG"
         )
@@ -149,8 +153,22 @@ class SignalProcessingLayer:
             # 6. Compute features (implementation-specific)
             features = self._compute_window_features(window_samples)
 
-            # 7. Emit WindowFeatures
-            # TODO: What if valid_sample_ratio < min_valid_sample_ratio?
+            # 7. Check data quality and emit WindowFeatures
+            is_low_quality = valid_sample_ratio < self._config.min_valid_sample_ratio
+
+            if is_low_quality:
+                self._logger.system(
+                    "low_quality_window",
+                    {
+                        "window_start": window_start,
+                        "window_end": window_end,
+                        "valid_sample_ratio": valid_sample_ratio,
+                        "min_required": self._config.min_valid_sample_ratio,
+                        "sample_count": sample_count,
+                    },
+                    level="WARNING"
+                )
+
             window_features = WindowFeatures(
                 window_start=window_start,
                 window_end=window_end,
@@ -160,10 +178,7 @@ class SignalProcessingLayer:
                 enabled_metrics=list(self._config.enabled_metrics)
             )
 
-            # 8. Log collected features
-            # TODO - figure out what to log here
-
-            # 9. Call output callbacks
+            # 8. Call output callbacks (emit even if low quality - let downstream decide)
             self.call_callbacks(window_features)
 
 
@@ -276,11 +291,18 @@ class SignalProcessingLayer:
                     features.update(
                         self._extract_data_quality_metrics(cleaned_samples)
                     )
-                # TODO : Implement other metrics
-                # elif metric == "gaze_dispersion":
-                #     features.update(
-                #         self._extract_gaze_dispersion_metrics(cleaned_samples)
-                #     )
+                elif metric == "gaze_dispersion":
+                    features.update(
+                        self._extract_gaze_dispersion_metrics(cleaned_samples)
+                    )
+                elif metric == "fixation_duration":
+                    features.update(
+                        self._extract_fixation_metrics(cleaned_samples)
+                    )
+                elif metric == "saccade_amplitude":
+                    features.update(
+                        self._extract_saccade_metrics(cleaned_samples)
+                    )
                 else:
                     self._logger.system(
                         "unknown_metric_requested",
@@ -300,38 +322,135 @@ class SignalProcessingLayer:
 
         return features
     
+    def _is_sample_valid(self, sample: GazeSample) -> bool:
+        """
+        Determine if a gaze sample meets validity criteria.
+
+        A sample is considered valid if at least one eye has:
+        - Valid flag set
+        - Finite gaze coordinates within configured bounds
+        - Finite pupil diameter within physiological range (if available)
+
+        Args:
+            sample: The gaze sample to validate.
+
+        Returns:
+            True if the sample is valid, False otherwise.
+        """
+        def is_finite(x: Optional[float]) -> bool:
+            """Check if value is not None and is a finite number."""
+            return x is not None and isinstance(x, (int, float)) and math.isfinite(x)
+
+        def is_in_bounds(x: Optional[float], min_val: float, max_val: float) -> bool:
+            """Check if value is finite and within bounds."""
+            return is_finite(x) and min_val <= x <= max_val  # type: ignore[arg-type, operator]
+
+        # Check left eye validity
+        left_valid = False
+        if sample.left_eye_valid:
+            # Check gaze coordinates
+            gaze_valid = (
+                is_in_bounds(
+                    sample.left_eye_x,
+                    self._config.min_gaze_coordinate,
+                    self._config.max_gaze_coordinate
+                ) and
+                is_in_bounds(
+                    sample.left_eye_y,
+                    self._config.min_gaze_coordinate,
+                    self._config.max_gaze_coordinate
+                )
+            )
+
+            # Check pupil diameter if available
+            pupil_valid = True
+            if sample.left_pupil_diameter is not None:
+                pupil_valid = is_in_bounds(
+                    sample.left_pupil_diameter,
+                    self._config.min_pupil_diameter_mm,
+                    self._config.max_pupil_diameter_mm
+                )
+
+            left_valid = gaze_valid and pupil_valid
+
+        # Check right eye validity
+        right_valid = False
+        if sample.right_eye_valid:
+            # Check gaze coordinates
+            gaze_valid = (
+                is_in_bounds(
+                    sample.right_eye_x,
+                    self._config.min_gaze_coordinate,
+                    self._config.max_gaze_coordinate
+                ) and
+                is_in_bounds(
+                    sample.right_eye_y,
+                    self._config.min_gaze_coordinate,
+                    self._config.max_gaze_coordinate
+                )
+            )
+
+            # Check pupil diameter if available
+            pupil_valid = True
+            if sample.right_pupil_diameter is not None:
+                pupil_valid = is_in_bounds(
+                    sample.right_pupil_diameter,
+                    self._config.min_pupil_diameter_mm,
+                    self._config.max_pupil_diameter_mm
+                )
+
+            right_valid = gaze_valid and pupil_valid
+
+        return left_valid or right_valid
+
     def _handle_missing_values(
         self, samples: List[GazeSample]
     ) -> List[GazeSample]:
         """
         Clean samples by removing invalid entries and optionally interpolating gaps.
         """
+        if not samples:
+            return []
 
-        valid_samples = [
-            s for s in samples
-            if s.left_eye_valid or s.right_eye_valid  # TODO : Define validity criteria
-        ]
+        # Filter samples using robust validity checking
+        initial_count = len(samples)
+        valid_samples = [s for s in samples if self._is_sample_valid(s)]
+        filtered_count = len(valid_samples)
+
+        # Log if significant data was filtered
+        if initial_count > 0:
+            rejection_ratio = (initial_count - filtered_count) / initial_count
+            if rejection_ratio > 0.2:  # More than 20% rejected
+                self._logger.system(
+                    "high_sample_rejection_rate",
+                    {
+                        "initial_count": initial_count,
+                        "valid_count": filtered_count,
+                        "rejection_ratio": rejection_ratio,
+                    },
+                    level="WARNING"
+                )
 
         if not self._config.interpolate_missing:
             return valid_samples
 
-        # TODO : Implement interpolation logic
+        # TODO: Implement interpolation logic
 
         return valid_samples
 
-    
+
     def _interpolate_gap(
-        self, 
-        before: GazeSample, 
+        self,
+        before: GazeSample,
         after: GazeSample
     ) -> List[GazeSample]:
         """
         Interpolate missing samples between two valid samples.
-        
+
         Args:
             before: Valid sample before the gap.
             after: Valid sample after the gap.
-            
+
         Returns:
             List of interpolated samples.
         """
@@ -520,3 +639,35 @@ class SignalProcessingLayer:
             "dq_mean_dt_ms": (mean_dt * 1000.0) if mean_dt is not None else None,
             "dq_dt_jitter_ms": (dt_jitter * 1000.0) if dt_jitter is not None else None,
         }
+
+    def _extract_gaze_dispersion_metrics(self, samples: List[GazeSample]) -> Dict[str, Any]:
+        """
+        Extract gaze dispersion metrics (spread/variability of gaze points).
+
+        Higher dispersion indicates less stable gaze, potentially more confusion or searching.
+
+        TODO: Implement gaze dispersion calculation (std, range, etc.)
+        """
+        return {}
+
+    def _extract_fixation_metrics(self, samples: List[GazeSample]) -> Dict[str, Any]:
+        """
+        Extract fixation-related metrics.
+
+        Fixations are periods when the eye is relatively stationary.
+        Longer fixations may indicate processing difficulty.
+
+        TODO: Implement fixation detection algorithm (e.g., I-VT velocity-based)
+        """
+        return {}
+
+    def _extract_saccade_metrics(self, samples: List[GazeSample]) -> Dict[str, Any]:
+        """
+        Extract saccade-related metrics.
+
+        Saccades are rapid eye movements between fixations.
+        Larger saccades may indicate more scattered attention.
+
+        TODO: Implement saccade detection algorithm
+        """
+        return {}

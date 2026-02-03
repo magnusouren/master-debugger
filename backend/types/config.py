@@ -105,24 +105,35 @@ class SignalProcessingConfig:
     """Configuration for Signal Processing layer."""
     # Input settings
     input_sampling_rate_hz: float = 120.0
-    
+
     # Window settings
     window_length_seconds: float = 1.0
     window_overlap_ratio: float = 0.5
-    
+
     # Output settings
     output_frequency_hz: float = 2.0  # 2-10 Hz as per requirements
-    
+
     # Metrics to extract (TODO: define specific metrics)
     enabled_metrics: List[str] = field(default_factory=lambda: [
+        "fixation_duration",
+        "saccade_amplitude",
         "pupil_diameter",
+        "gaze_dispersion",
+        "pupil_diameter",
+        "blink_rate",
         "data_quality"
     ])
-    
+
     # Data quality settings
     min_valid_sample_ratio: float = 0.5
     interpolate_missing: bool = True
     max_gap_to_interpolate_ms: float = 100.0
+
+    # Validation thresholds
+    min_pupil_diameter_mm: float = 1.5  # Physiological minimum
+    max_pupil_diameter_mm: float = 9.0  # Physiological maximum
+    min_gaze_coordinate: float = -0.5  # Allow some margin outside [0,1] normalized range
+    max_gaze_coordinate: float = 1.5  # Allow some margin outside [0,1] normalized range
 
 
 @dataclass
