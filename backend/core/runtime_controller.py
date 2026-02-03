@@ -315,16 +315,16 @@ class RuntimeController:
             if ok:
                 # Start signal processing
                 self._signal_processing.start()
-                
-                # Start streaming
-                await self._eye_tracker_adapter.start_streaming()
-                
+
                 device_info = self._eye_tracker_adapter.get_device_info()
                 self._logger.system(
                     "eye_tracker_connected",
                     device_info,
                     level="INFO"
                 )
+                
+                # Start streaming
+                await self._eye_tracker_adapter.start_streaming()
                 
                 # Publish status update
                 self._publish(DomainEvent(
