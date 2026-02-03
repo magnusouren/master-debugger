@@ -124,7 +124,7 @@ class ForecastingTool:
                         self._logger.system(
                             "forecasting_tool_callback_error",
                             {"error": str(e)},
-                            level="ERROR",
+                            level="ERROR"
                         )
     
     def predict(self) -> Optional[PredictedFeatures]:
