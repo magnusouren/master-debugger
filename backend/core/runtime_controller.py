@@ -634,7 +634,16 @@ class RuntimeController:
                     "threshold": threshold,
                     "pending_version": self._pending_feedback_version,
                 },
-                level="DEBUG",
+                level="INFO",
+            )
+            self._logger.experiment(
+                "feedback_delivery_threshold_met",
+                {
+                    "score": self._current_user_state.score.score,
+                    "threshold": threshold,
+                    "pending_version": self._pending_feedback_version,
+                },
+                level="INFO",
             )
         return True
     
@@ -686,10 +695,25 @@ class RuntimeController:
         self._logger.system(
             "feedback_delivered",
             {
-                "item_count": len(feedback.items),
+                "feedback_id": feedback.metadata.feedback_id,
+                "trigger": event_meta["trigger"],
                 "recipient_id": recipient_id,
                 "feedback_version": version,
+                "item_count": len(feedback.items),
+                "item_ids": [item.metadata.feedback_id for item in feedback.items],
+            },
+            level="INFO",
+        )
+
+        self._logger.experiment(
+            "feedback_delivered",
+            {
+                "feedback_id": feedback.metadata.feedback_id,
                 "trigger": event_meta["trigger"],
+                "recipient_id": recipient_id,
+                "feedback_version": version,
+                "item_count": len(feedback.items),
+                "item_ids": [item.metadata.feedback_id for item in feedback.items],
             },
             level="INFO",
         )
