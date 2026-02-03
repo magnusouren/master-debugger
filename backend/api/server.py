@@ -18,6 +18,7 @@ from backend.services.logger_service import get_logger
 from backend.types.code_context import CodeContext
 from backend.types.messages import MessageType, WebSocketMessage
 from backend.types.domain_events import DomainEvent, DomainEventType
+from backend.types.feedback import FeedbackInteraction
 
 
 class Server:
@@ -262,7 +263,6 @@ class Server:
             success = False
             try:
                 interaction_data = request_data.get("json", {})
-                from backend.types.feedback import FeedbackInteraction
                 interaction = FeedbackInteraction.from_dict(interaction_data)
                 success = await self._controller.handle_feedback_interaction(interaction)
                 return {"status": "received" if success else "failed"}
