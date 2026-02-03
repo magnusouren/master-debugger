@@ -302,11 +302,13 @@ function clearFeedback(): void {
 }
 
 async function triggerFeedbackSend(): Promise<void> {
-    console.log("Triggering manual feedback send");
-
-    await fetch(`http://${host}:${port}/feedback/manual_send`, {
-        method: "GET",
-    });
+    try {
+        await fetch(`http://${host}:${port}/feedback/manual_send`, {
+            method: "GET",
+        });
+    } catch (error) {
+        console.error("Failed to trigger manual feedback send:", error);
+    }
 }
 
 // --- Event Handlers ---
@@ -419,7 +421,7 @@ function handleError(message: { payload: Record<string, unknown> }): void {
 }
 
 async function handleFeedbackInteraction(
-    feedbackInteraction : FeedbackInteraction
+    feedbackInteraction: FeedbackInteraction
 ) {
     try {
         await fetch(`http://${host}:${port}/feedback/interaction`, {
