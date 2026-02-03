@@ -303,6 +303,10 @@ class SignalProcessingLayer:
                     features.update(
                         self._extract_saccade_metrics(cleaned_samples)
                     )
+                elif metric == "blink_rate":
+                    features.update(
+                        self._extract_blink_rate(cleaned_samples)
+                    )
                 else:
                     self._logger.system(
                         "unknown_metric_requested",
@@ -664,6 +668,17 @@ class SignalProcessingLayer:
     def _extract_saccade_metrics(self, samples: List[GazeSample]) -> Dict[str, Any]:
         """
         Extract saccade-related metrics.
+
+        Saccades are rapid eye movements between fixations.
+        Larger saccades may indicate more scattered attention.
+
+        TODO: Implement saccade detection algorithm
+        """
+        return {}
+    
+    def _extract_blink_rate(self, samples: List[GazeSample]) -> Dict[str, Any]:
+        """
+        Extract blink rate metrics.
 
         Saccades are rapid eye movements between fixations.
         Larger saccades may indicate more scattered attention.
