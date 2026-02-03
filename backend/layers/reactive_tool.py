@@ -18,6 +18,7 @@ from typing import Optional, List, Callable
 from collections import deque
 from enum import Enum
 
+from backend.services.logger_service import LoggerService
 from backend.types import (
     WindowFeatures,
     UserStateScore,
@@ -75,12 +76,17 @@ class ReactiveTool:
     Estimates user state from eye-tracking features.
     """
     
-    def __init__(self, config: Optional[ReactiveToolConfig] = None):
+    def __init__(
+        self,
+        config: Optional[ReactiveToolConfig] = None,
+        logger: Optional[LoggerService] = None,
+    ):
         """
         Initialize the Reactive Tool.
         
         Args:
             config: Configuration for reactive tool parameters.
+            logger: Logger instance for recording events.
         """
         self._config = config or ReactiveToolConfig()
         self._feature_window: deque[WindowFeatures] = deque()
@@ -90,6 +96,12 @@ class ReactiveTool:
         self._output_callbacks: List[Callable[[UserStateEstimate], None]] = []
         self._score_history: deque[float] = deque()  # For smoothing
         self._is_running: bool = False
+        
+        # Use provided logger or create fallback
+        if logger is None:
+            from backend.services.logger_service import get_logger
+            logger = get_logger()
+        self._logger = logger
     
     def configure(self, config: ReactiveToolConfig) -> None:
         """

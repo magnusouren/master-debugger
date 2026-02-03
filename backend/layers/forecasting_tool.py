@@ -14,7 +14,7 @@ to the Signal Processing output to ensure compatibility with downstream logic.
 from typing import Optional, List, Callable
 from collections import deque
 
-from backend.services.logger_service import get_logger
+from backend.services.logger_service import LoggerService
 from backend.types import (
     WindowFeatures,
     PredictedFeatures,
@@ -27,12 +27,17 @@ class ForecastingTool:
     Predicts future eye-tracking features for proactive intervention.
     """
     
-    def __init__(self, config: Optional[ForecastingConfig] = None):
+    def __init__(
+        self,
+        config: Optional[ForecastingConfig] = None,
+        logger: Optional[LoggerService] = None,
+    ):
         """
         Initialize the Forecasting Tool.
         
         Args:
             config: Configuration for forecasting parameters.
+            logger: Logger instance for recording events.
         """
         self._config = config or ForecastingConfig()
         self._feature_history: deque[WindowFeatures] = deque()
@@ -41,7 +46,11 @@ class ForecastingTool:
         self._is_enabled: bool = False
         self._last_prediction_time: float = 0.0
 
-        self._logger = get_logger()
+        # Use provided logger or create fallback
+        if logger is None:
+            from backend.services.logger_service import get_logger
+            logger = get_logger()
+        self._logger = logger
     
     def configure(self, config: ForecastingConfig) -> None:
         """
