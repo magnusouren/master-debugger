@@ -295,6 +295,9 @@ export class StatusBarManager {
 
                     <div class="label">Feedback generated</div>
                     <div class="value" id="feedback_generated">–</div>
+
+                    <div class="label">Feedback cooldown left (s)</div>
+                    <div class="value" id="feedback_cooldown_left_s">–</div>
                 </div>
 
                 <div class="divider"></div>
@@ -352,6 +355,7 @@ export class StatusBarManager {
                     setText("eye_samples_processed", s.eye_samples_processed);
                     setText("code_window_samples_processed", s.code_window_samples_processed);
                     setText("feedback_generated", s.feedback_generated);
+                    setText("feedback_cooldown_left_s", s.feedback_cooldown_left_s !== undefined ? s.feedback_cooldown_left_s : "–");
 
                     const errorBox = document.getElementById("error_box");
                     if (s.error_message) {

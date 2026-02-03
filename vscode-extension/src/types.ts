@@ -172,6 +172,7 @@ export interface SystemStatusMessage {
     code_window_samples_processed: number;
     feedback_generated: number;
     experiment_active: boolean;
+    feedback_cooldown_left_s: number;
     llm_model?: string;
     experiment_id?: string;
     participant_id?: string;
