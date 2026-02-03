@@ -146,6 +146,7 @@ class SignalProcessingLayer:
                 features=features,
                 sample_count=sample_count,
                 valid_sample_ratio=valid_sample_ratio,
+                enabled_metrics=list(self._config.enabled_metrics)
             )
 
             # 8. Log collected features

@@ -248,6 +248,7 @@ class ForecastingTool:
                 target_window_end=feature.window_end + self._config.prediction_horizon_seconds + (feature.window_end - feature.window_start),
                 horizon_seconds=self._config.prediction_horizon_seconds,
                 features=feature.features,
+                enabled_metrics=feature.enabled_metrics.copy(),
                 confidence=0.5,
                 uncertainty={}
             )

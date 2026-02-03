@@ -115,11 +115,8 @@ class SignalProcessingConfig:
     
     # Metrics to extract (TODO: define specific metrics)
     enabled_metrics: List[str] = field(default_factory=lambda: [
-        "fixation_duration",
-        "saccade_amplitude",
         "pupil_diameter",
-        "blink_rate",
-        "gaze_dispersion",
+        "data_quality"
     ])
     
     # Data quality settings
@@ -152,7 +149,7 @@ class ForecastingConfig:
 class ReactiveToolConfig:
     """Configuration for Reactive Tool."""
     # Sliding window settings
-    window_size_seconds: float = 3.0
+    window_size_seconds: float = 60.0
     
     # Model settings
     model_type: str = "rule_based"  # "rule_based", "ml_classifier", "sequence_model"

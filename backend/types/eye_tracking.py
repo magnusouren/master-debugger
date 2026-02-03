@@ -44,6 +44,9 @@ class WindowFeatures:
     # TODO: Define specific metrics to extract (configurable)
     # Placeholder feature dictionary - to be expanded
     features: Dict[str, float] = field(default_factory=dict)
+
+    # Enabled metrics
+    enabled_metrics: List[str] = field(default_factory=list)
     
     # Metadata
     sample_count: int = 0
@@ -72,6 +75,9 @@ class PredictedFeatures:
     
     # Predicted features (same format as WindowFeatures)
     features: Dict[str, float] = field(default_factory=dict)
+
+    # Enabled metrics
+    enabled_metrics: List[str] = field(default_factory=list)
     
     # Prediction confidence/uncertainty
     confidence: float = 0.0
@@ -84,5 +90,6 @@ class PredictedFeatures:
             window_end=self.target_window_end,
             features=self.features.copy(),
             sample_count=0,  # Not applicable for predictions
-            valid_sample_ratio=0.0  # Not applicable for predictions
+            valid_sample_ratio=0.0,  # Not applicable for predictions
+            enabled_metrics=self.enabled_metrics.copy(),
         )
