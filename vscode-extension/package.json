@@ -76,6 +76,16 @@
           "type": "boolean",
           "default": true,
           "description": "Show inline hints in the editor"
+        },
+        "eyeTrackingDebugger.autoConnectBackend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect to eye tracker on backend connection"
+        },
+        "eyeTrackingDebugger.autoConnectEyeTracker": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect to eye tracker on backend connection"
         }
       }
     }
