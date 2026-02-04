@@ -128,6 +128,11 @@ class SignalProcessingConfig:
     interpolate_missing: bool = True
     max_gap_to_interpolate_ms: float = 100.0
 
+    # Require both eyes to be valid for a sample to be considered valid
+    require_both_eyes_valid: bool = False
+
+    # TODO - add in config example
+
     # Validation thresholds
     min_pupil_diameter_mm: float = 1.5  # Physiological minimum
     max_pupil_diameter_mm: float = 9.0  # Physiological maximum

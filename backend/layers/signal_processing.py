@@ -328,84 +328,11 @@ class SignalProcessingLayer:
     
     def _is_sample_valid(self, sample: GazeSample) -> bool:
         """
-        Determine if a gaze sample meets validity criteria.
-
-        A sample is considered valid if at least one eye has:
-        - Valid flag set
-        - Finite gaze coordinates within configured bounds
-        - Finite pupil diameter within physiological range (if available)
-
-        Args:
-            sample: The gaze sample to validate.
-
-        Returns:
-            True if the sample is valid, False otherwise.
+        Check if a sample is valid based on the SDK-defined criteria and config.
         """
-        def is_finite(x: Optional[float]) -> bool:
-            """Check if value is not None and is a finite number."""
-            return x is not None and isinstance(x, (int, float)) and math.isfinite(x)
-
-        def is_in_bounds(x: Optional[float], min_val: float, max_val: float) -> bool:
-            """Check if value is finite and within bounds."""
-            return is_finite(x) and min_val <= x <= max_val  # type: ignore[arg-type, operator]
-
-        # Check left eye validity
-        left_valid = False
-        if sample.left_eye_valid:
-            # Check gaze coordinates
-            gaze_valid = (
-                is_in_bounds(
-                    sample.left_eye_x,
-                    self._config.min_gaze_coordinate,
-                    self._config.max_gaze_coordinate
-                ) and
-                is_in_bounds(
-                    sample.left_eye_y,
-                    self._config.min_gaze_coordinate,
-                    self._config.max_gaze_coordinate
-                )
-            )
-
-            # Check pupil diameter if available
-            pupil_valid = True
-            if sample.left_pupil_diameter is not None:
-                pupil_valid = is_in_bounds(
-                    sample.left_pupil_diameter,
-                    self._config.min_pupil_diameter_mm,
-                    self._config.max_pupil_diameter_mm
-                )
-
-            left_valid = gaze_valid and pupil_valid
-
-        # Check right eye validity
-        right_valid = False
-        if sample.right_eye_valid:
-            # Check gaze coordinates
-            gaze_valid = (
-                is_in_bounds(
-                    sample.right_eye_x,
-                    self._config.min_gaze_coordinate,
-                    self._config.max_gaze_coordinate
-                ) and
-                is_in_bounds(
-                    sample.right_eye_y,
-                    self._config.min_gaze_coordinate,
-                    self._config.max_gaze_coordinate
-                )
-            )
-
-            # Check pupil diameter if available
-            pupil_valid = True
-            if sample.right_pupil_diameter is not None:
-                pupil_valid = is_in_bounds(
-                    sample.right_pupil_diameter,
-                    self._config.min_pupil_diameter_mm,
-                    self._config.max_pupil_diameter_mm
-                )
-
-            right_valid = gaze_valid and pupil_valid
-
-        return left_valid or right_valid
+        if self._config.require_both_eyes_valid:
+            return sample.left_eye_valid and sample.right_eye_valid
+        return sample.left_eye_valid or sample.right_eye_valid
 
     def _handle_missing_values(
         self, samples: List[GazeSample]
