@@ -253,7 +253,7 @@ class Server:
             except Exception as error:
                 return {"status": "error", "error": str(error)}
             
-        def handle_end_experiment(request_data: Dict[str, Any]) -> Dict[str, Any]:
+        def handle_end_experiment(_: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 status_msg = self._controller.end_experiment()
                 return json_safe({"status": status_msg})
@@ -270,7 +270,7 @@ class Server:
                 return {"status": "error", "error": str(error)}
         
         
-        async def handle_disconnect_eye_tracker(request_data: Dict[str, Any]) -> Dict[str, Any]:
+        async def handle_disconnect_eye_tracker(_: Dict[str, Any]) -> Dict[str, Any]:
             # Await the disconnection
             try:
                 ok = await self._controller.disconnect_eye_tracker()
