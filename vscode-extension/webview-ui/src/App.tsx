@@ -85,6 +85,9 @@ function App() {
   };
 
   const handleFeedbackInteraction = (feedbackId: string, interactionType: "dismissed" | "accepted") => {
+    setFeedbackItems((prevItems) => 
+      prevItems.filter(item => item.metadata.feedback_id !== feedbackId)
+    );
     vscode.postMessage({ 
       type: "feedbackInteraction", 
       payload: { feedbackId, interactionType } 
