@@ -9,6 +9,7 @@ import { WebSocketClient } from "./websocket-client";
 import { ContextCollector } from "./context-collector";
 import { FeedbackRenderer } from "./feedback-renderer";
 import { StatusBarManager } from "./status-bar";
+import { FeedbackViewProvider } from "./webview-provider";
 import {
     MessageType,
     FeedbackDeliveryPayload,
@@ -23,6 +24,7 @@ let wsClient: WebSocketClient | null = null;
 let contextCollector: ContextCollector | null = null;
 let feedbackRenderer: FeedbackRenderer | null = null;
 let statusBar: StatusBarManager | null = null;
+let webviewProvider: FeedbackViewProvider | null = null;
 
 // Debounce timer for context updates
 let contextUpdateTimer: NodeJS.Timeout | null = null;
@@ -78,6 +80,33 @@ function initializeComponents(context: vscode.ExtensionContext): void {
     const port = config.get<number>("websocketPort") || 8765;
 
     wsClient = new WebSocketClient(host, port);
+
+    // Initialize WebviewViewProvider
+    webviewProvider = new FeedbackViewProvider(context.extensionUri);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            FeedbackViewProvider.viewType,
+            webviewProvider
+        )
+    );
+
+    // Set up webview callbacks
+    webviewProvider.setCallbacks({
+        onConnect: connectToBackend,
+        onDisconnect: disconnectFromBackend,
+        onToggleMode: toggleMode,
+        onClearFeedback: clearFeedback,
+        onTriggerFeedback: triggerFeedbackSend,
+        onConnectEyeTracker: connectToEyeTracker,
+        onDisconnectEyeTracker: disconnectFromEyeTracker,
+        onFeedbackInteraction: (feedbackId, interactionType) => {
+            handleFeedbackInteraction({
+                feedback_id: feedbackId,
+                interaction_type: interactionType,
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+        },
+    });
     contextCollector = new ContextCollector();
     feedbackRenderer = new FeedbackRenderer(context);
     statusBar = new StatusBarManager(context);
@@ -217,6 +246,7 @@ async function connectToBackend(): Promise<void> {
     if (connected) {
         vscode.window.showInformationMessage("Connected to Eye Tracking backend");
         statusBar?.setConnected(true);
+        webviewProvider?.updateConnectionStatus(true);
 
         // Send initial context immediately
         sendContextUpdate();
@@ -227,6 +257,7 @@ async function connectToBackend(): Promise<void> {
 
             if (isStatusUpdatePayload(statusPayload)) {
                 statusBar?.setStatus(statusPayload);
+                webviewProvider?.updateStatus(statusPayload);
             } else {
                 console.warn("/status response did not match expected shape", statusPayload);
             }
@@ -237,6 +268,7 @@ async function connectToBackend(): Promise<void> {
         vscode.window.showErrorMessage(
             "Failed to connect to Eye Tracking backend"
         );
+        webviewProvider?.updateConnectionStatus(false);
     }
 }
 
@@ -244,6 +276,7 @@ function disconnectFromBackend(): void {
     // TODO: Implement backend disconnection
     wsClient?.disconnect();
     statusBar?.setConnected(false);
+    webviewProvider?.updateConnectionStatus(false);
     vscode.window.showInformationMessage(
         "Disconnected from Eye Tracking backend"
     );
@@ -298,6 +331,7 @@ async function disconnectFromEyeTracker(): Promise<void> {
 function clearFeedback(): void {
     // TODO: Implement feedback clearing
     feedbackRenderer?.clearAll();
+    webviewProvider?.clearFeedback();
     vscode.window.showInformationMessage("Feedback cleared");
 }
 
@@ -385,6 +419,7 @@ function handleFeedbackDelivery(message: { payload: Record<string, unknown> }): 
 
     const payload = message.payload as unknown as FeedbackDeliveryPayload;
     feedbackRenderer?.renderFeedback(payload.items);
+    webviewProvider?.updateFeedback(payload.items);
 }
 
 function handleStatusUpdate(message: { payload: Record<string, unknown> }): void {
@@ -398,6 +433,7 @@ function handleStatusUpdate(message: { payload: Record<string, unknown> }): void
     const payload = payloadUnknown; // type is now confirmed
 
     statusBar?.setStatus(payload);
+    webviewProvider?.updateStatus(payload);
 
     if (payload.status === SystemStatus.ERROR && payload.error_message) {
         console.error("Backend error:", payload.error_message);
