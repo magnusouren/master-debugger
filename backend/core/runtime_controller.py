@@ -941,7 +941,7 @@ class RuntimeController:
     
     # --- Logging and Experiment Control ---
     
-    async def start_experiment(
+    def start_experiment(
         self, 
         experiment_id: str, 
         participant_id: str
