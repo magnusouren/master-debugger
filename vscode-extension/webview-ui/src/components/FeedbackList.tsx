@@ -39,7 +39,7 @@ function FeedbackItemCard({ item, onDismiss, onAccept }: FeedbackItemCardProps) 
     <div className={`feedback-item ${item.feedback_type}`}>
       <div className="feedback-header">
         <span className="feedback-title">{item.title}</span>
-        <span className="feedback-priority">{item.priority}</span>
+        {/* <span className="feedback-priority">{item.priority}</span> */}
       </div>
       <p className="feedback-message">{item.message}</p>
       <div className="feedback-actions">
