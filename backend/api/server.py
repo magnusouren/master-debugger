@@ -16,6 +16,7 @@ from backend.api.websocket_server import WebSocketServer
 from backend.api.rest_api import HttpMethod, RestAPI
 from backend.services.logger_service import get_logger
 from backend.types.code_context import CodeContext
+from backend.types.config import OperationMode
 from backend.types.messages import MessageType, WebSocketMessage
 from backend.types.domain_events import DomainEvent, DomainEventType
 from backend.types.feedback import FeedbackInteraction
@@ -276,6 +277,18 @@ class Server:
                     level="ERROR",
                 )
                 return {"status": "error", "error": str(e)}
+            
+        async def handle_set_mode(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            mode = request_data.get("json", {}).get("mode", "")
+
+            if mode not in [m.value for m in OperationMode]:
+                return {"status": "error", "error": f"Invalid mode: {mode}"}
+
+            try:
+                self._controller.set_operation_mode(OperationMode(mode))
+                return {"status": "mode_set", "mode": mode}
+            except Exception as e:
+                return {"status": "error", "error": str(e)}
 
         # ---- Register Routes ----
 
@@ -321,6 +334,11 @@ class Server:
             handle_feedback_interaction,
         )
 
+        self._rest_api.register_route(
+            "/mode/set",
+            HttpMethod.POST,
+            handle_set_mode,
+        )
 
         # TODO - add more routes as needed
     
