@@ -242,6 +242,23 @@ class Server:
         """Set up REST API routes with controller handlers."""
 
         # ---- Handlers ----
+        def handle_start_experiment(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            try:    
+                experiment_id = request_data.get("json", {}).get("experiment_id", None)
+                participant_id = request_data.get("json", {}).get("participant_id", None)
+
+                ok = self._controller.start_experiment(experiment_id=experiment_id, participant_id=participant_id)
+                return {"status": "started" if ok else "failed"}
+            except Exception as error:
+                return {"status": "error", "error": str(error)}
+            
+        def handle_end_experiment(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            try:
+                ok = self._controller.end_experiment()
+                return {"status": "ended" if ok else "failed"}
+            except Exception as error:
+                return {"status": "error", "error": str(error)}
+
         async def handle_connect_eye_tracker(request_data: Dict[str, Any]) -> Dict[str, Any]:
             device_id = request_data.get("json", {}).get("device_id", None)
             # Await the connection and return the result
@@ -301,13 +318,13 @@ class Server:
         self._rest_api.register_route(
             "/experiment/start",
             HttpMethod.POST,
-            self._controller.start_experiment,
+            handle_start_experiment
         )
         
         self._rest_api.register_route(
             "/experiment/end",
             HttpMethod.POST,
-            self._controller.end_experiment,
+            handle_end_experiment
         )
 
         self._rest_api.register_route(
