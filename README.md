@@ -69,6 +69,10 @@ master-debuger/
 ### Backend
 
 ```bash
+# skip if you have a virtual environment already
+python3.11 -m venv .venv
+
+
 # Activate the virtual environment
 source .venv/bin/activate
 

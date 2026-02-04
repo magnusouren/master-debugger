@@ -1,0 +1,30 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "compile",
+      "path": "vscode-extension",
+      "problemMatcher": "$tsc",
+      "label": "npm: compile - vscode-extension",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "type": "npm",
+      "script": "watch",
+      "path": "vscode-extension",
+      "problemMatcher": "$tsc-watch",
+      "label": "npm: watch - vscode-extension",
+      "isBackground": true
+    },
+    {
+      "label": "Install Backend Dependencies",
+      "type": "shell",
+      "command": "pip install -r backend/requirements.txt",
+      "problemMatcher": []
+    }
+  ]
+}
