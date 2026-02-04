@@ -70,7 +70,7 @@ master-debuger/
 
 ```bash
 # skip if you have a virtual environment already
-python3.11 -m venv .venv
+
 
 
 # Activate the virtual environment
@@ -80,9 +80,9 @@ source .venv/bin/activate
 cd backend
 pip install -r requirements.txt
 
-# Run the backend
-cd backend
-python main.py --config config.yaml
+# Run the backend (from root)
+python -m backend.main
+
 ```
 The backend will start a WebSocket server on port 8765 and a REST API server on port 8080 by default. Adjust ports in `config.yaml` as needed.
 

@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default=None, # Maybee enter "config.yaml" here later
+        default="./backend/config.yaml", # Maybee enter "config.yaml" here later
         help="Path to configuration file (YAML)",
     )
     parser.add_argument(
