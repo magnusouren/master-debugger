@@ -339,15 +339,22 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
     def _convert_tobii_sample(self, gaze_data: Dict[str, Any]) -> GazeSample:
         """
         Convert Tobii SDK gaze data to GazeSample.
-        
+
         Args:
             gaze_data: Gaze data dictionary from Tobii SDK.
-            
+
         Returns:
             GazeSample object.
         """
-        # Use system time for timestamp (seconds since epoch)
-        timestamp = time.time()
+        # Use device timestamp if available (microseconds), otherwise system time
+        # Device timestamps are more precise, especially on Windows where time.time()
+        # has ~15.6ms resolution which is too coarse for 120Hz data
+        device_ts = gaze_data.get("device_time_stamp")
+        if device_ts is not None:
+            # Convert from microseconds to seconds
+            timestamp = device_ts / 1_000_000.0
+        else:
+            timestamp = time.time()
         
         # Extract left eye data
         left_eye = gaze_data.get("left_gaze_point_on_display_area", (None, None))
