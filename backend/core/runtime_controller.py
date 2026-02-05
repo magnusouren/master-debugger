@@ -977,25 +977,9 @@ class RuntimeController:
         sums: Dict[str, float] = {}
         counts: Dict[str, int] = {}
 
-        for features in self._baseline_features:
-            # Extract metrics from WindowFeatures dataclass
-            metrics = {
-                "avg_fixation_duration_ms": features.avg_fixation_duration_ms,
-                "fixation_count": features.fixation_count,
-                "avg_saccade_amplitude": features.avg_saccade_amplitude,
-                "saccade_count": features.saccade_count,
-                "avg_pupil_diameter_mm": features.avg_pupil_diameter_mm,
-                "pupil_diameter_std": features.pupil_diameter_std,
-                "blink_count": features.blink_count,
-                "blink_rate_per_minute": features.blink_rate_per_minute,
-                "gaze_dispersion_x": features.gaze_dispersion_x,
-                "gaze_dispersion_y": features.gaze_dispersion_y,
-                "gaze_disp_total": features.gaze_disp_total,
-                "dq_valid_ratio_any": features.dq_valid_ratio_any,
-                "dq_valid_ratio_both": features.dq_valid_ratio_both,
-            }
-
-            for key, value in metrics.items():
+        for window in self._baseline_features:
+            # WindowFeatures stores metrics in a features dictionary
+            for key, value in window.features.items():
                 if value is not None:
                     sums[key] = sums.get(key, 0.0) + value
                     counts[key] = counts.get(key, 0) + 1
