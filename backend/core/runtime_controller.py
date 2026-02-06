@@ -201,7 +201,7 @@ class RuntimeController:
         
         self._logger.system(
             "runtime_controller_reconfigured",
-            {"operation_mode": self._operation_mode.name},
+            {"operation_mode": self._operation_mode.value},
             level="INFO",
         )
     
@@ -263,7 +263,7 @@ class RuntimeController:
             status=self.get_status().value,
             timestamp=datetime.now(timezone.utc).timestamp(),
             eye_tracker_connected=self.is_eye_tracker_connected(),
-            operation_mode=self._operation_mode.name,
+            operation_mode=self._operation_mode.value,
             eye_samples_processed=self._stats["eye_samples_processed"],
             code_window_samples_processed=self._stats["code_window_samples_processed"],
             feedback_generated=self._stats["feedback_generated"],
