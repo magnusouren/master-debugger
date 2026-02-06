@@ -1,17 +1,17 @@
 /**
  * WebviewViewProvider for the Eye Tracking Debugger feedback panel.
- * 
+ *
  * This provider manages the webview that displays the React-based UI.
  */
-import * as vscode from "vscode";
-import { FeedbackItem, SystemStatusMessage } from "./types";
+import * as vscode from 'vscode';
+import { FeedbackItem, SystemStatusMessage } from './types';
 
 // Set to true during development to load from Vite dev server
 const DEV_MODE = false;
-const DEV_SERVER_URL = "http://localhost:5173";
+const DEV_SERVER_URL = 'http://localhost:5173';
 
 export class FeedbackViewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = "eyeTrackingDebugger.feedbackView";
+    public static readonly viewType = 'eyeTrackingDebugger.feedbackView';
 
     private _view?: vscode.WebviewView;
     private _extensionUri: vscode.Uri;
@@ -19,12 +19,20 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
     // Callbacks for handling webview messages
     private _onConnect?: () => void;
     private _onDisconnect?: () => void;
-    private _onToggleMode?: () => void;
+    private _onToggleMode?: (new_mode: 'reactive' | 'proactive') => void;
     private _onClearFeedback?: () => void;
     private _onTriggerFeedback?: () => void;
     private _onConnectEyeTracker?: () => void;
     private _onDisconnectEyeTracker?: () => void;
-    private _onFeedbackInteraction?: (feedbackId: string, interactionType: "dismissed" | "accepted") => void;
+    private _onFeedbackInteraction?: (
+        feedbackId: string,
+        interactionType: 'dismissed' | 'accepted',
+    ) => void;
+    private _onStartExperiment?: (
+        experimentId: string,
+        participantId: string,
+    ) => void;
+    private _onEndExperiment?: () => void;
 
     constructor(extensionUri: vscode.Uri) {
         this._extensionUri = extensionUri;
@@ -36,12 +44,20 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
     public setCallbacks(callbacks: {
         onConnect?: () => void;
         onDisconnect?: () => void;
-        onToggleMode?: () => void;
+        onToggleMode?: (new_mode: 'reactive' | 'proactive') => void;
         onClearFeedback?: () => void;
         onTriggerFeedback?: () => void;
         onConnectEyeTracker?: () => void;
         onDisconnectEyeTracker?: () => void;
-        onFeedbackInteraction?: (feedbackId: string, interactionType: "dismissed" | "accepted") => void;
+        onFeedbackInteraction?: (
+            feedbackId: string,
+            interactionType: 'dismissed' | 'accepted',
+        ) => void;
+        onStartExperiment?: (
+            experimentId: string,
+            participantId: string,
+        ) => void;
+        onEndExperiment?: () => void;
     }): void {
         this._onConnect = callbacks.onConnect;
         this._onDisconnect = callbacks.onDisconnect;
@@ -51,6 +67,8 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
         this._onConnectEyeTracker = callbacks.onConnectEyeTracker;
         this._onDisconnectEyeTracker = callbacks.onDisconnectEyeTracker;
         this._onFeedbackInteraction = callbacks.onFeedbackInteraction;
+        this._onStartExperiment = callbacks.onStartExperiment;
+        this._onEndExperiment = callbacks.onEndExperiment;
     }
 
     /**
@@ -59,14 +77,14 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
         _context: vscode.WebviewViewResolveContext,
-        _token: vscode.CancellationToken
+        _token: vscode.CancellationToken,
     ): void {
         this._view = webviewView;
 
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [
-                vscode.Uri.joinPath(this._extensionUri, "webview-ui", "build"),
+                vscode.Uri.joinPath(this._extensionUri, 'webview-ui', 'build'),
             ],
         };
 
@@ -81,7 +99,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
         webviewView.onDidChangeVisibility(() => {
             if (webviewView.visible) {
                 // Webview became visible - extension can send current state
-                console.log("Webview became visible");
+                console.log('Webview became visible');
             }
         });
     }
@@ -91,7 +109,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
      */
     public updateConnectionStatus(connected: boolean): void {
         this._postMessage({
-            type: "connectionStatus",
+            type: 'connectionStatus',
             payload: { connected },
         });
     }
@@ -101,7 +119,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
      */
     public updateStatus(status: SystemStatusMessage): void {
         this._postMessage({
-            type: "statusUpdate",
+            type: 'statusUpdate',
             payload: status,
         });
     }
@@ -111,7 +129,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
      */
     public updateFeedback(items: FeedbackItem[]): void {
         this._postMessage({
-            type: "feedbackUpdate",
+            type: 'feedbackUpdate',
             payload: { items },
         });
     }
@@ -121,7 +139,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
      */
     public clearFeedback(): void {
         this._postMessage({
-            type: "clearFeedback",
+            type: 'clearFeedback',
             payload: {},
         });
     }
@@ -129,39 +147,64 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
     /**
      * Handle messages from the webview
      */
-    private _handleWebviewMessage(message: { type: string; payload?: unknown }): void {
+    private _handleWebviewMessage(message: {
+        type: string;
+        payload?: unknown;
+    }): void {
         switch (message.type) {
-            case "ready":
+            case 'ready':
                 // Webview is ready - send initial state
-                console.log("Webview ready, sending initial state");
+                console.log('Webview ready, sending initial state');
                 break;
-            case "connect":
+            case 'connect':
                 this._onConnect?.();
                 break;
-            case "disconnect":
+            case 'disconnect':
                 this._onDisconnect?.();
                 break;
-            case "toggleMode":
-                this._onToggleMode?.();
+            case 'toggleMode':
+                const modePayload = message.payload as {
+                    new_mode: 'reactive' | 'proactive';
+                };
+                this._onToggleMode?.(modePayload.new_mode);
                 break;
-            case "clearFeedback":
+            case 'clearFeedback':
                 this._onClearFeedback?.();
                 break;
-            case "triggerFeedback":
+            case 'triggerFeedback':
                 this._onTriggerFeedback?.();
                 break;
-            case "connectEyeTracker":
+            case 'connectEyeTracker':
                 this._onConnectEyeTracker?.();
                 break;
-            case "disconnectEyeTracker":
+            case 'disconnectEyeTracker':
                 this._onDisconnectEyeTracker?.();
                 break;
-            case "feedbackInteraction":
-                const payload = message.payload as { feedbackId: string; interactionType: "dismissed" | "accepted" };
-                this._onFeedbackInteraction?.(payload.feedbackId, payload.interactionType);
+            case 'feedbackInteraction':
+                const payload = message.payload as {
+                    feedbackId: string;
+                    interactionType: 'dismissed' | 'accepted';
+                };
+                this._onFeedbackInteraction?.(
+                    payload.feedbackId,
+                    payload.interactionType,
+                );
+                break;
+            case 'startExperiment':
+                const startPayload = message.payload as {
+                    experimentId: string;
+                    participantId: string;
+                };
+                this._onStartExperiment?.(
+                    startPayload.experimentId,
+                    startPayload.participantId,
+                );
+                break;
+            case 'endExperiment':
+                this._onEndExperiment?.();
                 break;
             default:
-                console.log("Unknown webview message:", message.type);
+                console.log('Unknown webview message:', message.type);
         }
     }
 
@@ -206,10 +249,22 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
 
         // Production mode: load from built assets
         const scriptUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, "webview-ui", "build", "assets", "main.js")
+            vscode.Uri.joinPath(
+                this._extensionUri,
+                'webview-ui',
+                'build',
+                'assets',
+                'main.js',
+            ),
         );
         const styleUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, "webview-ui", "build", "assets", "main.css")
+            vscode.Uri.joinPath(
+                this._extensionUri,
+                'webview-ui',
+                'build',
+                'assets',
+                'main.css',
+            ),
         );
 
         return `<!DOCTYPE html>
@@ -232,10 +287,13 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
      * Generate a nonce for CSP
      */
     private _getNonce(): string {
-        let text = "";
-        const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        let text = '';
+        const possible =
+            'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
         for (let i = 0; i < 32; i++) {
-            text += possible.charAt(Math.floor(Math.random() * possible.length));
+            text += possible.charAt(
+                Math.floor(Math.random() * possible.length),
+            );
         }
         return text;
     }

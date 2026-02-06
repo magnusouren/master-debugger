@@ -18,7 +18,7 @@ export function StatusPanel({ status }: StatusPanelProps) {
                 }}
             >
                 <span>System Status</span>
-                <button className="btn small secondary toggle-btn" onClick={() => setToggled(!toggled)}>{toggled ? "Hide Details" : "Show Details"}</button>
+                <button className="btn small secondary toggle-btn" onClick={() => setToggled(!toggled)}>{toggled ? "Hide" : "Show"}</button>
             </div>
             {toggled && (
                 <div className="status-info">
@@ -40,19 +40,19 @@ export function StatusPanel({ status }: StatusPanelProps) {
                     <span className="label">Feedback Generated</span>
                     <span className="value">{status.feedback_generated}</span>
 
-                    {status.experiment_active && (
-                        <>
-                            <span className="label">Experiment</span>
-                            <span className="value">{status.experiment_id || "Active"}</span>
-                        </>
-                    )}
+                    <span className="label">Experiment</span>
+                    <span className="value">{status.experiment_active ? "Running" : "Not Running"}</span>
 
-                    {status.feedback_cooldown_left_s > 0 && (
-                        <>
-                            <span className="label">Cooldown</span>
-                            <span className="value">{status.feedback_cooldown_left_s}s</span>
-                        </>
-                    )}
+                    <span className="label">Experiment ID</span>
+                    <span className="value">{status.experiment_id || "-"}</span>
+
+                    <span className="label">Participant ID</span>
+                    <span className="value">{status.participant_id || "-"}</span>
+
+
+                    <span className="label">Cooldown</span>
+                    <span className="value">{status.feedback_cooldown_left_s || 0}s</span>
+
 
                     {status.llm_model && (
                         <>
@@ -61,7 +61,8 @@ export function StatusPanel({ status }: StatusPanelProps) {
                         </>
                     )}
                 </div>
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 }

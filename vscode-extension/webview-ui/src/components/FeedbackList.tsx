@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { FeedbackItem } from "../types";
 
 interface FeedbackListProps {
@@ -17,14 +18,59 @@ export function FeedbackList({ items, onInteraction }: FeedbackListProps) {
   return (
     <div className="feedback-list">
       {items.map((item) => (
-        <FeedbackItemCard
+        <FeedbackAlertCard
           key={item.metadata.feedback_id}
           item={item}
-          onDismiss={() => onInteraction(item.metadata.feedback_id, "dismissed")}
           onAccept={() => onInteraction(item.metadata.feedback_id, "accepted")}
+          onDismiss={() => onInteraction(item.metadata.feedback_id, "dismissed")}
         />
       ))}
     </div>
+  );
+}
+
+interface FeedbackAlertCardProps {
+  item: FeedbackItem;
+  onDismiss: () => void;
+  onAccept: () => void;
+}
+
+function FeedbackAlertCard({ item, onDismiss, onAccept }: FeedbackAlertCardProps) {
+  const [accepted, setAccepted] = useState(false);
+
+  const handleAccept = () => {
+    setAccepted(true);
+    onAccept();
+  };
+
+  const handleDismiss = () => {
+    onDismiss();
+  };
+
+  return (
+    <>
+      {!accepted ? (
+        <div className={`feedback-item ${item.feedback_type}`}>
+          <div className="feedback-header">
+            <span className="feedback-title">Feedback Available</span>
+            {/* <span className="feedback-priority">{item.priority}</span> */}
+          </div>
+          <p className="feedback-message">Do you want to be presented this feedback?</p>
+          <div className="feedback-actions">
+            {item.actionable && (
+              <button className="feedback-action-btn" onClick={handleAccept} disabled={accepted}>
+                Yes
+              </button>
+            )}
+            {item.dismissible && (
+              <button className="feedback-action-btn" onClick={handleDismiss}>
+                No
+              </button>
+            )}
+          </div>
+        </div>
+      ) : <FeedbackItemCard item={item} onDismiss={onDismiss} onAccept={() => { }} />}
+    </>
   );
 }
 

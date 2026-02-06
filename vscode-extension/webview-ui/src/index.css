@@ -99,7 +99,12 @@ body {
 }
 
 .section {
-  margin-top: 8px;
+  margin-top: 16px;
+}
+
+.controller-section {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
 }
 
 .section-title {
@@ -230,4 +235,27 @@ body {
 .mode-value {
   font-weight: 600;
   color: var(--vscode-foreground);
+}
+
+.text-input {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--vscode-textInput-border);
+  border-radius: 4px;
+  background-color: var(--vscode-editor-background);
+  color: var(--vscode-textInput-foreground);
+}
+
+.experiement-settings {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  background-color: var(--vscode-editor-background);
+  border-radius: 4px;
+}
+.experiment-setting {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
