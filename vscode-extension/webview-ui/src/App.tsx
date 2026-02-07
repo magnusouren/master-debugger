@@ -29,7 +29,7 @@ interface ClearFeedbackMessage {
 
 type ExtensionMessage = ConnectionStatusMessage | StatusUpdateMessage | FeedbackUpdateMessage | ClearFeedbackMessage;
 
-function App() {
+export function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
@@ -116,6 +116,13 @@ function App() {
     vscode.postMessage({ type: "disconnectEyeTracker" });
   };
 
+  const handleSetCooldown = (cooldownSeconds: number) => {
+    vscode.postMessage({
+      type: "setCooldown",
+      payload: { cooldownSeconds }
+    });
+  };
+
   return (
     <div className="app">
       <div className="controller-section">
@@ -162,15 +169,37 @@ function App() {
         }
       </div>
 
+
+
       <div className="section">
         <div className="section-title">Feedback</div>
+        <div className="cooldown-buttons">
+
+
+          {status?.feedback_cooldown_left_s && status?.feedback_cooldown_left_s > 80000 ? (
+            <button className="btn small secondary" onClick={() => handleSetCooldown(15)} disabled={!isConnected}>
+              Enable Feedback
+            </button>
+          ) : (
+            <>
+              <button className="btn small secondary" onClick={() => handleSetCooldown(300)} disabled={!isConnected}>
+                Disable for 5 min
+              </button>
+              <button className="btn small secondary" onClick={() => handleSetCooldown(86400)} disabled={!isConnected}>
+                Disable Feedback
+              </button>
+            </>
+          )}
+        </div>
+
         <FeedbackList
           items={feedbackItems}
           onInteraction={handleFeedbackInteraction}
         />
       </div>
+
+
     </div>
   );
 }
 
-export default App;

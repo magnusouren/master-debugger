@@ -33,6 +33,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
         participantId: string,
     ) => void;
     private _onEndExperiment?: () => void;
+    private _onSetCooldown?: (cooldownSeconds: number) => void;
 
     constructor(extensionUri: vscode.Uri) {
         this._extensionUri = extensionUri;
@@ -58,6 +59,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
             participantId: string,
         ) => void;
         onEndExperiment?: () => void;
+        onSetCooldown?: (cooldownSeconds: number) => void;
     }): void {
         this._onConnect = callbacks.onConnect;
         this._onDisconnect = callbacks.onDisconnect;
@@ -69,6 +71,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
         this._onFeedbackInteraction = callbacks.onFeedbackInteraction;
         this._onStartExperiment = callbacks.onStartExperiment;
         this._onEndExperiment = callbacks.onEndExperiment;
+        this._onSetCooldown = callbacks.onSetCooldown;
     }
 
     /**
@@ -202,6 +205,12 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
                 break;
             case 'endExperiment':
                 this._onEndExperiment?.();
+                break;
+            case 'setCooldown':
+                const cooldownPayload = message.payload as {
+                    cooldownSeconds: number;
+                };
+                this._onSetCooldown?.(cooldownPayload.cooldownSeconds);
                 break;
             default:
                 console.log('Unknown webview message:', message.type);

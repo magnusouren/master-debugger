@@ -233,6 +233,12 @@ class RuntimeController:
         # Reconfigure layers as needed using the updated configuration
         if self._config is not None:
             self.configure(self._config)
+
+        # Publish status update
+        self._publish(DomainEvent(
+            event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+            payload=self.get_system_status(),
+        ))
     
     def get_operation_mode(self) -> OperationMode:
         """
@@ -824,6 +830,34 @@ class RuntimeController:
 
         remaining = max(0.0, cooldown - elapsed)
         return remaining
+
+    def set_feedback_cooldown(self, cooldown_seconds: float) -> None:
+        """
+        Set the feedback cooldown duration.
+        
+        Args:
+            cooldown_seconds: New cooldown duration in seconds.
+        """
+        self._last_feedback_time = asyncio.get_event_loop().time() # reset cooldown timer on change
+        self._config.controller.feedback_cooldown_seconds = cooldown_seconds
+        
+        self._logger.system(
+            "feedback_cooldown_changed",
+            {"new_cooldown_seconds": cooldown_seconds},
+            level="INFO",
+        )
+        
+        self._logger.experiment(
+            "feedback_cooldown_changed",
+            {"new_cooldown_seconds": cooldown_seconds},
+            level="INFO",
+        )
+        
+        # Publish status update
+        self._publish(DomainEvent(
+            event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+            payload=self.get_system_status(),
+        ))
     
     # --- Data Flow Callbacks ---
     
@@ -998,6 +1032,12 @@ class RuntimeController:
                 "participant_id": self._participant_id,
                 "session_id": self._session_id,
             },
+        ))
+
+        # Publish initial system status update after experiment start
+        self._publish(DomainEvent(
+            event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+            payload=self.get_system_status(),
         ))
 
         return self.get_system_status()
