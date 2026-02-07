@@ -489,17 +489,30 @@ class RuntimeController:
         """
         Handle user interaction with feedback.
         
+        Interaction types:
+        - presented: Feedback was shown to user
+        - accepted: User accepted to see feedback details
+        - rejected: User rejected seeing the feedback
+        - highlighted: User clicked to highlight in code
+        - dismissed: User dismissed the shown feedback
+        
         Args:
             interaction: User interaction data.
         """
 
-        category_msg = ""
-        if interaction.interaction_type == "dismissed":
-            category_msg = "feedback_dismissed_by_user"
-        elif interaction.interaction_type == "accepted":
-            category_msg = "feedback_accepted_by_user"
-        else:
-            category_msg = f"feedback_interaction_unknown_type: {interaction.interaction_type}"
+        # Map interaction types to log categories
+        category_map = {
+            "presented": "feedback_presented_to_user",
+            "accepted": "feedback_accepted_by_user",
+            "rejected": "feedback_rejected_by_user",
+            "highlighted": "feedback_highlighted_in_code",
+            "dismissed": "feedback_dismissed_by_user",
+        }
+        
+        category_msg = category_map.get(
+            interaction.interaction_type,
+            f"feedback_interaction_unknown_type: {interaction.interaction_type}"
+        )
         
         self._logger.system(
             category_msg,
@@ -772,24 +785,7 @@ class RuntimeController:
                 self._pending_feedback = feedback
                 self._pending_feedback_version = version
                 self._stats["feedback_generated"] = self._stats.get("feedback_generated", 0) + 1
-
-                self._logger.system(
-                    "feedback_generation_completed",
-                    {
-                        "version": version,
-                        "item_count": len(feedback.items),
-                    },
-                    level="INFO",
-                )
-
-                self._logger.experiment(
-                    "feedback_generated",
-                    {
-                        "version": version,
-                        "item_count": len(feedback.items),
-                    },
-                    level="INFO",
-                )
+                
             else:
                 self._logger.system(
                     "feedback_generation_empty",

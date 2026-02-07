@@ -93,6 +93,24 @@ class FeedbackResponse:
     metadata: FeedbackMetadata = field(default_factory=FeedbackMetadata)
 
 
+class InteractionType(Enum):
+    """
+    Types of user interactions with feedback.
+    
+    Flow:
+    1. Feedback presented -> user accepts OR rejects
+    2. If accepted -> user can highlight in code OR dismiss
+    """
+    # Stage 1: Initial presentation
+    PRESENTED = "presented"  # Feedback was shown to user
+    ACCEPTED = "accepted"    # User accepted to see feedback details
+    REJECTED = "rejected"    # User rejected seeing the feedback
+    
+    # Stage 2: After accepting
+    HIGHLIGHTED = "highlighted"  # User clicked to highlight in code
+    DISMISSED = "dismissed"      # User dismissed the shown feedback
+
+
 @dataclass
 class FeedbackInteraction:
     """
@@ -100,7 +118,7 @@ class FeedbackInteraction:
     Received from VS Code extension.
     """
     feedback_id: str
-    interaction_type: str  # "dismissed", "accepted"
+    interaction_type: str  # See InteractionType enum
     timestamp: float  # When interaction occurred
     metadata: Dict[str, Any] = field(default_factory=dict)
 

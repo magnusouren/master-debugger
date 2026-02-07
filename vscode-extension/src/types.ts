@@ -131,11 +131,27 @@ export interface FeedbackItem {
 }
 
 /**
+ * Types of user interactions with feedback.
+ *
+ * Flow:
+ * 1. Feedback presented -> user accepts OR rejects
+ * 2. If accepted -> user can highlight in code OR dismiss
+ */
+export type InteractionType =
+    // Stage 1: Initial presentation
+    | 'presented' // Feedback was shown to user
+    | 'accepted' // User accepted to see feedback details
+    | 'rejected' // User rejected seeing the feedback
+    // Stage 2: After accepting
+    | 'highlighted' // User clicked to highlight in code
+    | 'dismissed'; // User dismissed the shown feedback
+
+/**
  * User interaction with feedback.
  */
 export interface FeedbackInteraction {
     feedback_id: string;
-    interaction_type: 'dismissed' | 'accepted';
+    interaction_type: InteractionType;
     timestamp: number;
     metadata?: Record<string, unknown>;
 }
