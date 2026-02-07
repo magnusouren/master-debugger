@@ -51,7 +51,7 @@ export function ExperimentIDs({
             />
           </div>
           <div className="experiment-setting">
-            <label htmlFor="experiment-description-input">Participant ID:</label>
+            <label htmlFor="participant-id-input">Participant ID:</label>
             <input
               type="text"
               id="participant-id-input"
