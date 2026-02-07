@@ -116,6 +116,13 @@ function App() {
     vscode.postMessage({ type: "disconnectEyeTracker" });
   };
 
+  const handleSetCooldown = (cooldownSeconds: number) => {
+    vscode.postMessage({
+      type: "setCooldown",
+      payload: { cooldownSeconds }
+    });
+  };
+
   return (
     <div className="app">
       <div className="controller-section">
@@ -153,6 +160,7 @@ function App() {
             onConnectEyeTracker={handleConnectEyeTracker}
             onDisconnectEyeTracker={handleDisconnectEyeTracker}
             eyeTrackerConnected={status?.eye_tracker_connected ?? false}
+            onSetCooldown={handleSetCooldown}
           />
         </div>
         {status &&

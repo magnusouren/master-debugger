@@ -108,6 +108,7 @@ function initializeComponents(context: vscode.ExtensionContext): void {
         },
         onStartExperiment: startExperiment,
         onEndExperiment: stopExperiment,
+        onSetCooldown: setCooldown,
     });
     contextCollector = new ContextCollector();
     feedbackRenderer = new FeedbackRenderer(context);
@@ -208,6 +209,14 @@ function registerCommands(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand(
             'eyeTrackingDebugger.stopExperiment',
             stopExperiment,
+        ),
+    );
+
+    // Set Cooldown command
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            'eyeTrackingDebugger.setCooldown',
+            setCooldown,
         ),
     );
 }
@@ -330,6 +339,38 @@ async function toggleMode(
         });
     } catch (error) {
         console.error('Failed to toggle mode:', error);
+    }
+}
+
+async function setCooldown(cooldownSeconds: number): Promise<void> {
+    if (!cooldownSeconds) {
+        const input = await vscode.window.showInputBox({
+            prompt: 'Enter cooldown duration in seconds (0 to disable)',
+            placeHolder: 'e.g., 300 for 5 minutes',
+            validateInput: (value) => {
+                const num = Number(value);
+                if (isNaN(num) || num < 0) {
+                    return 'Please enter a valid non-negative number';
+                }
+                return null;
+            },
+        });
+        if (input === undefined) {
+            return; // User cancelled
+        }
+        cooldownSeconds = Number(input);
+    }
+
+    try {
+        await fetch(`http://${host}:${port}/cooldown`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ cooldown_seconds: cooldownSeconds }),
+        });
+    } catch (error) {
+        console.error('Failed to set cooldown:', error);
     }
 }
 

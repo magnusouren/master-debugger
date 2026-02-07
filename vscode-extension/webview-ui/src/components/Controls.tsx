@@ -10,6 +10,7 @@ interface ControlsProps {
   onTriggerFeedback: () => void;
   onConnectEyeTracker: () => void;
   onDisconnectEyeTracker: () => void;
+  onSetCooldown: (cooldownSeconds: number) => void;
 }
 
 export function Controls({
@@ -22,6 +23,7 @@ export function Controls({
   onTriggerFeedback,
   onConnectEyeTracker,
   onDisconnectEyeTracker,
+  onSetCooldown,
 }: ControlsProps) {
   const [toggled, setToggled] = useState(false);
 
@@ -69,6 +71,18 @@ export function Controls({
           <button className="btn secondary" onClick={onClearFeedback}>
             Clear Feedback
           </button>
+
+          <div style={{ marginTop: "8px", borderTop: "1px solid var(--vscode-panel-border)", paddingTop: "8px" }}>
+            <span style={{ fontSize: "12px", opacity: 0.8 }}>Cooldown:</span>
+            <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
+              <button className="btn small secondary" onClick={() => onSetCooldown(300)} disabled={!isConnected}>
+                5 min
+              </button>
+              <button className="btn small secondary" onClick={() => onSetCooldown(3600)} disabled={!isConnected}>
+                Disable
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

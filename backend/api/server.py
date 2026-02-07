@@ -353,6 +353,28 @@ class Server:
             handle_set_mode,
         )
 
+        def handle_set_cooldown(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            cooldown_seconds = request_data.get("json", {}).get("cooldown_seconds", None)
+            
+            if cooldown_seconds is None:
+                return {"status": "error", "error": "cooldown_seconds is required"}
+            
+            try:
+                cooldown_seconds = float(cooldown_seconds)
+                if cooldown_seconds < 0:
+                    return {"status": "error", "error": "cooldown_seconds must be non-negative"}
+                
+                self._controller.set_feedback_cooldown(cooldown_seconds)
+                return {"status": "cooldown_set", "cooldown_seconds": cooldown_seconds}
+            except (ValueError, TypeError) as e:
+                return {"status": "error", "error": f"Invalid cooldown_seconds: {e}"}
+
+        self._rest_api.register_route(
+            "/cooldown",
+            HttpMethod.PUT,
+            handle_set_cooldown,
+        )
+
         # TODO - add more routes as needed
     
     def _setup_websocket_handlers(self) -> None:
