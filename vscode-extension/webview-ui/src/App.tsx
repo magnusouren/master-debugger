@@ -3,7 +3,7 @@ import { FeedbackList } from "./components/FeedbackList";
 import { StatusPanel } from "./components/StatusPanel";
 import { Controls } from "./components/Controls";
 import { vscode } from "./utilities/vscode";
-import type { FeedbackItem, SystemStatus } from "./types";
+import type { FeedbackItem, SystemStatus, InteractionType } from "./types";
 import { ExperimentIDs } from "./components/ExperimentIDs";
 
 // Message types from extension to webview
@@ -96,8 +96,9 @@ export function App() {
     vscode.postMessage({ type: "triggerFeedback" });
   };
 
-  const handleFeedbackInteraction = (feedbackId: string, interactionType: "dismissed" | "accepted") => {
-    if (interactionType === "dismissed") {
+  const handleFeedbackInteraction = (feedbackId: string, interactionType: InteractionType) => {
+    // Remove from list when rejected or dismissed
+    if (interactionType === "rejected" || interactionType === "dismissed") {
       setFeedbackItems((prevItems) =>
         prevItems.filter(item => item.metadata.feedback_id !== feedbackId)
       );

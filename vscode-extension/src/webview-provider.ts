@@ -4,7 +4,7 @@
  * This provider manages the webview that displays the React-based UI.
  */
 import * as vscode from 'vscode';
-import { FeedbackItem, SystemStatusMessage } from './types';
+import { FeedbackItem, SystemStatusMessage, InteractionType } from './types';
 
 // Set to true during development to load from Vite dev server
 const DEV_MODE = false;
@@ -26,7 +26,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
     private _onDisconnectEyeTracker?: () => void;
     private _onFeedbackInteraction?: (
         feedbackId: string,
-        interactionType: 'dismissed' | 'accepted',
+        interactionType: InteractionType,
     ) => void;
     private _onStartExperiment?: (
         experimentId: string,
@@ -52,7 +52,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
         onDisconnectEyeTracker?: () => void;
         onFeedbackInteraction?: (
             feedbackId: string,
-            interactionType: 'dismissed' | 'accepted',
+            interactionType: InteractionType,
         ) => void;
         onStartExperiment?: (
             experimentId: string,
@@ -186,7 +186,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
             case 'feedbackInteraction':
                 const payload = message.payload as {
                     feedbackId: string;
-                    interactionType: 'dismissed' | 'accepted';
+                    interactionType: InteractionType;
                 };
                 this._onFeedbackInteraction?.(
                     payload.feedbackId,

@@ -1,14 +1,15 @@
 /**
  * Feedback renderer - displays feedback in the VS Code editor.
  */
-import * as vscode from "vscode";
+import * as vscode from 'vscode';
 import {
     FeedbackItem,
     FeedbackType,
     FeedbackPriority,
     CodeRange,
     FeedbackInteraction,
-} from "./types";
+    InteractionType,
+} from './types';
 
 export type InteractionCallback = (interaction: FeedbackInteraction) => void;
 
@@ -20,7 +21,7 @@ export class FeedbackRenderer {
 
     constructor(private context: vscode.ExtensionContext) {
         this.diagnosticCollection = vscode.languages.createDiagnosticCollection(
-            "eyeTrackingDebugger"
+            'eyeTrackingDebugger',
         );
         context.subscriptions.push(this.diagnosticCollection);
     }
@@ -38,7 +39,7 @@ export class FeedbackRenderer {
     renderFeedback(items: FeedbackItem[]): void {
         // TODO: Implement feedback rendering
 
-        console.log("FEEDBACK ITEMS:", items);
+        console.log('FEEDBACK ITEMS:', items);
     }
 
     /**
@@ -88,7 +89,7 @@ export class FeedbackRenderer {
      */
     recordInteraction(
         feedbackId: string,
-        interactionType: FeedbackInteraction["interaction_type"]
+        interactionType: InteractionType,
     ): void {
         if (this.interactionCallback) {
             const interaction: FeedbackInteraction = {
@@ -118,7 +119,7 @@ export class FeedbackRenderer {
 
     private getDecorationColor(priority: FeedbackPriority): string {
         // TODO: Implement color mapping
-        return "yellow";
+        return 'yellow';
     }
 
     private getSeverity(priority: FeedbackPriority): vscode.DiagnosticSeverity {
@@ -132,7 +133,7 @@ export class FeedbackRenderer {
             range.start.line,
             range.start.character,
             range.end.line,
-            range.end.character
+            range.end.character,
         );
     }
 

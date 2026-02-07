@@ -53,6 +53,15 @@ export interface FeedbackItem {
   metadata: FeedbackMetadata;
 }
 
+export type InteractionType =
+  // Stage 1: Initial presentation
+  | "presented" // Feedback was shown to user
+  | "accepted" // User accepted to see feedback details
+  | "rejected" // User rejected seeing the feedback
+  // Stage 2: After accepting
+  | "highlighted" // User clicked to highlight in code
+  | "dismissed"; // User dismissed the shown feedback
+
 export interface SystemStatus {
   status: "initializing" | "ready" | "processing" | "paused" | "error" | "disconnected";
   timestamp: number;

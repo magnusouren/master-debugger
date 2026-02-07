@@ -1,9 +1,9 @@
-import { useState } from "react";
-import type { FeedbackItem } from "../types";
+import { useState, useEffect } from "react";
+import type { FeedbackItem, InteractionType } from "../types";
 
 interface FeedbackListProps {
   items: FeedbackItem[];
-  onInteraction: (feedbackId: string, interactionType: "dismissed" | "accepted") => void;
+  onInteraction: (feedbackId: string, interactionType: InteractionType) => void;
 }
 
 export function FeedbackList({ items, onInteraction }: FeedbackListProps) {
@@ -21,8 +21,7 @@ export function FeedbackList({ items, onInteraction }: FeedbackListProps) {
         <FeedbackAlertCard
           key={item.metadata.feedback_id}
           item={item}
-          onAccept={() => onInteraction(item.metadata.feedback_id, "accepted")}
-          onDismiss={() => onInteraction(item.metadata.feedback_id, "dismissed")}
+          onInteraction={(type) => onInteraction(item.metadata.feedback_id, type)}
         />
       ))}
     </div>
@@ -31,20 +30,36 @@ export function FeedbackList({ items, onInteraction }: FeedbackListProps) {
 
 interface FeedbackAlertCardProps {
   item: FeedbackItem;
-  onDismiss: () => void;
-  onAccept: () => void;
+  onInteraction: (type: InteractionType) => void;
 }
 
-function FeedbackAlertCard({ item, onDismiss, onAccept }: FeedbackAlertCardProps) {
+function FeedbackAlertCard({ item, onInteraction }: FeedbackAlertCardProps) {
   const [accepted, setAccepted] = useState(false);
+  const [presented, setPresented] = useState(false);
+
+  // Log when feedback is first presented to user
+  useEffect(() => {
+    if (!presented) {
+      setPresented(true);
+      onInteraction("presented");
+    }
+  }, [presented, onInteraction]);
 
   const handleAccept = () => {
     setAccepted(true);
-    onAccept();
+    onInteraction("accepted");
+  };
+
+  const handleReject = () => {
+    onInteraction("rejected");
+  };
+
+  const handleHighlight = () => {
+    onInteraction("highlighted");
   };
 
   const handleDismiss = () => {
-    onDismiss();
+    onInteraction("dismissed");
   };
 
   return (
@@ -53,7 +68,6 @@ function FeedbackAlertCard({ item, onDismiss, onAccept }: FeedbackAlertCardProps
         <div className={`feedback-item ${item.feedback_type}`}>
           <div className="feedback-header">
             <span className="feedback-title">Feedback Available</span>
-            {/* <span className="feedback-priority">{item.priority}</span> */}
           </div>
           <p className="feedback-message">Do you want to be presented this feedback?</p>
           <div className="feedback-actions">
@@ -63,35 +77,40 @@ function FeedbackAlertCard({ item, onDismiss, onAccept }: FeedbackAlertCardProps
               </button>
             )}
             {item.dismissible && (
-              <button className="feedback-action-btn" onClick={handleDismiss}>
+              <button className="feedback-action-btn" onClick={handleReject}>
                 No
               </button>
             )}
           </div>
         </div>
-      ) : <FeedbackItemCard item={item} onDismiss={onDismiss} onAccept={() => { }} />}
+      ) : (
+        <FeedbackItemCard
+          item={item}
+          onHighlight={handleHighlight}
+          onDismiss={handleDismiss}
+        />
+      )}
     </>
   );
 }
 
 interface FeedbackItemCardProps {
   item: FeedbackItem;
+  onHighlight: () => void;
   onDismiss: () => void;
-  onAccept: () => void;
 }
 
-function FeedbackItemCard({ item, onDismiss, onAccept }: FeedbackItemCardProps) {
+function FeedbackItemCard({ item, onHighlight, onDismiss }: FeedbackItemCardProps) {
   return (
     <div className={`feedback-item ${item.feedback_type}`}>
       <div className="feedback-header">
         <span className="feedback-title">{item.title}</span>
-        {/* <span className="feedback-priority">{item.priority}</span> */}
       </div>
       <p className="feedback-message">{item.message}</p>
       <div className="feedback-actions">
-        {item.actionable && (
-          <button className="feedback-action-btn" onClick={onAccept}>
-            {item.action_label || "Apply"}
+        {item.code_range && (
+          <button className="feedback-action-btn" onClick={onHighlight}>
+            {item.action_label || "Highlight in Code"}
           </button>
         )}
         {item.dismissible && (
