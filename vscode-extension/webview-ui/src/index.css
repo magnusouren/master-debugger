@@ -254,8 +254,15 @@ body {
   background-color: var(--vscode-editor-background);
   border-radius: 4px;
 }
+
 .experiment-setting {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.error-message {
+  color: var(--vscode-editorError-foreground);
+  font-size: 12px;
+  margin-top: 8px;
 }

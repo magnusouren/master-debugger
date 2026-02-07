@@ -15,13 +15,18 @@ export function ExperimentIDs({
   const [toggled, setToggled] = useState(false);
   const [experimentId, setExperimentId] = useState("");
   const [participantId, setParticipantId] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const handleStartExperiment = () => {
+  const handleStartExperiment = async () => {
     if (!experimentId || !participantId) {
-      alert("Please enter both Experiment ID and Participant ID to start the experiment.");
+      setErrorMessage("Experiment ID and Participant ID are required.");
       return;
     }
-    startExperiment(experimentId, participantId);
+    try {
+      await startExperiment(experimentId, participantId);
+    } catch (error) {
+      setErrorMessage("Failed to start experiment. Please check connection and try again.");
+    }
   }
 
 
@@ -73,6 +78,7 @@ export function ExperimentIDs({
               </button>
             )}
           </div>
+          {errorMessage && <p className="error-message">{errorMessage}</p>}
         </div>
       )}
     </div>
