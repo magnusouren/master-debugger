@@ -53,13 +53,6 @@ export interface FeedbackItem {
   metadata: FeedbackMetadata;
 }
 
-/**
- * Types of user interactions with feedback.
- *
- * Flow:
- * 1. Feedback presented -> user accepts OR rejects
- * 2. If accepted -> user can highlight in code OR dismiss
- */
 export type InteractionType =
   // Stage 1: Initial presentation
   | "presented" // Feedback was shown to user
