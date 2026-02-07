@@ -1,130 +1,134 @@
 {
-  "name": "eye-tracking-debugger",
-  "displayName": "Eye Tracking Debugger",
-  "description": "VS Code extension for eye-tracking based debugging assistance",
-  "version": "0.1.0",
-  "publisher": "your-publisher-name",
-  "engines": {
-    "vscode": "^1.85.0"
-  },
-  "categories": [
-    "Other"
-  ],
-  "activationEvents": [
-    "onStartupFinished"
-  ],
-  "main": "./out/extension.js",
-  "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "eyeTrackingDebugger",
-          "title": "Eye Tracking Debugger",
-          "icon": "$(eye)"
-        }
-      ]
+    "name": "eye-tracking-debugger",
+    "displayName": "Eye Tracking Debugger",
+    "description": "VS Code extension for eye-tracking based debugging assistance",
+    "version": "0.1.0",
+    "publisher": "your-publisher-name",
+    "engines": {
+        "vscode": "^1.85.0"
     },
-    "views": {
-      "eyeTrackingDebugger": [
-        {
-          "type": "webview",
-          "id": "eyeTrackingDebugger.feedbackView",
-          "name": "Feedback"
-        }
-      ]
-    },
-    "commands": [
-      {
-        "command": "eyeTrackingDebugger.connect",
-        "title": "Eye Tracking: Connect to Backend"
-      },
-      {
-        "command": "eyeTrackingDebugger.disconnect",
-        "title": "Eye Tracking: Disconnect from Backend"
-      },
-      {
-        "command": "eyeTrackingDebugger.toggleMode",
-        "title": "Eye Tracking: Toggle Reactive/Proactive Mode"
-      },
-      {
-        "command": "eyeTrackingDebugger.showStatus",
-        "title": "Eye Tracking: Show Status"
-      },
-      {
-        "command": "eyeTrackingDebugger.clearFeedback",
-        "title": "Eye Tracking: Clear All Feedback"
-      },
-      {
-        "command": "eyeTrackingDebugger.triggerFeedbackSend",
-        "title": "Eye Tracking: Trigger Feedback Send"
-      },
-      {
-        "command": "eyeTrackingDebugger.connectEyeTracker",
-        "title": "Eye Tracking: Connect Eye Tracker"
-      },
-      {
-        "command": "eyeTrackingDebugger.disconnectEyeTracker",
-        "title": "Eye Tracking: Disconnect Eye Tracker"
-      }
+    "categories": [
+        "Other"
     ],
-    "configuration": {
-      "title": "Eye Tracking Debugger",
-      "properties": {
-        "eyeTrackingDebugger.backendHost": {
-          "type": "string",
-          "default": "localhost",
-          "description": "Backend server host"
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "eyeTrackingDebugger",
+                    "title": "Eye Tracking Debugger",
+                    "icon": "$(eye)"
+                }
+            ]
         },
-        "eyeTrackingDebugger.websocketPort": {
-          "type": "number",
-          "default": 8765,
-          "description": "WebSocket server port"
+        "views": {
+            "eyeTrackingDebugger": [
+                {
+                    "type": "webview",
+                    "id": "eyeTrackingDebugger.feedbackView",
+                    "name": "Feedback"
+                }
+            ]
         },
-        "eyeTrackingDebugger.apiPort": {
-          "type": "number",
-          "default": 8080,
-          "description": "REST API server port"
-        },
-        "eyeTrackingDebugger.showInlineHints": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show inline hints in the editor"
-        },
-        "eyeTrackingDebugger.autoConnectBackend": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically connect to backend on backend connection"
-        },
-        "eyeTrackingDebugger.autoConnectEyeTracker": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically connect to eye tracker on backend connection"
+        "commands": [
+            {
+                "command": "eyeTrackingDebugger.connect",
+                "title": "Eye Tracking: Connect to Backend"
+            },
+            {
+                "command": "eyeTrackingDebugger.disconnect",
+                "title": "Eye Tracking: Disconnect from Backend"
+            },
+            {
+                "command": "eyeTrackingDebugger.toggleMode",
+                "title": "Eye Tracking: Toggle Reactive/Proactive Mode"
+            },
+            {
+                "command": "eyeTrackingDebugger.showStatus",
+                "title": "Eye Tracking: Show Status"
+            },
+            {
+                "command": "eyeTrackingDebugger.clearFeedback",
+                "title": "Eye Tracking: Clear All Feedback"
+            },
+            {
+                "command": "eyeTrackingDebugger.triggerFeedbackSend",
+                "title": "Eye Tracking: Trigger Feedback Send"
+            },
+            {
+                "command": "eyeTrackingDebugger.connectEyeTracker",
+                "title": "Eye Tracking: Connect Eye Tracker"
+            },
+            {
+                "command": "eyeTrackingDebugger.disconnectEyeTracker",
+                "title": "Eye Tracking: Disconnect Eye Tracker"
+            },
+            {
+                "command": "eyeTrackingDebugger.setCooldown",
+                "title": "Eye Tracking: Set Feedback Cooldown"
+            }
+        ],
+        "configuration": {
+            "title": "Eye Tracking Debugger",
+            "properties": {
+                "eyeTrackingDebugger.backendHost": {
+                    "type": "string",
+                    "default": "localhost",
+                    "description": "Backend server host"
+                },
+                "eyeTrackingDebugger.websocketPort": {
+                    "type": "number",
+                    "default": 8765,
+                    "description": "WebSocket server port"
+                },
+                "eyeTrackingDebugger.apiPort": {
+                    "type": "number",
+                    "default": 8080,
+                    "description": "REST API server port"
+                },
+                "eyeTrackingDebugger.showInlineHints": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show inline hints in the editor"
+                },
+                "eyeTrackingDebugger.autoConnectBackend": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Automatically connect to backend on backend connection"
+                },
+                "eyeTrackingDebugger.autoConnectEyeTracker": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Automatically connect to eye tracker on backend connection"
+                }
+            }
         }
-      }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run build",
+        "build": "npm run build:webview && npm run compile",
+        "build:webview": "cd webview-ui && npm run build",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "watch:webview": "cd webview-ui && npm run dev",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src --ext ts",
+        "test": "node ./out/test/runTest.js",
+        "install:all": "npm install && cd webview-ui && npm install"
+    },
+    "devDependencies": {
+        "@types/node": "^20.10.0",
+        "@types/vscode": "^1.85.0",
+        "@types/ws": "^8.5.10",
+        "@typescript-eslint/eslint-plugin": "^6.13.0",
+        "@typescript-eslint/parser": "^6.13.0",
+        "eslint": "^8.54.0",
+        "typescript": "^5.3.2"
+    },
+    "dependencies": {
+        "ws": "^8.14.2"
     }
-  },
-  "scripts": {
-    "vscode:prepublish": "npm run build",
-    "build": "npm run build:webview && npm run compile",
-    "build:webview": "cd webview-ui && npm run build",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "watch:webview": "cd webview-ui && npm run dev",
-    "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js",
-    "install:all": "npm install && cd webview-ui && npm install"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.0",
-    "@types/vscode": "^1.85.0",
-    "@types/ws": "^8.5.10",
-    "@typescript-eslint/eslint-plugin": "^6.13.0",
-    "@typescript-eslint/parser": "^6.13.0",
-    "eslint": "^8.54.0",
-    "typescript": "^5.3.2"
-  },
-  "dependencies": {
-    "ws": "^8.14.2"
-  }
 }
