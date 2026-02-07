@@ -536,9 +536,28 @@ async function handleFeedbackInteraction(
 }
 
 async function startExperiment(
-    experimentID: string,
-    participantID: string,
+    experimentID?: string,
+    participantID?: string,
 ): Promise<void> {
+    if (!experimentID) {
+        experimentID = await vscode.window.showInputBox({
+            prompt: 'Enter Experiment ID',
+            placeHolder: 'e.g., exp123',
+        });
+    }
+    if (!participantID) {
+        participantID = await vscode.window.showInputBox({
+            prompt: 'Enter Participant ID',
+            placeHolder: 'e.g., participant456',
+        });
+    }
+    if (!experimentID || !participantID) {
+        vscode.window.showWarningMessage(
+            'Experiment start cancelled - missing experiment or participant ID',
+        );
+        return;
+    }
+
     try {
         await fetch(`http://${host}:${port}/experiment/start`, {
             method: 'POST',
