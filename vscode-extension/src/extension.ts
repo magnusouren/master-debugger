@@ -1,59 +1,61 @@
 /**
  * Eye Tracking Debugger Extension
- * 
+ *
  * Main entry point for the VS Code extension.
  * Handles extension activation, command registration, and lifecycle management.
  */
-import * as vscode from "vscode";
-import { WebSocketClient } from "./websocket-client";
-import { ContextCollector } from "./context-collector";
-import { FeedbackRenderer } from "./feedback-renderer";
-import { StatusBarManager } from "./status-bar";
+import * as vscode from 'vscode';
+import { WebSocketClient } from './websocket-client';
+import { ContextCollector } from './context-collector';
+import { FeedbackRenderer } from './feedback-renderer';
+import { StatusBarManager } from './status-bar';
+import { FeedbackViewProvider } from './webview-provider';
 import {
     MessageType,
     FeedbackDeliveryPayload,
     ContextRequestPayload,
     SystemStatus,
     FeedbackInteraction,
-} from "./types";
-import { isStatusUpdatePayload } from "./utils/typeguard";
-import { fetchStatus } from "./api";
+} from './types';
+import { isStatusUpdatePayload } from './utils/typeguard';
+import { fetchStatus } from './api';
 
 let wsClient: WebSocketClient | null = null;
 let contextCollector: ContextCollector | null = null;
 let feedbackRenderer: FeedbackRenderer | null = null;
 let statusBar: StatusBarManager | null = null;
+let webviewProvider: FeedbackViewProvider | null = null;
 
 // Debounce timer for context updates
 let contextUpdateTimer: NodeJS.Timeout | null = null;
 const CONTEXT_UPDATE_DEBOUNCE_MS = 500;
 
 // Configuration for backend connection
-const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
-const host = config.get<string>("backendHost") || "localhost";
-const port = config.get<number>("apiPort") || 8080;
+const config = vscode.workspace.getConfiguration('eyeTrackingDebugger');
+const host = config.get<string>('backendHost') || 'localhost';
+const port = config.get<number>('apiPort') || 8080;
 
 /**
  * Extension activation.
  */
 export function activate(context: vscode.ExtensionContext): void {
-    console.log("Eye Tracking Debugger extension is now active");
+    console.log('Eye Tracking Debugger extension is now active');
 
     // Initialize components
     initializeComponents(context);
 
     // Register commands
     registerCommands(context);
-    
+
     // Set up event listeners
     setupEventListeners(context);
 
     // Auto-connect if configured
-    if (config.get<boolean>("autoConnectBackend")) {
+    if (config.get<boolean>('autoConnectBackend')) {
         connectToBackend();
     }
 
-    if (config.get<boolean>("autoConnectEyeTracker")) {
+    if (config.get<boolean>('autoConnectEyeTracker')) {
         connectToEyeTracker();
     }
 }
@@ -73,21 +75,48 @@ export function deactivate(): void {
  */
 function initializeComponents(context: vscode.ExtensionContext): void {
     // TODO: Implement component initialization
-    const config = vscode.workspace.getConfiguration("eyeTrackingDebugger");
-    const host = config.get<string>("backendHost") || "localhost";
-    const port = config.get<number>("websocketPort") || 8765;
+    const config = vscode.workspace.getConfiguration('eyeTrackingDebugger');
+    const host = config.get<string>('backendHost') || 'localhost';
+    const port = config.get<number>('websocketPort') || 8765;
 
     wsClient = new WebSocketClient(host, port);
+
+    // Initialize WebviewViewProvider
+    webviewProvider = new FeedbackViewProvider(context.extensionUri);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            FeedbackViewProvider.viewType,
+            webviewProvider,
+        ),
+    );
+
+    // Set up webview callbacks
+    webviewProvider.setCallbacks({
+        onConnect: connectToBackend,
+        onDisconnect: disconnectFromBackend,
+        onToggleMode: toggleMode,
+        onClearFeedback: clearFeedback,
+        onTriggerFeedback: triggerFeedbackSend,
+        onConnectEyeTracker: connectToEyeTracker,
+        onDisconnectEyeTracker: disconnectFromEyeTracker,
+        onFeedbackInteraction: (feedbackId, interactionType) => {
+            handleFeedbackInteraction({
+                feedback_id: feedbackId,
+                interaction_type: interactionType,
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+        },
+        onStartExperiment: startExperiment,
+        onEndExperiment: stopExperiment,
+    });
     contextCollector = new ContextCollector();
     feedbackRenderer = new FeedbackRenderer(context);
     statusBar = new StatusBarManager(context);
 
     // Configure callbacks
-    feedbackRenderer.setInteractionCallback(
-        (interaction) => {
-            handleFeedbackInteraction(interaction);
-        }
-    );
+    feedbackRenderer.setInteractionCallback((interaction) => {
+        handleFeedbackInteraction(interaction);
+    });
 
     // Update UI when connection state changes (e.g., server shutdown)
     wsClient.onConnectionChange((connected: boolean) => {
@@ -105,65 +134,81 @@ function registerCommands(context: vscode.ExtensionContext): void {
     // Connect command
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            "eyeTrackingDebugger.connect",
-            connectToBackend
-        )
+            'eyeTrackingDebugger.connect',
+            connectToBackend,
+        ),
     );
 
     // Disconnect command
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            "eyeTrackingDebugger.disconnect",
-            disconnectFromBackend
-        )
+            'eyeTrackingDebugger.disconnect',
+            disconnectFromBackend,
+        ),
     );
 
     // Toggle mode command
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            "eyeTrackingDebugger.toggleMode",
-            toggleMode
-        )
+            'eyeTrackingDebugger.toggleMode',
+            toggleMode,
+        ),
     );
 
     // Show status command
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            "eyeTrackingDebugger.showStatus",
-            showStatus
-        )
+            'eyeTrackingDebugger.showStatus',
+            showStatus,
+        ),
     );
 
     // Clear feedback command
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            "eyeTrackingDebugger.clearFeedback",
-            clearFeedback
-        )
+            'eyeTrackingDebugger.clearFeedback',
+            clearFeedback,
+        ),
     );
 
     // Trigger feedback send command
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            "eyeTrackingDebugger.triggerFeedbackSend",
-            triggerFeedbackSend
-        )
+            'eyeTrackingDebugger.triggerFeedbackSend',
+            triggerFeedbackSend,
+        ),
     );
 
     // Connect to eye tracker command
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            "eyeTrackingDebugger.connectEyeTracker",
-            connectToEyeTracker
-        )
+            'eyeTrackingDebugger.connectEyeTracker',
+            connectToEyeTracker,
+        ),
     );
 
     // Disconnect from eye tracker command
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            "eyeTrackingDebugger.disconnectEyeTracker",
-            disconnectFromEyeTracker
-        )
+            'eyeTrackingDebugger.disconnectEyeTracker',
+            disconnectFromEyeTracker,
+        ),
+    );
+
+    // Start Experiment command
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            'eyeTrackingDebugger.startExperiment',
+            startExperiment,
+        ),
+    );
+
+    // Stop Experiment command
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            'eyeTrackingDebugger.stopExperiment',
+            stopExperiment,
+        ),
     );
 }
 
@@ -175,22 +220,22 @@ function setupEventListeners(context: vscode.ExtensionContext): void {
 
     // Listen for active editor changes
     context.subscriptions.push(
-        vscode.window.onDidChangeActiveTextEditor(onActiveEditorChanged)
+        vscode.window.onDidChangeActiveTextEditor(onActiveEditorChanged),
     );
 
     // Listen for document changes
     context.subscriptions.push(
-        vscode.workspace.onDidChangeTextDocument(onDocumentChanged)
+        vscode.workspace.onDidChangeTextDocument(onDocumentChanged),
     );
 
     // Listen for selection changes
     context.subscriptions.push(
-        vscode.window.onDidChangeTextEditorSelection(onSelectionChanged)
+        vscode.window.onDidChangeTextEditorSelection(onSelectionChanged),
     );
 
     // Listen for configuration changes
     context.subscriptions.push(
-        vscode.workspace.onDidChangeConfiguration(onConfigurationChanged)
+        vscode.workspace.onDidChangeConfiguration(onConfigurationChanged),
     );
 }
 
@@ -215,8 +260,11 @@ async function connectToBackend(): Promise<void> {
 
     const connected = await wsClient.connect();
     if (connected) {
-        vscode.window.showInformationMessage("Connected to Eye Tracking backend");
+        vscode.window.showInformationMessage(
+            'Connected to Eye Tracking backend',
+        );
         statusBar?.setConnected(true);
+        webviewProvider?.updateConnectionStatus(true);
 
         // Send initial context immediately
         sendContextUpdate();
@@ -227,16 +275,21 @@ async function connectToBackend(): Promise<void> {
 
             if (isStatusUpdatePayload(statusPayload)) {
                 statusBar?.setStatus(statusPayload);
+                webviewProvider?.updateStatus(statusPayload);
             } else {
-                console.warn("/status response did not match expected shape", statusPayload);
+                console.warn(
+                    '/status response did not match expected shape',
+                    statusPayload,
+                );
             }
         } catch (err) {
-            console.warn("Failed to fetch /status from backend:", err);
+            console.warn('Failed to fetch /status from backend:', err);
         }
     } else {
         vscode.window.showErrorMessage(
-            "Failed to connect to Eye Tracking backend"
+            'Failed to connect to Eye Tracking backend',
         );
+        webviewProvider?.updateConnectionStatus(false);
     }
 }
 
@@ -244,14 +297,40 @@ function disconnectFromBackend(): void {
     // TODO: Implement backend disconnection
     wsClient?.disconnect();
     statusBar?.setConnected(false);
+    webviewProvider?.updateConnectionStatus(false);
     vscode.window.showInformationMessage(
-        "Disconnected from Eye Tracking backend"
+        'Disconnected from Eye Tracking backend',
     );
 }
 
-async function toggleMode(): Promise<void> {
-    // TODO: Implement mode toggling
-    vscode.window.showInformationMessage("Mode toggle not yet implemented");
+async function toggleMode(
+    new_mode: 'reactive' | 'proactive' | undefined,
+): Promise<void> {
+    if (!new_mode) {
+        // Input for selecting mode if not provided
+        const selectedMode = await vscode.window.showQuickPick(
+            ['reactive', 'proactive'],
+            {
+                placeHolder: 'Select operation mode',
+            },
+        );
+        if (!selectedMode) {
+            return; // User cancelled
+        }
+        new_mode = selectedMode as 'reactive' | 'proactive';
+    }
+
+    try {
+        await fetch(`http://${host}:${port}/mode`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ mode: new_mode }),
+        });
+    } catch (error) {
+        console.error('Failed to toggle mode:', error);
+    }
 }
 
 async function showStatus(): Promise<void> {
@@ -259,7 +338,7 @@ async function showStatus(): Promise<void> {
     if (statusBar) {
         await statusBar.showStatusDetails();
     } else {
-        vscode.window.showInformationMessage("No status available");
+        vscode.window.showInformationMessage('No status available');
     }
 }
 
@@ -272,42 +351,44 @@ async function connectToEyeTracker(): Promise<void> {
 
     try {
         await fetch(`http://${host}:${port}/eye_tracker/connect`, {
-            method: "POST",
+            method: 'POST',
             headers: {
-                "Content-Type": "application/json",
+                'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ device_id: "" }),
+            body: JSON.stringify({ device_id: '' }),
         });
-        vscode.window.showInformationMessage("Eye tracker connection initiated");
+        vscode.window.showInformationMessage(
+            'Eye tracker connection initiated',
+        );
     } catch (error) {
-        console.error("Failed to connect to eye tracker:", error);
+        console.error('Failed to connect to eye tracker:', error);
     }
 }
 
 async function disconnectFromEyeTracker(): Promise<void> {
     try {
         await fetch(`http://${host}:${port}/eye_tracker/disconnect`, {
-            method: "POST",
+            method: 'POST',
         });
     } catch (error) {
-        console.error("Failed to disconnect from eye tracker:", error);
+        console.error('Failed to disconnect from eye tracker:', error);
     }
 }
-
 
 function clearFeedback(): void {
     // TODO: Implement feedback clearing
     feedbackRenderer?.clearAll();
-    vscode.window.showInformationMessage("Feedback cleared");
+    webviewProvider?.clearFeedback();
+    vscode.window.showInformationMessage('Feedback cleared');
 }
 
 async function triggerFeedbackSend(): Promise<void> {
     try {
         await fetch(`http://${host}:${port}/feedback/manual_send`, {
-            method: "GET",
+            method: 'GET',
         });
     } catch (error) {
-        console.error("Failed to trigger manual feedback send:", error);
+        console.error('Failed to trigger manual feedback send:', error);
     }
 }
 
@@ -319,7 +400,7 @@ function onActiveEditorChanged(editor: vscode.TextEditor | undefined): void {
         // Send context immediately when switching files
         sendContextUpdate();
     } else {
-        console.log("No active editor");
+        console.log('No active editor');
     }
 }
 
@@ -333,9 +414,13 @@ function onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
     }
 }
 
-function onSelectionChanged(event: vscode.TextEditorSelectionChangeEvent): void {
+function onSelectionChanged(
+    event: vscode.TextEditorSelectionChangeEvent,
+): void {
     // TODO - only track selection changes in the active editor, dont send the whole file again
-    console.log(`Selection changed in: ${event.textEditor.document.uri.toString()}`);
+    console.log(
+        `Selection changed in: ${event.textEditor.document.uri.toString()}`,
+    );
     // Debounce selection changes (cursor movement)
     scheduleContextUpdate();
 }
@@ -357,7 +442,7 @@ function scheduleContextUpdate(): void {
  */
 function sendContextUpdate(): void {
     if (!wsClient?.isConnected()) {
-        console.log("WebSocket not connected, skipping context update");
+        console.log('WebSocket not connected, skipping context update');
         return;
     }
 
@@ -369,7 +454,7 @@ function sendContextUpdate(): void {
 }
 
 function onConfigurationChanged(event: vscode.ConfigurationChangeEvent): void {
-    if (event.affectsConfiguration("eyeTrackingDebugger")) {
+    if (event.affectsConfiguration('eyeTrackingDebugger')) {
         updateConfiguration();
     }
 }
@@ -380,32 +465,45 @@ function updateConfiguration(): void {
 
 // --- Message Handlers ---
 
-function handleFeedbackDelivery(message: { payload: Record<string, unknown> }): void {
-    console.log("Received feedback delivery message");
+function handleFeedbackDelivery(message: {
+    payload: Record<string, unknown>;
+}): void {
+    console.log('Received feedback delivery message');
 
     const payload = message.payload as unknown as FeedbackDeliveryPayload;
     feedbackRenderer?.renderFeedback(payload.items);
+    webviewProvider?.updateFeedback(payload.items);
 }
 
-function handleStatusUpdate(message: { payload: Record<string, unknown> }): void {
+function handleStatusUpdate(message: {
+    payload: Record<string, unknown>;
+}): void {
     const payloadUnknown = message.payload;
 
     if (!isStatusUpdatePayload(payloadUnknown)) {
-        console.warn("STATUS_UPDATE payload did not match StatusUpdatePayload shape", payloadUnknown);
+        console.warn(
+            'STATUS_UPDATE payload did not match StatusUpdatePayload shape',
+            payloadUnknown,
+        );
         return;
     }
 
     const payload = payloadUnknown; // type is now confirmed
 
     statusBar?.setStatus(payload);
+    webviewProvider?.updateStatus(payload);
 
     if (payload.status === SystemStatus.ERROR && payload.error_message) {
-        console.error("Backend error:", payload.error_message);
-        vscode.window.showErrorMessage(`Eye Tracking Debugger Error: ${payload.error_message}`);
+        console.error('Backend error:', payload.error_message);
+        vscode.window.showErrorMessage(
+            `Eye Tracking Debugger Error: ${payload.error_message}`,
+        );
     }
 }
 
-function handleContextRequest(message: { payload: Record<string, unknown> }): void {
+function handleContextRequest(message: {
+    payload: Record<string, unknown>;
+}): void {
     // TODO: Implement context request handling
     const payload = message.payload as unknown as ContextRequestPayload;
     const context = contextCollector?.collectContext();
@@ -416,22 +514,74 @@ function handleContextRequest(message: { payload: Record<string, unknown> }): vo
 
 function handleError(message: { payload: Record<string, unknown> }): void {
     // TODO: Implement error handling
-    const errorMessage = message.payload["message"] as string || "Unknown error";
+    const errorMessage =
+        (message.payload['message'] as string) || 'Unknown error';
     vscode.window.showErrorMessage(`Eye Tracking Error: ${errorMessage}`);
 }
 
 async function handleFeedbackInteraction(
-    feedbackInteraction: FeedbackInteraction
+    feedbackInteraction: FeedbackInteraction,
 ) {
     try {
         await fetch(`http://${host}:${port}/feedback/interaction`, {
-            method: "POST",
+            method: 'POST',
             headers: {
-                "Content-Type": "application/json",
+                'Content-Type': 'application/json',
             },
             body: JSON.stringify(feedbackInteraction),
         });
     } catch (error) {
-        console.error("Failed to send feedback interaction:", error);
+        console.error('Failed to send feedback interaction:', error);
+    }
+}
+
+async function startExperiment(
+    experimentID?: string,
+    participantID?: string,
+): Promise<void> {
+    if (!experimentID) {
+        experimentID = await vscode.window.showInputBox({
+            prompt: 'Enter Experiment ID',
+            placeHolder: 'e.g., exp123',
+        });
+    }
+    if (!participantID) {
+        participantID = await vscode.window.showInputBox({
+            prompt: 'Enter Participant ID',
+            placeHolder: 'e.g., participant456',
+        });
+    }
+    if (!experimentID || !participantID) {
+        vscode.window.showWarningMessage(
+            'Experiment start cancelled - missing experiment or participant ID',
+        );
+        return;
+    }
+
+    try {
+        await fetch(`http://${host}:${port}/experiment/start`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                experiment_id: experimentID,
+                participant_id: participantID,
+            }),
+        });
+        vscode.window.showInformationMessage('Experiment start initiated');
+    } catch (error) {
+        console.error('Failed to start experiment:', error);
+    }
+}
+
+async function stopExperiment(): Promise<void> {
+    try {
+        await fetch(`http://${host}:${port}/experiment/end`, {
+            method: 'POST',
+        });
+        vscode.window.showInformationMessage('Experiment stop initiated');
+    } catch (error) {
+        console.error('Failed to stop experiment:', error);
     }
 }

@@ -226,11 +226,6 @@ class Server:
         """Broadcast a WebSocket message to all connected clients."""
         try:
             await self._websocket_server.broadcast(msg)
-            self._logger.system(
-                "message_broadcast",
-                {"message_type": msg.type.value},
-                level="DEBUG",
-            )
         except Exception as e:
             self._logger.system(
                 "error_broadcasting_message",
@@ -353,8 +348,8 @@ class Server:
         )
 
         self._rest_api.register_route(
-            "/mode/set",
-            HttpMethod.POST,
+            "/mode",
+            HttpMethod.PUT,
             handle_set_mode,
         )
 
