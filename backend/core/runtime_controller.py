@@ -785,7 +785,6 @@ class RuntimeController:
                 self._pending_feedback = feedback
                 self._pending_feedback_version = version
                 self._stats["feedback_generated"] = self._stats.get("feedback_generated", 0) + 1
-                
             else:
                 self._logger.system(
                     "feedback_generation_empty",
