@@ -124,6 +124,9 @@ class SystemStatusMessage:
 
     # Participant ID
     participant_id: Optional[str] = None
+
+    # User state score (0.0 to 1.0)
+    user_state_score: Optional[float] = None
     
     # Error information
     error_message: Optional[str] = None

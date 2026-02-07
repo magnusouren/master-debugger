@@ -8,52 +8,52 @@
  */
 export enum MessageType {
     // From VS Code to Backend
-    CONTEXT_UPDATE = "context_update",
-    CONTEXT_REQUEST = "context_request",
-    FEEDBACK_INTERACTION = "feedback_interaction",
+    CONTEXT_UPDATE = 'context_update',
+    CONTEXT_REQUEST = 'context_request',
+    FEEDBACK_INTERACTION = 'feedback_interaction',
 
     // From Backend to VS Code
-    FEEDBACK_DELIVERY = "feedback_delivery",
-    STATUS_UPDATE = "status_update",
-    ERROR = "error",
+    FEEDBACK_DELIVERY = 'feedback_delivery',
+    STATUS_UPDATE = 'status_update',
+    ERROR = 'error',
 
     // Bidirectional
-    PING = "ping",
-    PONG = "pong",
-    CONFIG_UPDATE = "config_update",
+    PING = 'ping',
+    PONG = 'pong',
+    CONFIG_UPDATE = 'config_update',
 }
 
 /**
  * System status states.
  */
 export enum SystemStatus {
-    INITIALIZING = "initializing",
-    READY = "ready",
-    PROCESSING = "processing",
-    PAUSED = "paused",
-    ERROR = "error",
-    DISCONNECTED = "disconnected",
+    INITIALIZING = 'initializing',
+    READY = 'ready',
+    PROCESSING = 'processing',
+    PAUSED = 'paused',
+    ERROR = 'error',
+    DISCONNECTED = 'disconnected',
 }
 
 /**
  * Feedback types.
  */
 export enum FeedbackType {
-    HINT = "hint",
-    SUGGESTION = "suggestion",
-    WARNING = "warning",
-    EXPLANATION = "explanation",
-    SIMPLIFICATION = "simplification",
+    HINT = 'hint',
+    SUGGESTION = 'suggestion',
+    WARNING = 'warning',
+    EXPLANATION = 'explanation',
+    SIMPLIFICATION = 'simplification',
 }
 
 /**
  * Feedback priority levels.
  */
 export enum FeedbackPriority {
-    LOW = "low",
-    MEDIUM = "medium",
-    HIGH = "high",
-    CRITICAL = "critical",
+    LOW = 'low',
+    MEDIUM = 'medium',
+    HIGH = 'high',
+    CRITICAL = 'critical',
 }
 
 /**
@@ -135,7 +135,7 @@ export interface FeedbackItem {
  */
 export interface FeedbackInteraction {
     feedback_id: string;
-    interaction_type: "dismissed" | "accepted";
+    interaction_type: 'dismissed' | 'accepted';
     timestamp: number;
     metadata?: Record<string, unknown>;
 }
@@ -156,7 +156,7 @@ export interface WebSocketMessage {
 export interface FeedbackDeliveryPayload {
     items: FeedbackItem[];
     request_id?: string;
-    triggered_by: "reactive" | "proactive" | "manual";
+    triggered_by: 'reactive' | 'proactive' | 'manual';
     user_state_score?: number;
 }
 
@@ -167,7 +167,7 @@ export interface SystemStatusMessage {
     status: SystemStatus;
     timestamp: number;
     eye_tracker_connected: boolean;
-    operation_mode: "reactive" | "proactive";
+    operation_mode: 'reactive' | 'proactive';
     eye_samples_processed: number;
     code_window_samples_processed: number;
     feedback_generated: number;
@@ -176,6 +176,7 @@ export interface SystemStatusMessage {
     llm_model?: string;
     experiment_id?: string;
     participant_id?: string;
+    user_state_score?: number | null;
     error_message?: string;
 }
 
