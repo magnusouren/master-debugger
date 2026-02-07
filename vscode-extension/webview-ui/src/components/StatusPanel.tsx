@@ -53,6 +53,8 @@ export function StatusPanel({ status }: StatusPanelProps) {
                     <span className="label">Cooldown</span>
                     <span className="value">{status.feedback_cooldown_left_s || 0}s</span>
 
+                    <span className="label">User State Score</span>
+                    <span className="value">{status.user_state_score !== undefined && status.user_state_score !== null ? status.user_state_score.toFixed(2) : "-"}</span>
 
                     {status.llm_model && (
                         <>

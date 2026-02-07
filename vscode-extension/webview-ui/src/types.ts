@@ -66,5 +66,6 @@ export interface SystemStatus {
   llm_model?: string;
   experiment_id?: string;
   participant_id?: string;
+  user_state_score?: number | null;
   error_message?: string;
 }

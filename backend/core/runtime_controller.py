@@ -278,6 +278,7 @@ class RuntimeController:
             experiment_active=self._experiment_is_active,
             experiment_id=self._experiment_id,
             participant_id=self._participant_id,
+            user_state_score=self._current_user_state.score.score if self._current_user_state else None,
         )
     
     def get_statistics(self) -> Dict[str, Any]:
