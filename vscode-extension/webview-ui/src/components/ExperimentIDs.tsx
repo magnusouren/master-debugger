@@ -33,7 +33,7 @@ export function ExperimentIDs({
           justifyContent: "space-between"
         }}
       >
-        <span>Experiment Controll</span>
+        <span>Experiment Control</span>
         <button className="btn small secondary toggle-btn" onClick={() => setToggled(!toggled)}>{toggled ? "Hide" : "Show"}</button>
       </div>
       {toggled && (
