@@ -44,6 +44,7 @@ export function App() {
         break;
       case "statusUpdate":
         setStatus(message.payload);
+        setIsConnected(message.payload.status === "ready" || message.payload.status === "processing" || message.payload.status === "paused");
         break;
       case "feedbackUpdate":
         setFeedbackItems(message.payload.items);
