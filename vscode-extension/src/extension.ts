@@ -303,8 +303,23 @@ function disconnectFromBackend(): void {
     );
 }
 
-async function toggleMode(new_mode: 'reactive' | 'proactive'): Promise<void> {
-    console.log(`Toggling mode to: ${new_mode}`);
+async function toggleMode(
+    new_mode: 'reactive' | 'proactive' | undefined,
+): Promise<void> {
+    if (!new_mode) {
+        // Input for selecting mode if not provided
+        const selectedMode = await vscode.window.showQuickPick(
+            ['reactive', 'proactive'],
+            {
+                placeHolder: 'Select operation mode',
+            },
+        );
+        if (!selectedMode) {
+            return; // User cancelled
+        }
+        new_mode = selectedMode as 'reactive' | 'proactive';
+    }
+
     try {
         await fetch(`http://${host}:${port}/mode`, {
             method: 'PUT',
