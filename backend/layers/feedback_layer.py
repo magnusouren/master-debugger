@@ -465,12 +465,14 @@ class FeedbackLayer:
         # Return excerpt and its starting line (1-based)
         return excerpt, start_idx + 1
 
-    def _with_line_numbers(self, code: str, start_line_one_based: int) -> str:
+    def _with_line_numbers(self, code: str, start_line_one_based: int, cursor_line_one_based: Optional[int] = None) -> str:
         """
         Prefix each line with stable line numbers in format: L000123| <code>
+        Lines where the cursor is located are marked with >>> prefix.
         
         :param code: Code excerpt to number
         :param start_line_one_based: Starting line number (1-based) for this excerpt
+        :param cursor_line_one_based: Optional cursor line (1-based) to mark with >>>
         :return: Line-numbered code
         """
         lines = code.splitlines()
@@ -478,7 +480,10 @@ class FeedbackLayer:
         
         for idx, line in enumerate(lines):
             line_num = start_line_one_based + idx
-            numbered_lines.append(f"L{line_num:06d}| {line}")
+            if cursor_line_one_based is not None and line_num == cursor_line_one_based:
+                numbered_lines.append(f">>> L{line_num:06d}| {line}")
+            else:
+                numbered_lines.append(f"    L{line_num:06d}| {line}")
         
         return "\n".join(numbered_lines)
 
@@ -487,8 +492,6 @@ class FeedbackLayer:
         context: CodeContext,
         user_state: Optional["UserStateEstimate"] = None,
     ) -> str:
-        cursor = context.cursor_position
-
         def _fmt_pos(p: CodePosition) -> str:
             return f"line {p.line}, col {p.character}"
 
@@ -537,24 +540,16 @@ class FeedbackLayer:
             full_code = ""
             base_line_one_based = 1
 
-        # Extract window around cursor (VS Code uses 0-based line indexing)
-        # Convert cursor.line from absolute 0-based to a 1-based line relative to `full_code`
+        # Use full code with line numbers, cursor position provides context for the LLM
+        cursor = context.cursor_position
+        
+        # Convert cursor to 1-based line number for marking in the code
+        cursor_line_one_based = None
         if cursor:
-            cursor_abs_line_one_based = cursor.line + 1
-            cursor_line_one_based_relative = cursor_abs_line_one_based - base_line_one_based + 1
-            # Clamp to at least 1 to avoid invalid indices in helpers
-            if cursor_line_one_based_relative < 1:
-                cursor_line_one_based_relative = 1
-        else:
-            cursor_line_one_based_relative = 1
-
-        code_excerpt, excerpt_start_line_relative = self._extract_window(
-            full_code, cursor_line_one_based_relative, radius=60
-        )
-
-        # Add line numbers to the excerpt, using absolute 1-based file line numbers
-        excerpt_start_line_absolute = base_line_one_based + excerpt_start_line_relative - 1
-        numbered_code = self._with_line_numbers(code_excerpt, excerpt_start_line_absolute)
+            cursor_line_one_based = cursor.line + 1  # VS Code uses 0-based lines
+        
+        # Add line numbers to the full code, marking the cursor line
+        numbered_code = self._with_line_numbers(full_code, base_line_one_based, cursor_line_one_based)
         # TODO - give more details about user state for better personalized feedback
         # Optional user_state snippet (kept generic so it doesn't break if UserStateEstimate changes)
         user_state_text = "(none)"
@@ -598,11 +593,12 @@ class FeedbackLayer:
             "- Prefer specific edits (what/where/how) over generic advice.\n\n"
 
             "IMPORTANT - Line Number Usage:\n"
-            "- Each code line is prefixed like: L000123| <code>\n"
+            "- Each code line is prefixed like:     L000123| <code>\n"
+            "- The cursor line is marked with >>> prefix: >>> L000042| <code>\n"
             "- VS Code positions are 0-based. Therefore, convert the prefix number L to code_range line by: line = L - 1.\n"
             "- Set code_range.start.line and code_range.end.line using that conversion.\n"
             "- If you are unsure about exact column positions, set start.character = 0 and end.character = 0.\n"
-            "- Example: 'L000042| def foo():' => code_range.start.line = 41.\n\n"
+            "- Example: '>>> L000042| def foo():' => code_range.start.line = 41 (this is where the cursor is).\n\n"
 
             "Context:\n"
             f"- language_id: {context.language_id}\n"
@@ -612,13 +608,12 @@ class FeedbackLayer:
             f"- cursor_position: {_fmt_pos(cursor)}\n"
             f"- selection: {selection_text}\n"
             f"- visible_range: {visible_text}\n"
-            f"- metadata: {context.metadata if context.metadata else '{}'}\n"
             f"- user_state: {user_state_text}\n\n"
 
             "Diagnostics (DiagnosticInfo.severity is one of: error, warning, info, hint):\n"
             f"{diag_text}\n\n"
 
-            "Code (excerpt around cursor with line numbers):\n"
+            "Code (full file with line numbers, cursor indicates user's focus area):\n"
             f"<BEGIN_CODE language={context.language_id}>\n"
             f"{numbered_code}\n"
             "<END_CODE>\n"
