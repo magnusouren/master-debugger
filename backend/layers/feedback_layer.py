@@ -529,6 +529,8 @@ class FeedbackLayer:
         
         # Add line numbers to the full code, marking the cursor line
         numbered_code = self._with_line_numbers(full_code, base_line_one_based, cursor_line_one_based)
+        # NOTE - big files may be really expensive to send, a better extraction strategy may be needed in practice (e.g. a focused window around the cursor, or just the visible range)
+        
         # TODO - give more details about user state for better personalized feedback
         # Optional user_state snippet (kept generic so it doesn't break if UserStateEstimate changes)
         user_state_text = "(none)"
