@@ -438,33 +438,6 @@ class FeedbackLayer:
         for k in expired:
             self._cache.pop(k, None)
 
-    def _extract_window(self, code: str, cursor_line_one_based: int, radius: int = 60) -> Tuple[str, int]:
-        """
-        Extract a window of code around the cursor line.
-        
-        :param code: Full file content
-        :param cursor_line_one_based: Cursor line (1-based)
-        :param radius: Number of lines before/after cursor to include
-        :return: (excerpt_code, excerpt_start_line_one_based)
-        """
-        lines = code.splitlines()
-        total_lines = len(lines)
-        
-        # Convert to 0-based for indexing
-        cursor_idx = cursor_line_one_based - 1
-        cursor_idx = max(0, min(cursor_idx, total_lines - 1))
-        
-        # Calculate window boundaries
-        start_idx = max(0, cursor_idx - radius)
-        end_idx = min(total_lines, cursor_idx + radius + 1)
-        
-        # Extract window
-        window_lines = lines[start_idx:end_idx]
-        excerpt = "\n".join(window_lines)
-        
-        # Return excerpt and its starting line (1-based)
-        return excerpt, start_idx + 1
-
     def _with_line_numbers(self, code: str, start_line_one_based: int, cursor_line_one_based: Optional[int] = None) -> str:
         """
         Prefix each line with stable line numbers in format: L000123| <code>
