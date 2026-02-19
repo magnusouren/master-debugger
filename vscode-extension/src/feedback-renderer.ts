@@ -34,54 +34,155 @@ export class FeedbackRenderer {
     }
 
     /**
-     * Render feedback items in the editor.
+     * Add feedback to the renderer, but don't display it yet.
      */
-    renderFeedback(items: FeedbackItem[]): void {
-        // TODO: Implement feedback rendering
+    addFeedback(items: FeedbackItem[]): void {
+        items.forEach((item) => {
+            this.activeFeedback.set(item.metadata.feedback_id, item);
+            this.showNotification(item);
+        });
+    }
 
-        console.log('FEEDBACK ITEMS:', items);
+    /**
+     * Activate existing feedback items (e.g. show decorations, diagnostics, etc.).
+     */
+    activateFeedback(feedbackId: string): void {
+        const item = this.activeFeedback.get(feedbackId);
+        if (!item) return;
+
+        // For simplicity, we'll show all feedback as diagnostics and inline decorations
+        this.showAsDiagnostic(item);
+        // this.showInlineDecoration(item);
+        // this.highlightCodeRange(item);
     }
 
     /**
      * Clear all rendered feedback.
      */
     clearAll(): void {
-        // TODO: Implement clearing all feedback
+        this.activeFeedback.clear();
+        this.diagnosticCollection.clear();
+        if (this.decorationType) {
+            this.decorationType.dispose();
+            this.decorationType = null;
+        }
     }
 
     /**
      * Clear feedback by ID.
      */
     clearFeedback(feedbackId: string): void {
-        // TODO: Implement clearing specific feedback
+        this.activeFeedback.delete(feedbackId);
+        const diagnostics = this.diagnosticCollection.get(
+            vscode.window.activeTextEditor?.document.uri ||
+                vscode.Uri.parse(''),
+        );
+        if (diagnostics) {
+            const updatedDiagnostics = diagnostics.filter(
+                (diag) => diag.code !== feedbackId,
+            );
+            this.diagnosticCollection.set(
+                vscode.window.activeTextEditor?.document.uri ||
+                    vscode.Uri.parse(''),
+                updatedDiagnostics,
+            );
+        }
     }
 
     /**
      * Show feedback as inline decoration.
      */
     showInlineDecoration(item: FeedbackItem): void {
-        // TODO: Implement inline decoration
+        if (!item.code_range) return;
+
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return;
+
+        const range = this.convertRange(item.code_range, editor.document);
+        const decorationColor = this.getDecorationColor(item.priority);
+
+        if (!this.decorationType) {
+            this.decorationType = vscode.window.createTextEditorDecorationType({
+                backgroundColor: decorationColor,
+                isWholeLine: false,
+            });
+        }
+
+        editor.setDecorations(this.decorationType, [range]);
     }
 
     /**
      * Show feedback as hover tooltip.
      */
     showHoverTooltip(item: FeedbackItem): void {
-        // TODO: Implement hover tooltip
+        if (!item.code_range) return;
+
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return;
+
+        const range = this.convertRange(item.code_range, editor.document);
+        const markdownMessage = this.createMarkdownMessage(item);
+
+        const hoverProvider: vscode.HoverProvider = {
+            provideHover() {
+                return new vscode.Hover(markdownMessage, range);
+            },
+        };
+
+        const selector: vscode.DocumentSelector = [
+            { scheme: 'file', language: editor.document.languageId },
+        ];
+
+        this.context.subscriptions.push(
+            vscode.languages.registerHoverProvider(selector, hoverProvider),
+        );
     }
 
     /**
      * Show feedback as diagnostic (in Problems panel).
      */
     showAsDiagnostic(item: FeedbackItem): void {
-        // TODO: Implement diagnostic display
+        if (!item.code_range) return;
+
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return;
+
+        const range = this.convertRange(item.code_range, editor.document);
+        const severity = this.getSeverity(item.priority);
+        const diagnostic = new vscode.Diagnostic(range, item.message, severity);
+        diagnostic.code = item.metadata.feedback_id;
+
+        this.diagnosticCollection.set(editor.document.uri, [diagnostic]);
     }
 
     /**
      * Show feedback as notification.
      */
     showNotification(item: FeedbackItem): void {
-        // TODO: Implement notification display
+        vscode.window
+            .showInformationMessage(
+                // `${item.title}: ${item.message}`,
+                'Feedback Available',
+                'View Details',
+                'Dismiss',
+            )
+            .then((selection) => {
+                if (selection === 'View Details') {
+                    this.interactionCallback?.({
+                        feedback_id: item.metadata.feedback_id,
+                        interaction_type: 'accepted',
+                        timestamp: Math.floor(Date.now() / 1000),
+                    });
+                    this.showHoverTooltip(item);
+                } else if (selection === 'Dismiss') {
+                    this.interactionCallback?.({
+                        feedback_id: item.metadata.feedback_id,
+                        interaction_type: 'rejected',
+                        timestamp: Math.floor(Date.now() / 1000),
+                    });
+                    this.clearFeedback(item.metadata.feedback_id);
+                }
+            });
     }
 
     /**
@@ -112,7 +213,8 @@ export class FeedbackRenderer {
      * Dispose of resources.
      */
     dispose(): void {
-        // TODO: Implement disposal
+        this.clearAll();
+        this.diagnosticCollection.dispose();
     }
 
     // --- Private Methods ---
@@ -127,14 +229,20 @@ export class FeedbackRenderer {
         return vscode.DiagnosticSeverity.Information;
     }
 
-    private convertRange(range: CodeRange): vscode.Range {
-        // TODO: Implement range conversion
-        return new vscode.Range(
-            range.start.line,
-            range.start.character,
-            range.end.line,
-            range.end.character,
-        );
+    private convertRange(
+        range: CodeRange,
+        document: vscode.TextDocument,
+    ): vscode.Range {
+        const clamp = (n: number, min: number, max: number) =>
+            Math.max(min, Math.min(max, n));
+
+        const startLine = clamp(range.start.line, 0, document.lineCount - 1);
+        const endLine = clamp(range.end.line, 0, document.lineCount - 1);
+
+        const start = document.lineAt(startLine).range.start;
+        const end = document.lineAt(endLine).range.end;
+
+        return new vscode.Range(start, end);
     }
 
     private createMarkdownMessage(item: FeedbackItem): vscode.MarkdownString {
