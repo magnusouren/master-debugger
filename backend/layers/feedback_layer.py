@@ -543,10 +543,16 @@ class FeedbackLayer:
         # Use full code with line numbers, cursor position provides context for the LLM
         cursor = context.cursor_position
         
-        # Convert cursor to 1-based line number for marking in the code
+        # Convert cursor to absolute 1-based line number for marking in the code
+        # Only mark cursor if it falls within the snippet bounds
         cursor_line_one_based = None
-        if cursor:
-            cursor_line_one_based = cursor.line + 1  # VS Code uses 0-based lines
+        if cursor and full_code:
+            cursor_abs_one_based = cursor.line + 1  # VS Code uses 0-based lines
+            snippet_line_count = len(full_code.splitlines())
+            snippet_end_line = base_line_one_based + snippet_line_count - 1
+            # Verify cursor is within the snippet range before marking
+            if base_line_one_based <= cursor_abs_one_based <= snippet_end_line:
+                cursor_line_one_based = cursor_abs_one_based
         
         # Add line numbers to the full code, marking the cursor line
         numbered_code = self._with_line_numbers(full_code, base_line_one_based, cursor_line_one_based)
