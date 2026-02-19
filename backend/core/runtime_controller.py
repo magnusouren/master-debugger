@@ -110,6 +110,13 @@ class RuntimeController:
         self._experiment_id: Optional[str] = self._config.controller.experiment_id
         self._participant_id: Optional[str] = self._config.controller.participant_id
 
+        # Baseline recording state
+        self._baseline_recording: bool = False
+        self._baseline_start_time: Optional[float] = None
+        self._baseline_features: List[WindowFeatures] = []
+        self._baseline_duration_seconds: float = 30.0
+        self._baseline_computed: Optional[Dict[str, float]] = None
+
         # Generate session ID only if both participant_id and experiment_id are available
         if self._config.controller.participant_id and self._config.controller.experiment_id:
             self._session_id: Optional[str] = f"{self._config.controller.participant_id}_{self._config.controller.experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
@@ -899,11 +906,18 @@ class RuntimeController:
     def _on_window_features(self, features: WindowFeatures) -> None:
         """
         Handle new window features from Signal Processing.
-        
+
         Args:
             features: Computed window features.
         """
-        # TODO - log some stats
+        # Baseline recording (commented out - kept for future use)
+        # if self._baseline_recording:
+        #     self._baseline_features.append(features)
+        #     current_time = asyncio.get_event_loop().time()
+        #     elapsed = current_time - self._baseline_start_time
+        #
+        #     if elapsed >= self._baseline_duration_seconds:
+        #         self._finish_baseline_recording()
 
         if self._operation_mode == OperationMode.REACTIVE:
             # Baseline: observed features -> reactive
@@ -968,7 +982,69 @@ class RuntimeController:
 
         # Attempt to deliver feedback if conditions are met
         self._try_deliver_feedback(force=False)
-    
+
+    def _finish_baseline_recording(self) -> None:
+        """
+        Finish baseline recording and compute average metrics.
+
+        Called automatically after baseline_duration_seconds have elapsed.
+        Computes averages of all collected window features and logs them.
+        """
+        self._baseline_recording = False
+
+        if not self._baseline_features:
+            self._logger.system(
+                "baseline_recording_empty",
+                {"message": "No features collected during baseline period"},
+                level="WARNING",
+            )
+            return
+
+        # Compute averages for all metrics
+        num_windows = len(self._baseline_features)
+
+        # Collect all numeric values from features
+        sums: Dict[str, float] = {}
+        counts: Dict[str, int] = {}
+
+        for window in self._baseline_features:
+            # WindowFeatures stores metrics in a features dictionary
+            for key, value in window.features.items():
+                if value is not None:
+                    sums[key] = sums.get(key, 0.0) + value
+                    counts[key] = counts.get(key, 0) + 1
+
+        # Compute averages
+        baseline_averages: Dict[str, float] = {}
+        for key in sums:
+            if counts[key] > 0:
+                baseline_averages[key] = sums[key] / counts[key]
+
+        self._baseline_computed = baseline_averages
+
+        self._logger.system(
+            "baseline_recording_completed",
+            {
+                "num_windows": num_windows,
+                "duration_seconds": self._baseline_duration_seconds,
+                "baseline_averages": baseline_averages,
+            },
+            level="INFO",
+        )
+
+        self._logger.experiment(
+            "baseline_recorded",
+            {
+                "num_windows": num_windows,
+                "duration_seconds": self._baseline_duration_seconds,
+                "baseline_averages": baseline_averages,
+            },
+            level="INFO",
+        )
+
+        # Clear the collected features to free memory
+        self._baseline_features = []
+
     # --- Logging and Experiment Control ---
     
     def start_experiment(
@@ -998,6 +1074,21 @@ class RuntimeController:
 
         # Start reactive tool
         self._reactive_tool.start()
+
+        # Baseline recording (commented out - kept for future use)
+        # self._baseline_recording = True
+        # self._baseline_start_time = asyncio.get_event_loop().time()
+        # self._baseline_features = []
+        # self._baseline_computed = None
+        #
+        # self._logger.system(
+        #     "baseline_recording_started",
+        #     {
+        #         "duration_seconds": self._baseline_duration_seconds,
+        #         "experiment_id": self._experiment_id,
+        #     },
+        #     level="INFO",
+        # )
 
         self._logger.system(
             "experiment_started",

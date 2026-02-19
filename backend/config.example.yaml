@@ -14,6 +14,7 @@ signal_processing:
   min_valid_sample_ratio: 0.5
   interpolate_missing: true
   max_gap_to_interpolate_ms: 100.0
+  require_both_eyes_valid: false
 
 # Forecasting Tool (proactive mode only)
 forecasting:

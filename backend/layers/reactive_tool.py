@@ -315,7 +315,8 @@ class ReactiveTool:
         estimate degrades gracefully when some metrics are unavailable.
 
         TODO - make the normalization ramps configurable later. (eg. via calibration values)
-
+        TODO - as mentioned over, pupil mean, fixation duration, sacecade amplitude, gaze dispersion
+            should use values from the calculation stage and not the raw features. 
         Args:
             windows: List of recent feature windows.
         Returns:
