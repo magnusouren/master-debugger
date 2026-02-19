@@ -880,14 +880,14 @@ class RuntimeController:
         Args:
             features: Computed window features.
         """
-        # Collect baseline data if recording
-        if self._baseline_recording:
-            self._baseline_features.append(features)
-            current_time = asyncio.get_event_loop().time()
-            elapsed = current_time - self._baseline_start_time
-
-            if elapsed >= self._baseline_duration_seconds:
-                self._finish_baseline_recording()
+        # Baseline recording (commented out - kept for future use)
+        # if self._baseline_recording:
+        #     self._baseline_features.append(features)
+        #     current_time = asyncio.get_event_loop().time()
+        #     elapsed = current_time - self._baseline_start_time
+        #
+        #     if elapsed >= self._baseline_duration_seconds:
+        #         self._finish_baseline_recording()
 
         if self._operation_mode == OperationMode.REACTIVE:
             # Baseline: observed features -> reactive
@@ -1045,20 +1045,20 @@ class RuntimeController:
         # Start reactive tool
         self._reactive_tool.start()
 
-        # Start baseline recording
-        self._baseline_recording = True
-        self._baseline_start_time = asyncio.get_event_loop().time()
-        self._baseline_features = []
-        self._baseline_computed = None
-
-        self._logger.system(
-            "baseline_recording_started",
-            {
-                "duration_seconds": self._baseline_duration_seconds,
-                "experiment_id": self._experiment_id,
-            },
-            level="INFO",
-        )
+        # Baseline recording (commented out - kept for future use)
+        # self._baseline_recording = True
+        # self._baseline_start_time = asyncio.get_event_loop().time()
+        # self._baseline_features = []
+        # self._baseline_computed = None
+        #
+        # self._logger.system(
+        #     "baseline_recording_started",
+        #     {
+        #         "duration_seconds": self._baseline_duration_seconds,
+        #         "experiment_id": self._experiment_id,
+        #     },
+        #     level="INFO",
+        # )
 
         self._logger.system(
             "experiment_started",
