@@ -42,6 +42,7 @@ METRIC_KEYGROUPS = {
             "vel": "pupil_mean_abs_vel",
             "std": "pupil_std",
             "range": "pupil_range",
+            "ipa": "pupil_ipa",  # Index of Pupillary Activity
         },
         "quality": {
             "valid_ratio": "pupil_valid_ratio",
@@ -80,6 +81,8 @@ METRIC_KEYGROUPS = {
             "max_amplitude": "saccade_max_amplitude",
             "count": "saccade_count",
             "mean_duration_ms": "saccade_mean_duration_ms",
+            "mean_velocity": "saccade_mean_velocity",  # For anticipation
+            "velocity_std": "saccade_velocity_std",    # For perceived difficulty
         },
     },
     "gaze_dispersion": {
@@ -308,52 +311,41 @@ class ReactiveTool:
     
     def _estimate_rule_based(self, windows: List[WindowFeatures]) -> float:
         """
-        Estimate user state using rule-based heuristics.
+        Estimate user state using rule-based heuristics with 5 equal-weight metrics.
 
-        Each enabled metric group contributes a normalised [0,1] sub-score
-        with a base weight.  Weights are re-normalised at runtime so the
-        estimate degrades gracefully when some metrics are unavailable.
+        Metrics (each weighted 0.2):
+        1. IPA (Index of Pupillary Activity) - cognitive load from pupil dynamics
+        2. Fixation Duration - longer fixations indicate processing difficulty
+        3. Anticipation (saccade velocity) - rapid scanning indicates anticipation
+        4. Perceived Difficulty (saccade velocity std) - variable scanning indicates uncertainty
+        5. Information Processing Index - composite of fixation and saccade patterns
 
-        TODO - make the normalization ramps configurable later. (eg. via calibration values)
-        TODO - as mentioned over, pupil mean, fixation duration, sacecade amplitude, gaze dispersion
-            should use values from the calculation stage and not the raw features. 
         Args:
             windows: List of recent feature windows.
         Returns:
-            Computed user state score.
+            Computed user state score (0.0 to 1.0).
         """
         enabled = self._enabled(windows)
 
         # components: metric_name -> (sub_score, base_weight)
+        # raw_values: metric_name -> raw value (for logging)
+        # All metrics have equal weight of 0.2
         components: dict = {}
+        raw_values: dict = {}
 
-        # --- Pupil diameter (base weight 0.50) ---
+        # --- 1. IPA - Index of Pupillary Activity (weight 0.2) ---
+        # Higher IPA → more cognitive load events
         if "pupil_diameter" in enabled:
-            load_keys = METRIC_KEYGROUPS["pupil_diameter"]["load"]
+            ipa_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["pupil_diameter"]["load"]["ipa"]
+            )
+            if ipa_series:
+                mean_ipa = sum(ipa_series) / len(ipa_series)
+                raw_values["ipa"] = mean_ipa
+                # IPA typically ranges 0-3 events/sec, higher = more load
+                components["ipa"] = (self._ramp(mean_ipa, lo=0.5, hi=2.5), 0.2)
 
-            mean_series  = self._metric_series(windows, load_keys["mean"])
-            slope_series = self._metric_series(windows, load_keys["slope"])
-            vel_series   = self._metric_series(windows, load_keys["vel"])
-            std_series   = self._metric_series(windows, load_keys["std"])
-            range_series = self._metric_series(windows, load_keys["range"])
-
-            if mean_series or slope_series or vel_series or std_series or range_series:
-                pupil_mean  = sum(mean_series)  / len(mean_series)  if mean_series  else 0.0
-                pupil_slope = sum(slope_series) / len(slope_series) if slope_series else 0.0
-                pupil_vel   = sum(vel_series)   / len(vel_series)   if vel_series   else 0.0
-                pupil_std   = sum(std_series)   / len(std_series)   if std_series   else 0.0
-                pupil_range = sum(range_series) / len(range_series) if range_series else 0.0
-
-                pupil_score = (
-                    0.4 * self._ramp(pupil_mean,  lo=3.8,  hi=4.6)  +
-                    0.2 * self._ramp(pupil_slope, lo=0.00, hi=0.30) +
-                    0.2 * self._ramp(pupil_vel,   lo=5.0,  hi=15.0) +
-                    0.1 * self._ramp(pupil_std,   lo=0.1,  hi=0.5)  +
-                    0.1 * self._ramp(pupil_range, lo=1.0,  hi=3.0)
-                )
-                components["pupil"] = (pupil_score, 0.50)
-
-        # --- Fixation duration (base weight 0.25) ---
+        # --- 2. Fixation Duration (weight 0.2) ---
         # Longer mean fixation → higher cognitive load
         if "fixation_duration" in enabled:
             dur_series = self._metric_series(
@@ -361,27 +353,58 @@ class ReactiveTool:
             )
             if dur_series:
                 mean_dur = sum(dur_series) / len(dur_series)
-                components["fixation"] = (self._ramp(mean_dur, lo=150.0, hi=500.0), 0.25)
+                raw_values["fixation_duration_ms"] = mean_dur
+                components["fixation_duration"] = (self._ramp(mean_dur, lo=150.0, hi=500.0), 0.2)
 
-        # --- Saccade amplitude (base weight 0.15) ---
-        # Larger mean saccade amplitude → more scattered attention
+        # --- 3. Anticipation - Saccade Velocity (weight 0.2) ---
+        # Higher saccade velocity → more rapid/anticipatory scanning
         if "saccade_amplitude" in enabled:
-            amp_series = self._metric_series(
+            vel_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
+            )
+            if vel_series:
+                mean_vel = sum(vel_series) / len(vel_series)
+                raw_values["anticipation_velocity"] = mean_vel
+                # Saccade velocity in normalized units/sec
+                components["anticipation"] = (self._ramp(mean_vel, lo=1.0, hi=5.0), 0.2)
+
+        # --- 4. Perceived Difficulty - Saccade Velocity Variability (weight 0.2) ---
+        # Higher velocity std → more erratic/uncertain scanning
+        if "saccade_amplitude" in enabled:
+            vel_std_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["velocity_std"]
+            )
+            if vel_std_series:
+                mean_vel_std = sum(vel_std_series) / len(vel_std_series)
+                raw_values["perceived_difficulty_std"] = mean_vel_std
+                components["perceived_difficulty"] = (self._ramp(mean_vel_std, lo=0.5, hi=3.0), 0.2)
+
+        # --- 5. Information Processing Index (weight 0.2) ---
+        # Composite: (fixation_duration * saccade_amplitude) / saccade_count
+        # Higher values indicate deeper processing per visual area
+        if "fixation_duration" in enabled and "saccade_amplitude" in enabled:
+            fix_dur_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
+            )
+            sac_amp_series = self._metric_series(
                 windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_amplitude"]
             )
-            if amp_series:
-                mean_amp = sum(amp_series) / len(amp_series)
-                components["saccade"] = (self._ramp(mean_amp, lo=0.03, hi=0.20), 0.15)
-
-        # --- Gaze dispersion (base weight 0.10) ---
-        # Higher total dispersion → less focused gaze
-        if "gaze_dispersion" in enabled:
-            disp_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["gaze_dispersion"]["load"]["total"]
+            sac_count_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["count"]
             )
-            if disp_series:
-                mean_disp = sum(disp_series) / len(disp_series)
-                components["dispersion"] = (self._ramp(mean_disp, lo=0.02, hi=0.10), 0.10)
+
+            if fix_dur_series and sac_amp_series and sac_count_series:
+                mean_fix_dur = sum(fix_dur_series) / len(fix_dur_series)
+                mean_sac_amp = sum(sac_amp_series) / len(sac_amp_series)
+                mean_sac_count = sum(sac_count_series) / len(sac_count_series)
+
+                # Avoid division by zero
+                if mean_sac_count > 0:
+                    # Normalize: fixation in seconds, amplitude already normalized
+                    info_proc_index = (mean_fix_dur / 1000.0) * mean_sac_amp / mean_sac_count
+                    raw_values["info_processing_index"] = info_proc_index
+                    # Scale to reasonable range (empirically determined)
+                    components["info_processing"] = (self._ramp(info_proc_index, lo=0.001, hi=0.05), 0.2)
 
         if not components:
             return 0.5
@@ -389,6 +412,18 @@ class ReactiveTool:
         # Re-normalise weights so they sum to 1.0
         total_weight = sum(w for _, w in components.values())
         score = sum(v * (w / total_weight) for v, w in components.values())
+
+        # Log individual metrics with raw values and normalized scores
+        self._logger.system(
+            "user_state_metrics",
+            {
+                "raw_values": {k: round(v, 4) if v is not None else None for k, v in raw_values.items()},
+                "normalized_scores": {k: round(s, 3) for k, (s, _) in components.items()},
+                "final_score": round(score, 3),
+                "active_metrics": list(components.keys()),
+            },
+            level="INFO"
+        )
 
         return float(max(0.0, min(1.0, score)))
     
@@ -522,59 +557,78 @@ class ReactiveTool:
         self, features: List[WindowFeatures]
     ) -> dict:
         """
-        Identify features that contributed most to the estimate.
-        
+        Extract the 5 key metrics used in scoring.
+
         Args:
             features: Feature window used for estimation.
-            
+
         Returns:
-            Dictionary of feature contributions.
+            Dictionary with raw metric values and normalized scores.
         """
         contribs = {}
-
         enabled = self._enabled(features)
+
+        # --- 1. IPA (Index of Pupillary Activity) ---
         if "pupil_diameter" in enabled:
-            load_keys = METRIC_KEYGROUPS["pupil_diameter"]["load"]
-            mean_series = self._metric_series(features, load_keys["mean"])
-            slope_series = self._metric_series(features, load_keys["slope"])
-            vel_series = self._metric_series(features, load_keys["vel"])
-            std_series = self._metric_series(features, load_keys["std"])
-            range_series = self._metric_series(features, load_keys["range"])
+            ipa_series = self._metric_series(
+                features, METRIC_KEYGROUPS["pupil_diameter"]["load"]["ipa"]
+            )
+            if ipa_series:
+                mean_ipa = sum(ipa_series) / len(ipa_series)
+                contribs["ipa_raw"] = round(mean_ipa, 4)
+                contribs["ipa_score"] = round(self._ramp(mean_ipa, lo=0.5, hi=2.5), 3)
 
-            if mean_series:
-                contribs["pupil_mean"] = sum(mean_series) / len(mean_series)
-            if slope_series:
-                contribs["pupil_slope"] = sum(slope_series) / len(slope_series)
-            if vel_series:
-                contribs["pupil_mean_abs_vel"] = sum(vel_series) / len(vel_series)
-            if std_series:
-                contribs["pupil_std"] = sum(std_series) / len(std_series)
-            if range_series:
-                contribs["pupil_range"] = sum(range_series) / len(range_series)
-
+        # --- 2. Fixation Duration ---
         if "fixation_duration" in enabled:
-            load_keys = METRIC_KEYGROUPS["fixation_duration"]["load"]
-            dur_series = self._metric_series(features, load_keys["mean_duration_ms"])
+            dur_series = self._metric_series(
+                features, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
+            )
             if dur_series:
-                contribs["fixation_mean_duration_ms"] = sum(dur_series) / len(dur_series)
-            count_series = self._metric_series(features, load_keys["count"])
-            if count_series:
-                contribs["fixation_count"] = sum(count_series) / len(count_series)
+                mean_dur = sum(dur_series) / len(dur_series)
+                contribs["fixation_duration_ms"] = round(mean_dur, 1)
+                contribs["fixation_duration_score"] = round(self._ramp(mean_dur, lo=150.0, hi=500.0), 3)
 
+        # --- 3. Anticipation (Saccade Velocity) ---
         if "saccade_amplitude" in enabled:
-            load_keys = METRIC_KEYGROUPS["saccade_amplitude"]["load"]
-            amp_series = self._metric_series(features, load_keys["mean_amplitude"])
-            if amp_series:
-                contribs["saccade_mean_amplitude"] = sum(amp_series) / len(amp_series)
-            count_series = self._metric_series(features, load_keys["count"])
-            if count_series:
-                contribs["saccade_count"] = sum(count_series) / len(count_series)
+            vel_series = self._metric_series(
+                features, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
+            )
+            if vel_series:
+                mean_vel = sum(vel_series) / len(vel_series)
+                contribs["anticipation_velocity"] = round(mean_vel, 4)
+                contribs["anticipation_score"] = round(self._ramp(mean_vel, lo=1.0, hi=5.0), 3)
 
-        if "gaze_dispersion" in enabled:
-            load_keys = METRIC_KEYGROUPS["gaze_dispersion"]["load"]
-            disp_series = self._metric_series(features, load_keys["total"])
-            if disp_series:
-                contribs["gaze_disp_total"] = sum(disp_series) / len(disp_series)
+        # --- 4. Perceived Difficulty (Saccade Velocity Std) ---
+        if "saccade_amplitude" in enabled:
+            vel_std_series = self._metric_series(
+                features, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["velocity_std"]
+            )
+            if vel_std_series:
+                mean_vel_std = sum(vel_std_series) / len(vel_std_series)
+                contribs["perceived_difficulty_std"] = round(mean_vel_std, 4)
+                contribs["perceived_difficulty_score"] = round(self._ramp(mean_vel_std, lo=0.5, hi=3.0), 3)
+
+        # --- 5. Information Processing Index ---
+        if "fixation_duration" in enabled and "saccade_amplitude" in enabled:
+            fix_dur_series = self._metric_series(
+                features, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
+            )
+            sac_amp_series = self._metric_series(
+                features, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_amplitude"]
+            )
+            sac_count_series = self._metric_series(
+                features, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["count"]
+            )
+
+            if fix_dur_series and sac_amp_series and sac_count_series:
+                mean_fix_dur = sum(fix_dur_series) / len(fix_dur_series)
+                mean_sac_amp = sum(sac_amp_series) / len(sac_amp_series)
+                mean_sac_count = sum(sac_count_series) / len(sac_count_series)
+
+                if mean_sac_count > 0:
+                    info_proc_index = (mean_fix_dur / 1000.0) * mean_sac_amp / mean_sac_count
+                    contribs["info_processing_index"] = round(info_proc_index, 6)
+                    contribs["info_processing_score"] = round(self._ramp(info_proc_index, lo=0.001, hi=0.05), 3)
 
         return contribs
 
