@@ -8,6 +8,8 @@ from .eye_tracking import (
 from .user_state import (
     UserStateScore,
     UserStateEstimate,
+    MetricBaseline,
+    ParticipantBaseline,
 )
 from .code_context import (
     CodePosition,
@@ -54,6 +56,8 @@ __all__ = [
     # User state types
     "UserStateScore",
     "UserStateEstimate",
+    "MetricBaseline",
+    "ParticipantBaseline",
     # Code context types
     "CodePosition",
     "CodeRange",

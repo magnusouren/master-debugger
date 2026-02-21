@@ -861,7 +861,107 @@ class RuntimeController:
             event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
             payload=self.get_system_status(),
         ))
-    
+
+    # --- Baseline Calibration ---
+
+    async def _run_baseline_calibration(self, participant_id: str) -> None:
+        """
+        Automatic baseline calibration sequence.
+
+        Waits 5 seconds, then records baseline for 60 seconds.
+        """
+        try:
+            # Wait 5 seconds for things to settle
+            self._logger.system(
+                "baseline_calibration_waiting",
+                {"wait_seconds": 5, "participant_id": participant_id},
+                level="INFO"
+            )
+            await asyncio.sleep(5)
+
+            # Check if experiment is still active
+            if not self._experiment_is_active:
+                return
+
+            # Start baseline recording
+            self._reactive_tool.start_baseline_recording(participant_id)
+
+            # Record for 60 seconds
+            self._logger.system(
+                "baseline_calibration_recording",
+                {"duration_seconds": 60, "participant_id": participant_id},
+                level="INFO"
+            )
+            await asyncio.sleep(60)
+
+            # Check if experiment is still active
+            if not self._experiment_is_active:
+                return
+
+            # Stop baseline recording
+            baseline = self._reactive_tool.stop_baseline_recording(participant_id)
+
+            if baseline:
+                self._logger.system(
+                    "baseline_calibration_completed",
+                    {
+                        "participant_id": participant_id,
+                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
+                                   for k, v in baseline.metrics.items()},
+                    },
+                    level="INFO"
+                )
+            else:
+                self._logger.system(
+                    "baseline_calibration_failed",
+                    {"participant_id": participant_id, "reason": "insufficient_data"},
+                    level="WARNING"
+                )
+
+        except asyncio.CancelledError:
+            self._logger.system(
+                "baseline_calibration_cancelled",
+                {"participant_id": participant_id},
+                level="INFO"
+            )
+        except Exception as e:
+            self._logger.system(
+                "baseline_calibration_error",
+                {"participant_id": participant_id, "error": str(e)},
+                level="ERROR"
+            )
+
+    def start_baseline_recording(self, participant_id: str) -> None:
+        """
+        Start recording baseline metrics for a participant.
+
+        Call this when the participant begins the baseline task (e.g., reading simple text).
+
+        Args:
+            participant_id: Unique identifier for the participant.
+        """
+        self._reactive_tool.start_baseline_recording(participant_id)
+
+    def stop_baseline_recording(self, participant_id: str):
+        """
+        Stop recording and compute baseline statistics.
+
+        Args:
+            participant_id: Unique identifier for the participant.
+
+        Returns:
+            ParticipantBaseline object with computed statistics, or None if insufficient data.
+        """
+        return self._reactive_tool.stop_baseline_recording(participant_id)
+
+    def clear_baseline(self) -> None:
+        """Clear the current baseline (revert to static thresholds)."""
+        self._reactive_tool.clear_baseline()
+
+    def has_baseline(self) -> bool:
+        """Check if a valid baseline is loaded."""
+        return self._reactive_tool.has_baseline()
+
     # --- Data Flow Callbacks ---
     
     def _on_gaze_samples(self, samples: List[GazeSample]) -> None:
@@ -1075,20 +1175,9 @@ class RuntimeController:
         # Start reactive tool
         self._reactive_tool.start()
 
-        # Baseline recording (commented out - kept for future use)
-        # self._baseline_recording = True
-        # self._baseline_start_time = asyncio.get_event_loop().time()
-        # self._baseline_features = []
-        # self._baseline_computed = None
-        #
-        # self._logger.system(
-        #     "baseline_recording_started",
-        #     {
-        #         "duration_seconds": self._baseline_duration_seconds,
-        #         "experiment_id": self._experiment_id,
-        #     },
-        #     level="INFO",
-        # )
+        # Schedule automatic baseline recording
+        # Wait 5 seconds, then record baseline for 60 seconds
+        asyncio.create_task(self._run_baseline_calibration(participant_id))
 
         self._logger.system(
             "experiment_started",

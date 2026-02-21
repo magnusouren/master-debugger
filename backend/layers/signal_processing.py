@@ -995,12 +995,12 @@ class SignalProcessingLayer:
             # Detect modulus maxima in detail coefficients (level 2)
             cD2_modmax = SignalProcessingLayer._ipa_modmax(cD2)
 
-            # Universal threshold: λ = σ * sqrt(2 * log(n))
+            # Universal threshold: λ = σ * sqrt(2 * log2(n))
             if len(cD2_modmax) == 0:
                 return 0.0
 
             std_noise = float(np.std(cD2_modmax))
-            threshold = std_noise * math.sqrt(2.0 * math.log(len(cD2_modmax))) if len(cD2_modmax) > 1 else 0.0
+            threshold = std_noise * math.sqrt(2.0 * np.log2(len(cD2_modmax))) if len(cD2_modmax) > 1 else 0.0
 
             # Apply hard thresholding
             cD2_thresholded = pywt.threshold(cD2_modmax, threshold, mode='hard')
