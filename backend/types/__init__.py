@@ -32,6 +32,7 @@ from .config import (
     ControllerConfig,
     SystemConfig,
     OperationMode,
+    TrainingConfig,
 )
 from .messages import (
     MessageType,
@@ -77,6 +78,7 @@ __all__ = [
     "ControllerConfig",
     "SystemConfig",
     "OperationMode",
+    "TrainingConfig",
     # Message types
     "MessageType",
     "SystemStatus",

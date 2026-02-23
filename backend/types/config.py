@@ -152,20 +152,45 @@ class SignalProcessingConfig:
 class ForecastingConfig:
     """Configuration for Forecasting Tool (proactive mode)."""
     enabled: bool = False  # Only active in proactive mode
-    
+
     # Prediction settings
     prediction_horizon_seconds: float = 2.0
     update_rate_hz: float = 5.0
-    
+
     # Model settings
     model_path: Optional[str] = None
-    model_type: str = "lstm"  # or "transformer", "arima", etc.
-    
+    model_type: str = "xgboost"  # "xgboost", "lstm", etc.
+
     # History window for predictions
     history_window_seconds: float = 5.0
-    
+
     # Confidence threshold
     min_confidence_threshold: float = 0.5
+
+
+@dataclass
+class TrainingConfig:
+    """Configuration for ML model training."""
+    # Data settings
+    data_path: Optional[str] = None  # Path to processed features
+
+    # Sequence settings
+    history_window_size: int = 5  # Number of past windows as input
+    prediction_horizon: int = 2   # Windows to look ahead
+
+    # Split ratios
+    train_ratio: float = 0.7
+    val_ratio: float = 0.15
+    test_ratio: float = 0.15
+
+    # XGBoost hyperparameters
+    n_estimators: int = 500
+    max_depth: int = 6
+    learning_rate: float = 0.05
+    early_stopping_rounds: int = 20
+
+    # Random seed
+    random_state: int = 42
 
 
 @dataclass
@@ -265,6 +290,7 @@ class SystemConfig:
     """Complete system configuration."""
     signal_processing: SignalProcessingConfig = field(default_factory=SignalProcessingConfig)
     forecasting: ForecastingConfig = field(default_factory=ForecastingConfig)
+    training: TrainingConfig = field(default_factory=TrainingConfig)
     reactive_tool: ReactiveToolConfig = field(default_factory=ReactiveToolConfig)
     feedback_layer: FeedbackLayerConfig = field(default_factory=FeedbackLayerConfig)
     controller: ControllerConfig = field(default_factory=ControllerConfig)

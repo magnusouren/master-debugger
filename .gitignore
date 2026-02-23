@@ -45,6 +45,7 @@ backend/config.yaml
 !package.json
 !tsconfig.json
 data/
+backend/data/
 
 # not ignore .vscode/launch.json for debugging configurations
 !.vscode/launch.json
