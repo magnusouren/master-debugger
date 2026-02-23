@@ -560,8 +560,12 @@ function handleError(message: { payload: Record<string, unknown> }): void {
 async function handleFeedbackInteraction(
     feedbackInteraction: FeedbackInteraction,
 ) {
-    if (feedbackInteraction.interaction_type === 'accepted') {
-        feedbackRenderer?.activateFeedback(feedbackInteraction.feedback_id);
+    if (feedbackInteraction.interaction_type === 'highlighted') {
+        feedbackRenderer?.highlightFeedback(feedbackInteraction.feedback_id);
+    }
+
+    if (feedbackInteraction.interaction_type === 'dismissed') {
+        feedbackRenderer?.dismissFeedback(feedbackInteraction.feedback_id);
     }
 
     try {
