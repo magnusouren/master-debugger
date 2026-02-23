@@ -46,7 +46,7 @@ export function App() {
         setStatus(message.payload);
         break;
       case "feedbackUpdate":
-        setFeedbackItems(message.payload.items);
+        setFeedbackItems(prev => [...prev, ...message.payload.items]);
         break;
       case "clearFeedback":
         setFeedbackItems([]);
