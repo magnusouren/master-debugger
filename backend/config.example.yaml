@@ -29,8 +29,23 @@ forecasting:
   update_rate_hz: 5.0
   model_path: null  # Path to trained model, e.g., models/trained/latest.json
   model_type: xgboost  # xgboost, lstm
-  history_window_seconds: 60.0
+  history_window_seconds: 5.0
   min_confidence_threshold: 0.5
+
+# Training Configuration (for offline model training)
+training:
+  data_path: null  # Path to processed features parquet file
+  history_window_size: 5  # Number of past windows as input
+  prediction_horizon: 2  # Windows to look ahead for target
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  # XGBoost hyperparameters
+  n_estimators: 500
+  max_depth: 6
+  learning_rate: 0.05
+  early_stopping_rounds: 20
+  random_state: 42
 
 # Reactive Tool
 reactive_tool:
