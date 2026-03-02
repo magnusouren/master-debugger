@@ -225,8 +225,6 @@ function registerCommands(context: vscode.ExtensionContext): void {
  * Set up event listeners for editor changes.
  */
 function setupEventListeners(context: vscode.ExtensionContext): void {
-    // TODO: Implement event listeners
-
     // Listen for active editor changes
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(onActiveEditorChanged),
@@ -252,7 +250,6 @@ function setupEventListeners(context: vscode.ExtensionContext): void {
  * Set up WebSocket message handlers.
  */
 function setupMessageHandlers(): void {
-    // TODO: Implement message handler setup
     if (!wsClient) return;
 
     wsClient.onMessage(MessageType.FEEDBACK_DELIVERY, handleFeedbackDelivery);
@@ -264,7 +261,6 @@ function setupMessageHandlers(): void {
 // --- Command Handlers ---
 
 async function connectToBackend(): Promise<void> {
-    // TODO: Implement backend connection
     if (!wsClient) return;
 
     const connected = await wsClient.connect();
@@ -303,7 +299,6 @@ async function connectToBackend(): Promise<void> {
 }
 
 function disconnectFromBackend(): void {
-    // TODO: Implement backend disconnection
     wsClient?.disconnect();
     statusBar?.setConnected(false);
     webviewProvider?.updateConnectionStatus(false);
@@ -512,7 +507,9 @@ function handleFeedbackDelivery(message: {
     console.log('Received feedback delivery message');
 
     const payload = message.payload as unknown as FeedbackDeliveryPayload;
-    feedbackRenderer?.renderFeedback(payload.items);
+
+    console.log(`Feedback items received: ${payload.items}`);
+    feedbackRenderer?.addFeedback(payload.items);
     webviewProvider?.updateFeedback(payload.items);
 }
 
@@ -563,6 +560,14 @@ function handleError(message: { payload: Record<string, unknown> }): void {
 async function handleFeedbackInteraction(
     feedbackInteraction: FeedbackInteraction,
 ) {
+    if (feedbackInteraction.interaction_type === 'highlighted') {
+        feedbackRenderer?.highlightFeedback(feedbackInteraction.feedback_id);
+    }
+
+    if (feedbackInteraction.interaction_type === 'dismissed') {
+        feedbackRenderer?.dismissFeedback(feedbackInteraction.feedback_id);
+    }
+
     try {
         await fetch(`http://${host}:${port}/feedback/interaction`, {
             method: 'POST',

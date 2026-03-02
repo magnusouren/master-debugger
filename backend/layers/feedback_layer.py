@@ -337,51 +337,14 @@ class FeedbackLayer:
 
     def _compute_cache_key(self, context: CodeContext) -> str:
         """
-        Use a hash of relevant context, not just file name.
-
-        AI-generated code - should be optimized further later
-
+        Compute cache key based on file content and cursor line position.
         """
-        cursor = getattr(context, "cursor_position", None)
-        selection = getattr(context, "selection", None)
-        diagnostics = getattr(context, "diagnostics", []) or []
-
-        # Prefer visible window if you have it; otherwise take a small slice around cursor
+        cursor: CodePosition = getattr(context, "cursor_position", None)
         content = context.file_content or ""
-        if content and cursor is not None:
-            # small, stable slice: +/- N lines around cursor
-            lines = content.splitlines()
-            line_idx = max(0, min(cursor.line, len(lines) - 1))
-            a = max(0, line_idx - 40)
-            b = min(len(lines), line_idx + 40)
-            focus_text = "\n".join(lines[a:b])
-        else:
-            focus_text = content[:4000]  # cap
-
-        # Compact diagnostics: cap count and message length
-        diag_compact: List[Tuple[str, int, int]] = []
-        for d in diagnostics[:10]:
-            msg = getattr(d, "message", "")[:120]
-            sev = getattr(d, "severity", "")
-            rng = getattr(d, "range", None)
-            # best-effort range extraction
-            if rng and getattr(rng, "start", None):
-                ln = rng.start.line
-                ch = rng.start.character
-            else:
-                ln, ch = -1, -1
-            diag_compact.append((f"{sev}:{msg}", ln, ch))
 
         key_obj = {
-            "file_path": context.file_path,
-            "language_id": context.language_id,
-            "cursor": None if cursor is None else {"line": cursor.line, "character": cursor.character},
-            "selection": None if selection is None else {
-                "start": {"line": selection.start.line, "character": selection.start.character},
-                "end": {"line": selection.end.line, "character": selection.end.character},
-            },
-            "focus_text": focus_text,
-            "diagnostics": diag_compact,
+            "file_content": content,
+            "cursor": None if cursor is None else {"line": cursor.line},
         }
 
         raw = json.dumps(key_obj, sort_keys=True, ensure_ascii=False).encode("utf-8")

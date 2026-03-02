@@ -46,7 +46,13 @@ export function App() {
         setStatus(message.payload);
         break;
       case "feedbackUpdate":
-        setFeedbackItems(message.payload.items);
+        setFeedbackItems(prev => {
+          const existingIds = new Set(prev.map(item => item.metadata.feedback_id));
+          const newItems = message.payload.items.filter(
+            item => !existingIds.has(item.metadata.feedback_id)
+          );
+          return [...prev, ...newItems];
+        });
         break;
       case "clearFeedback":
         setFeedbackItems([]);

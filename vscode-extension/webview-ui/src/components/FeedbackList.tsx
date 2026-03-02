@@ -110,7 +110,7 @@ function FeedbackItemCard({ item, onHighlight, onDismiss }: FeedbackItemCardProp
       <div className="feedback-actions">
         {item.code_range && (
           <button className="feedback-action-btn" onClick={onHighlight}>
-            {item.action_label || "Highlight in Code"}
+            Show in Code
           </button>
         )}
         {item.dismissible && (

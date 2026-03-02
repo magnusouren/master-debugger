@@ -4,14 +4,15 @@
 import * as vscode from 'vscode';
 import {
     FeedbackItem,
-    FeedbackType,
-    FeedbackPriority,
     CodeRange,
     FeedbackInteraction,
     InteractionType,
 } from './types';
 
 export type InteractionCallback = (interaction: FeedbackInteraction) => void;
+
+/** Command ID for dismissing feedback */
+export const DISMISS_FEEDBACK_COMMAND = 'eyeTrackingDebugger.dismissFeedback';
 
 export class FeedbackRenderer {
     private decorationType: vscode.TextEditorDecorationType | null = null;
@@ -24,6 +25,28 @@ export class FeedbackRenderer {
             'eyeTrackingDebugger',
         );
         context.subscriptions.push(this.diagnosticCollection);
+
+        // Register dismiss command
+        const dismissCommand = vscode.commands.registerCommand(
+            DISMISS_FEEDBACK_COMMAND,
+            (feedbackId: string) => (
+                this.recordInteraction(feedbackId, 'dismissed'),
+                this.dismissFeedback(feedbackId)
+            ),
+        );
+        context.subscriptions.push(dismissCommand);
+
+        // Register code action provider for dismiss quick fix
+        const codeActionProvider = new FeedbackCodeActionProvider(
+            this.diagnosticCollection,
+        );
+        context.subscriptions.push(
+            vscode.languages.registerCodeActionsProvider(
+                { scheme: 'file' },
+                codeActionProvider,
+                { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] },
+            ),
+        );
     }
 
     /**
@@ -34,60 +57,89 @@ export class FeedbackRenderer {
     }
 
     /**
-     * Render feedback items in the editor.
+     * Add feedback to the renderer, but don't display it yet.
      */
-    renderFeedback(items: FeedbackItem[]): void {
-        // TODO: Implement feedback rendering
+    addFeedback(items: FeedbackItem[]): void {
+        items.forEach((item) => {
+            this.activeFeedback.set(item.metadata.feedback_id, item);
+        });
+    }
 
-        console.log('FEEDBACK ITEMS:', items);
+    /**
+     * Activate existing feedback items (e.g. show decorations, diagnostics, etc.).
+     */
+    highlightFeedback(feedbackId: string): void {
+        const item = this.activeFeedback.get(feedbackId);
+        if (!item) return;
+
+        this.showAsDiagnostic(item);
+    }
+
+    /**
+     * Clear feedback by ID.
+     */
+    dismissFeedback(feedbackId: string): void {
+        this.activeFeedback.delete(feedbackId);
+        const diagnostics = this.diagnosticCollection.get(
+            vscode.window.activeTextEditor?.document.uri ||
+                vscode.Uri.parse(''),
+        );
+        if (diagnostics) {
+            const updatedDiagnostics = diagnostics.filter(
+                (diag) => diag.code !== feedbackId,
+            );
+            this.diagnosticCollection.set(
+                vscode.window.activeTextEditor?.document.uri ||
+                    vscode.Uri.parse(''),
+                updatedDiagnostics,
+            );
+        }
     }
 
     /**
      * Clear all rendered feedback.
      */
     clearAll(): void {
-        // TODO: Implement clearing all feedback
-    }
-
-    /**
-     * Clear feedback by ID.
-     */
-    clearFeedback(feedbackId: string): void {
-        // TODO: Implement clearing specific feedback
-    }
-
-    /**
-     * Show feedback as inline decoration.
-     */
-    showInlineDecoration(item: FeedbackItem): void {
-        // TODO: Implement inline decoration
-    }
-
-    /**
-     * Show feedback as hover tooltip.
-     */
-    showHoverTooltip(item: FeedbackItem): void {
-        // TODO: Implement hover tooltip
+        this.activeFeedback.clear();
+        this.diagnosticCollection.clear();
+        if (this.decorationType) {
+            this.decorationType.dispose();
+            this.decorationType = null;
+        }
     }
 
     /**
      * Show feedback as diagnostic (in Problems panel).
      */
-    showAsDiagnostic(item: FeedbackItem): void {
-        // TODO: Implement diagnostic display
-    }
+    private showAsDiagnostic(item: FeedbackItem): void {
+        if (!item.code_range) return;
 
-    /**
-     * Show feedback as notification.
-     */
-    showNotification(item: FeedbackItem): void {
-        // TODO: Implement notification display
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return;
+
+        const range = this.convertRange(item.code_range, editor.document);
+        const severity = vscode.DiagnosticSeverity.Information;
+        const diagnostic = new vscode.Diagnostic(range, item.message, severity);
+        diagnostic.code = item.metadata.feedback_id;
+
+        // Get existing diagnostics and filter out any with the same feedback_id
+        const existingDiagnostics =
+            this.diagnosticCollection.get(editor.document.uri) || [];
+        const filteredDiagnostics = existingDiagnostics.filter(
+            (d) => d.code !== item.metadata.feedback_id,
+        );
+
+        // Merge with the new diagnostic
+        this.diagnosticCollection.set(editor.document.uri, [
+            ...filteredDiagnostics,
+            diagnostic,
+        ]);
     }
 
     /**
      * Record user interaction with feedback.
      */
-    recordInteraction(
+    private recordInteraction(
         feedbackId: string,
         interactionType: InteractionType,
     ): void {
@@ -101,44 +153,77 @@ export class FeedbackRenderer {
         }
     }
 
-    /**
-     * Get currently active feedback items.
-     */
-    getActiveFeedback(): FeedbackItem[] {
-        return Array.from(this.activeFeedback.values());
+    private convertRange(
+        range: CodeRange,
+        document: vscode.TextDocument,
+    ): vscode.Range {
+        const clamp = (n: number, min: number, max: number) =>
+            Math.max(min, Math.min(max, n));
+
+        const startLine = clamp(range.start.line, 0, document.lineCount - 1);
+        const endLine = clamp(range.end.line, 0, document.lineCount - 1);
+
+        const startLineLength = document.lineAt(startLine).text.length;
+        const endLineLength = document.lineAt(endLine).text.length;
+
+        const startChar = clamp(range.start.character, 0, startLineLength);
+        const endChar = clamp(range.end.character, 0, endLineLength);
+
+        return new vscode.Range(startLine, startChar, endLine, endChar);
     }
 
     /**
      * Dispose of resources.
      */
     dispose(): void {
-        // TODO: Implement disposal
+        this.clearAll();
+        this.diagnosticCollection.dispose();
     }
+}
 
-    // --- Private Methods ---
+/**
+ * Code action provider that offers "Dismiss Feedback" quick fix for feedback diagnostics.
+ */
+class FeedbackCodeActionProvider implements vscode.CodeActionProvider {
+    constructor(private diagnosticCollection: vscode.DiagnosticCollection) {}
 
-    private getDecorationColor(priority: FeedbackPriority): string {
-        // TODO: Implement color mapping
-        return 'yellow';
-    }
+    provideCodeActions(
+        document: vscode.TextDocument,
+        range: vscode.Range | vscode.Selection,
+        context: vscode.CodeActionContext,
+    ): vscode.CodeAction[] {
+        const actions: vscode.CodeAction[] = [];
 
-    private getSeverity(priority: FeedbackPriority): vscode.DiagnosticSeverity {
-        // TODO: Implement severity mapping
-        return vscode.DiagnosticSeverity.Information;
-    }
+        // Get our diagnostics for this document
+        const ourDiagnostics =
+            this.diagnosticCollection.get(document.uri) || [];
 
-    private convertRange(range: CodeRange): vscode.Range {
-        // TODO: Implement range conversion
-        return new vscode.Range(
-            range.start.line,
-            range.start.character,
-            range.end.line,
-            range.end.character,
-        );
-    }
+        // Find diagnostics that intersect with the current range
+        for (const diagnostic of context.diagnostics) {
+            // Check if this diagnostic belongs to our collection
+            const isOurDiagnostic = ourDiagnostics.some(
+                (d) =>
+                    d.code === diagnostic.code &&
+                    d.range.isEqual(diagnostic.range),
+            );
 
-    private createMarkdownMessage(item: FeedbackItem): vscode.MarkdownString {
-        // TODO: Implement markdown creation
-        return new vscode.MarkdownString(item.message);
+            if (isOurDiagnostic && diagnostic.code) {
+                const feedbackId = String(diagnostic.code);
+                const action = new vscode.CodeAction(
+                    'Dismiss Feedback',
+                    vscode.CodeActionKind.QuickFix,
+                );
+                action.command = {
+                    command: DISMISS_FEEDBACK_COMMAND,
+                    title: 'Dismiss Feedback',
+                    arguments: [feedbackId],
+                };
+                action.diagnostics = [diagnostic];
+                action.isPreferred = false;
+                actions.push(action);
+            }
+        }
+
+        return actions;
     }
 }
