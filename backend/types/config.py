@@ -154,15 +154,16 @@ class ForecastingConfig:
     enabled: bool = False  # Only active in proactive mode
 
     # Prediction settings
-    prediction_horizon_seconds: float = 2.0
+    prediction_horizon_seconds: float = 30.0
     update_rate_hz: float = 5.0
 
     # Model settings
     model_path: Optional[str] = None
     model_type: str = "xgboost"  # "xgboost", "lstm", etc.
 
-    # History window for predictions
-    history_window_seconds: float = 5.0
+    # History window for predictions (must match training.history_window_size)
+    # 120 windows × 0.5s per window = 60 seconds
+    history_window_seconds: float = 60.0
 
     # Confidence threshold
     min_confidence_threshold: float = 0.5
@@ -175,8 +176,10 @@ class TrainingConfig:
     data_path: Optional[str] = None  # Path to processed features
 
     # Sequence settings
-    history_window_size: int = 5  # Number of past windows as input
-    prediction_horizon: int = 2   # Windows to look ahead
+    # With 1-second windows at 50% overlap, windows arrive every 0.5 seconds
+    # history_window_size=120 means 120 × 0.5s = 60 seconds of history
+    history_window_size: int = 120  # Number of past windows as input
+    prediction_horizon: int = 60    # Windows to look ahead (~30 seconds)
 
     # Split ratios
     train_ratio: float = 0.7
