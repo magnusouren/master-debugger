@@ -117,10 +117,10 @@ class SignalProcessingConfig:
     enabled_metrics: List[str] = field(default_factory=lambda: [
         "fixation_duration",
         "saccade_amplitude",
-        "gaze_dispersion",
         "pupil_diameter",
         "blink_rate",
-        "data_quality"
+        "data_quality",
+        "ipi"
     ])
 
     # Data quality settings
@@ -142,6 +142,9 @@ class SignalProcessingConfig:
     # I-VT saccade/fixation detection
     saccade_velocity_threshold: float = 5.0  # normalized screen units per second
     min_fixation_duration_ms: float = 60.0   # minimum fixation duration in ms
+
+    # IPA (Index of Pupillary Activity) settings
+    ipa_window_seconds: float = 60.0  # Rolling window for IPA calculation (recommended: 60s)
 
 
 @dataclass

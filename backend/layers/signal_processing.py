@@ -5,14 +5,18 @@ Input: Raw eye-tracking data (120 Hz)
 Output: Window-based features at a lower frequency (e.g., 2–10 Hz)
 Configuration: Selected metrics, window length, output frequency
 
-This layer ingests raw data from the Tobii eye tracker and computes 
-window-based features suitable for downstream analysis. It handles 
-missing values and invalid samples and outputs a stable, structured 
+This layer ingests raw data from the Tobii eye tracker and computes
+window-based features suitable for downstream analysis. It handles
+missing values and invalid samples and outputs a stable, structured
 representation of the selected metrics.
 """
 import math
 from typing import Any, Dict, Optional, List, Callable, Tuple
 from collections import deque
+
+import numpy as np
+import pywt
+
 from backend.services.logger_service import LoggerService
 
 
@@ -46,14 +50,26 @@ class SignalProcessingLayer:
         self._output_callbacks: List[Callable[[WindowFeatures], None]] = []
         self._last_output_time: float = 0.0
         self._is_running: bool = False
-        
+
         # Use provided logger or create fallback
         if logger is None:
             from backend.services.logger_service import get_logger
             logger = get_logger()
         self._logger = logger
-        
+
         self._next_window_end_ts: Optional[float] = None
+
+        # IPA (Index of Pupillary Activity) rolling buffer
+        # Stores (timestamp, pupil_diameter) tuples for IPA calculation
+        self._ipa_buffer: deque[tuple[float, float]] = deque()
+        self._ipa_window_seconds: float = self._config.ipa_window_seconds
+
+        # IPI (Information Processing Index) calibration buffer
+        # Stores fixation_duration/saccade_length ratios for threshold calibration
+        self._ipi_ratio_buffer: deque[float] = deque(maxlen=1000)
+        self._ipi_short_threshold: Optional[float] = None  # 25th percentile
+        self._ipi_long_threshold: Optional[float] = None   # 75th percentile
+        self._ipi_calibrated: bool = False
     
     def configure(self, config: SignalProcessingConfig) -> None:
         """
@@ -93,6 +109,11 @@ class SignalProcessingLayer:
     def reset(self) -> None:
         """Reset internal state and buffers."""
         self._sample_buffer.clear()
+        self._ipa_buffer.clear()
+        self._ipi_ratio_buffer.clear()
+        self._ipi_calibrated = False
+        self._ipi_short_threshold = None
+        self._ipi_long_threshold = None
         self._next_window_end_ts = None
         self._is_running = False
     
@@ -308,6 +329,10 @@ class SignalProcessingLayer:
                     features.update(
                         self._extract_blink_rate(samples)
                     )
+                elif metric == "ipi":
+                    features.update(
+                        self._extract_ipi_metrics(cleaned_samples)
+                    )
                 else:
                     self._logger.system(
                         "unknown_metric_requested",
@@ -460,9 +485,10 @@ class SignalProcessingLayer:
     
     def _extract_pupil_metrics(self, samples: List[GazeSample]) -> Dict[str, Any]:
         """
-        AI Generated for POC purposes.
-        Extract pupil diameter metrics from samples.
-        
+        Extract pupil diameter metrics from samples, including IPA.
+
+        Metrics include basic statistics (mean, std, range), temporal dynamics
+        (slope, velocity), and IPA (Index of Pupillary Activity) for cognitive load.
         """
         def ok(x: Optional[float]) -> bool:
             return x is not None and isinstance(x, (int, float)) and math.isfinite(x)
@@ -477,6 +503,7 @@ class SignalProcessingLayer:
                 "pupil_range": None,
                 "pupil_slope": None,
                 "pupil_mean_abs_vel": None,
+                "pupil_ipa": None,
             }
 
         vals: List[float] = []
@@ -508,6 +535,7 @@ class SignalProcessingLayer:
                 "pupil_range": None,
                 "pupil_slope": None,
                 "pupil_mean_abs_vel": None,
+                "pupil_ipa": None,
             }
 
         # mean / std / range
@@ -542,6 +570,11 @@ class SignalProcessingLayer:
                 k += 1
             mean_abs_vel = (acc / k) if k > 0 else None
 
+        # Update IPA buffer and compute IPA
+        current_time = times[-1] if times else 0.0
+        self._update_ipa_buffer(samples, current_time)
+        ipa_value = self._compute_ipa()
+
         return {
             "pupil_window_sample_count": total,
             "pupil_valid_ratio": valid_ratio,
@@ -550,6 +583,7 @@ class SignalProcessingLayer:
             "pupil_range": vrange,
             "pupil_slope": slope,
             "pupil_mean_abs_vel": mean_abs_vel,
+            "pupil_ipa": ipa_value,
         }
 
 
@@ -733,10 +767,11 @@ class SignalProcessingLayer:
         """
         Extract saccade metrics using I-VT (velocity threshold) algorithm.
 
-        Saccades are rapid eye movements between fixations.  Amplitude is the
-        Euclidean distance (normalized screen units) from the end of the
-        preceding fixation to the start of the following fixation.  Only
-        complete saccades (with a fixation on both sides) are counted.
+        Saccades are rapid eye movements between fixations. Metrics include:
+        - Amplitude: distance from fixation end to next fixation start
+        - Duration: time of saccade
+        - Velocity: amplitude / duration (for anticipation measurement)
+        - Velocity std: variability in saccade speed (for perceived difficulty)
         """
         positions = self._get_gaze_positions(samples)
 
@@ -746,12 +781,15 @@ class SignalProcessingLayer:
                 "saccade_mean_amplitude": None,
                 "saccade_max_amplitude": None,
                 "saccade_mean_duration_ms": None,
+                "saccade_mean_velocity": None,
+                "saccade_velocity_std": None,
             }
 
         segments = self._segment_by_ivt(positions)
 
         amplitudes: List[float] = []
         durations: List[float] = []
+        velocities: List[float] = []
 
         # Walk segments tracking the cumulative position index so we can
         # reference the boundary samples of neighbouring fixations.
@@ -772,21 +810,38 @@ class SignalProcessingLayer:
 
                     dx = end[1] - start[1]
                     dy = end[2] - start[2]
-                    amplitudes.append(math.sqrt(dx * dx + dy * dy))
+                    amplitude = math.sqrt(dx * dx + dy * dy)
+                    amplitudes.append(amplitude)
 
-                    # Duration: from saccade onset to next fixation start
-                    durations.append(
-                        (positions[next_fixation_start_idx][0] - positions[pos_idx][0]) * 1000.0
-                    )
+                    # Duration: from saccade onset to next fixation start (in ms)
+                    duration_ms = (positions[next_fixation_start_idx][0] - positions[pos_idx][0]) * 1000.0
+                    durations.append(duration_ms)
+
+                    # Velocity: amplitude per second (convert duration from ms to s)
+                    if duration_ms > 0:
+                        velocity = amplitude / (duration_ms / 1000.0)
+                        velocities.append(velocity)
 
             pos_idx += seg_len
 
         count = len(amplitudes)
+
+        # Compute velocity statistics
+        mean_velocity = None
+        velocity_std = None
+        if velocities:
+            mean_velocity = sum(velocities) / len(velocities)
+            if len(velocities) >= 2:
+                variance = sum((v - mean_velocity) ** 2 for v in velocities) / len(velocities)
+                velocity_std = math.sqrt(variance)
+
         return {
             "saccade_count": count,
             "saccade_mean_amplitude": sum(amplitudes) / count if count > 0 else None,
             "saccade_max_amplitude": max(amplitudes) if count > 0 else None,
             "saccade_mean_duration_ms": sum(durations) / count if count > 0 else None,
+            "saccade_mean_velocity": mean_velocity,
+            "saccade_velocity_std": velocity_std,
         }
     
     # Made the function, but we are not using it for calculating in reactive tool currently.
@@ -831,3 +886,262 @@ class SignalProcessingLayer:
             "blink_rate_per_min": count / window_duration_min if window_duration_min > 0 else 0.0,
             "blink_mean_duration_ms": sum(blink_durations) / count if count > 0 else None,
         }
+
+    def _extract_ipi_metrics(self, samples: List[GazeSample]) -> Dict[str, Any]:
+        """
+        Extract Information Processing Index (IPI) metrics.
+
+        IPI measures the ratio of short-fixation-short-saccade patterns to
+        long-fixation-short-saccade patterns. Based on crunchwiz implementation.
+
+        Formula:
+        - For each fixation: ratio = fixation_duration / saccade_length_to_next
+        - IPI = count(ratio < 25th_percentile) / count(ratio > 75th_percentile)
+
+        Higher IPI = more rapid scanning behavior
+        Lower IPI = deeper, more focused processing
+        """
+        positions = self._get_gaze_positions(samples)
+
+        if len(positions) < 3:
+            return {
+                "ipi_value": None,
+                "ipi_ratio_count": 0,
+                "ipi_calibrated": self._ipi_calibrated,
+            }
+
+        # Segment into fixations and saccades
+        segments = self._segment_by_ivt(positions)
+        min_dur_ms = self._config.min_fixation_duration_ms
+
+        # Collect fixation-saccade ratios
+        ratios: List[float] = []
+
+        # We need pairs of (fixation, next_fixation) to compute saccade length
+        fixations: List[Tuple[float, float, float, float]] = []  # (duration_ms, center_x, center_y, end_time)
+
+        for is_saccade, seg_positions in segments:
+            if is_saccade or len(seg_positions) < 2:
+                continue
+
+            dur_ms = (seg_positions[-1][0] - seg_positions[0][0]) * 1000.0
+            if dur_ms < min_dur_ms:
+                continue
+
+            # Compute fixation center
+            n = len(seg_positions)
+            cx = sum(p[1] for p in seg_positions) / n
+            cy = sum(p[2] for p in seg_positions) / n
+
+            fixations.append((dur_ms, cx, cy, seg_positions[-1][0]))
+
+        # Compute ratios: fixation_duration / saccade_length_to_next_fixation
+        for i in range(len(fixations) - 1):
+            fix_dur = fixations[i][0]
+            x1, y1 = fixations[i][1], fixations[i][2]
+            x2, y2 = fixations[i + 1][1], fixations[i + 1][2]
+
+            saccade_length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+            if saccade_length > 0:
+                ratio = fix_dur / saccade_length
+                ratios.append(ratio)
+                self._ipi_ratio_buffer.append(ratio)
+
+        # Update calibration thresholds if we have enough data
+        if len(self._ipi_ratio_buffer) >= 20 and not self._ipi_calibrated:
+            self._calibrate_ipi_thresholds()
+
+        # Compute IPI from rolling buffer (like crunchwiz uses all data)
+        # Using last 30 ratios gives finer-grained values than per-window
+        ipi_value = None
+        if self._ipi_calibrated and len(self._ipi_ratio_buffer) >= 10:
+            recent_ratios = list(self._ipi_ratio_buffer)[-30:]
+            short_count = sum(1 for r in recent_ratios if r < self._ipi_short_threshold)
+            long_count = max(sum(1 for r in recent_ratios if r > self._ipi_long_threshold), 1)
+            ipi_value = short_count / long_count
+
+        return {
+            "ipi_value": ipi_value,
+            "ipi_ratio_count": len(ratios),
+            "ipi_calibrated": self._ipi_calibrated,
+        }
+
+    def _calibrate_ipi_thresholds(self) -> None:
+        """
+        Calibrate IPI thresholds from collected ratio data.
+
+        Sets short_threshold to 25th percentile and long_threshold to 75th percentile.
+        """
+        if len(self._ipi_ratio_buffer) < 20:
+            return
+
+        ratios = list(self._ipi_ratio_buffer)
+        self._ipi_short_threshold = float(np.percentile(ratios, 25))
+        self._ipi_long_threshold = float(np.percentile(ratios, 75))
+        self._ipi_calibrated = True
+
+        self._logger.system(
+            "ipi_calibration_complete",
+            {
+                "short_threshold": self._ipi_short_threshold,
+                "long_threshold": self._ipi_long_threshold,
+                "sample_count": len(ratios),
+            },
+            level="INFO"
+        )
+
+    def set_ipi_thresholds(self, short_threshold: float, long_threshold: float) -> None:
+        """
+        Manually set IPI thresholds (e.g., from a baseline calibration session).
+
+        Args:
+            short_threshold: 25th percentile threshold for short ratios.
+            long_threshold: 75th percentile threshold for long ratios.
+        """
+        self._ipi_short_threshold = short_threshold
+        self._ipi_long_threshold = long_threshold
+        self._ipi_calibrated = True
+
+    # --- IPA (Index of Pupillary Activity) calculation ---
+
+    def _update_ipa_buffer(
+        self,
+        samples: List[GazeSample],
+        current_time: float
+    ) -> None:
+        """
+        Update the rolling IPA buffer with new pupil diameter samples.
+
+        Args:
+            samples: New gaze samples to add.
+            current_time: Current timestamp for window pruning.
+        """
+        def ok(x: Optional[float]) -> bool:
+            return x is not None and isinstance(x, (int, float)) and math.isfinite(x)
+
+        # Add new samples to buffer
+        for s in samples:
+            l_ok = s.left_eye_valid and ok(s.left_pupil_diameter)
+            r_ok = s.right_eye_valid and ok(s.right_pupil_diameter)
+
+            if l_ok and r_ok:
+                diameter = (float(s.left_pupil_diameter) + float(s.right_pupil_diameter)) / 2.0  # type: ignore[arg-type]
+            elif l_ok:
+                diameter = float(s.left_pupil_diameter)  # type: ignore[arg-type]
+            elif r_ok:
+                diameter = float(s.right_pupil_diameter)  # type: ignore[arg-type]
+            else:
+                continue
+
+            self._ipa_buffer.append((s.timestamp, diameter))
+
+        # Prune old samples outside the window
+        cutoff_time = current_time - self._ipa_window_seconds
+        while self._ipa_buffer and self._ipa_buffer[0][0] < cutoff_time:
+            self._ipa_buffer.popleft()
+
+    def _compute_ipa(self) -> Optional[float]:
+        """
+        Compute Index of Pupillary Activity from the rolling buffer.
+
+        IPA uses wavelet decomposition to detect rapid pupil diameter changes
+        that indicate cognitive processing events.
+
+        Returns:
+            IPA value (events per second) or None if insufficient data.
+        """
+        if len(self._ipa_buffer) < 32:  # Need minimum samples for wavelet
+            return None
+
+        # Extract pupil diameter values and compute signal duration
+        diameters = [d for _, d in self._ipa_buffer]
+        timestamps = [t for t, _ in self._ipa_buffer]
+        signal_duration = timestamps[-1] - timestamps[0]
+
+        if signal_duration <= 0:
+            return None
+
+        return self._ipa_wavelet(diameters, signal_duration)
+
+    @staticmethod
+    def _ipa_modmax(d: List[float]) -> List[float]:
+        """
+        Compute modulus maxima of a signal.
+
+        Finds local maximum absolute values - these represent significant
+        pupil dilation/constriction events.
+
+        Args:
+            d: Input signal (wavelet coefficients).
+
+        Returns:
+            Signal with only local maxima preserved, zeros elsewhere.
+        """
+        n = len(d)
+        if n == 0:
+            return []
+
+        # Compute absolute values
+        m = [abs(x) for x in d]
+
+        # Find local maxima
+        result = [0.0] * n
+        for i in range(n):
+            left = m[i - 1] if i >= 1 else m[i]
+            center = m[i]
+            right = m[i + 1] if i < n - 1 else m[i]
+
+            # Local maximum: >= both neighbors and strictly > at least one
+            if (left <= center >= right) and (left < center or center > right):
+                result[i] = abs(d[i])
+
+        return result
+
+    @staticmethod
+    def _ipa_wavelet(diameters: List[float], signal_duration: float) -> Optional[float]:
+        """
+        Compute IPA using 2-level Discrete Wavelet Transform.
+
+        Uses Symlet-8 wavelet to decompose the pupil signal and count
+        significant pupil dilation events.
+
+        Args:
+            diameters: List of pupil diameter values (mm).
+            signal_duration: Duration of the signal in seconds.
+
+        Returns:
+            IPA value (events per second) or None on error.
+        """
+        try:
+            # 2-level DWT with Symlet-8 wavelet
+            coeffs = pywt.wavedec(diameters, 'sym8', mode='per', level=2)
+            cA2, cD2, cD1 = coeffs
+
+            # Normalize coefficients by 1/sqrt(2^j) where j is the level
+            cA2 = [x / math.sqrt(4.0) for x in cA2]
+            cD1 = [x / math.sqrt(2.0) for x in cD1]
+            cD2 = [x / math.sqrt(4.0) for x in cD2]
+
+            # Detect modulus maxima in detail coefficients (level 2)
+            cD2_modmax = SignalProcessingLayer._ipa_modmax(cD2)
+
+            # Universal threshold: λ = σ * sqrt(2 * log2(n))
+            if len(cD2_modmax) == 0:
+                return 0.0
+
+            std_noise = float(np.std(cD2_modmax))
+            threshold = std_noise * math.sqrt(2.0 * np.log2(len(cD2_modmax))) if len(cD2_modmax) > 1 else 0.0
+
+            # Apply hard thresholding
+            cD2_thresholded = pywt.threshold(cD2_modmax, threshold, mode='hard')
+
+            # Count significant events (non-zero after thresholding)
+            event_count = sum(1 for x in cD2_thresholded if abs(x) > 0)
+
+            # IPA = events per second
+            return float(event_count) / signal_duration
+
+        except ValueError:
+            # Insufficient data for wavelet decomposition
+            return None

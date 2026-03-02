@@ -14,7 +14,8 @@ Model progression:
 - Later: sequence-based models
 """
 import math
-from typing import Optional, List, Callable
+import time
+from typing import Optional, List, Callable, Dict
 from collections import deque
 from enum import Enum
 
@@ -24,6 +25,8 @@ from backend.types import (
     UserStateScore,
     UserStateEstimate,
     ReactiveToolConfig,
+    MetricBaseline,
+    ParticipantBaseline,
 )
 from backend.types.user_state import UserStateType
 
@@ -42,6 +45,7 @@ METRIC_KEYGROUPS = {
             "vel": "pupil_mean_abs_vel",
             "std": "pupil_std",
             "range": "pupil_range",
+            "ipa": "pupil_ipa",  # Index of Pupillary Activity
         },
         "quality": {
             "valid_ratio": "pupil_valid_ratio",
@@ -80,13 +84,15 @@ METRIC_KEYGROUPS = {
             "max_amplitude": "saccade_max_amplitude",
             "count": "saccade_count",
             "mean_duration_ms": "saccade_mean_duration_ms",
+            "mean_velocity": "saccade_mean_velocity",  # For anticipation (NOT cognitive load)
+            "velocity_std": "saccade_velocity_std",    # For perceived difficulty
         },
     },
-    "gaze_dispersion": {
+    "ipi": {
         "load": {
-            "total": "gaze_disp_total",
-            "x_std": "gaze_disp_x_std",
-            "y_std": "gaze_disp_y_std",
+            "value": "ipi_value",  # Information Processing Index from crunchwiz
+            "ratio_count": "ipi_ratio_count",
+            "calibrated": "ipi_calibrated",
         },
     },
 }
@@ -117,7 +123,13 @@ class ReactiveTool:
         self._output_callbacks: List[Callable[[UserStateEstimate], None]] = []
         self._score_history: deque[float] = deque()  # For smoothing
         self._is_running: bool = False
-        
+
+        # Baseline calibration
+        self._baseline: Optional[ParticipantBaseline] = None
+        self._is_recording_baseline: bool = False
+        self._baseline_start_time: float = 0.0
+        self._baseline_samples: Dict[str, List[float]] = {}  # metric_name -> values
+
         # Use provided logger or create fallback
         if logger is None:
             from backend.services.logger_service import get_logger
@@ -142,12 +154,115 @@ class ReactiveTool:
         self._is_running = False
     
     def reset(self) -> None:
-        """Reset internal state and sliding window."""
+        """Reset internal state, sliding window, and baseline."""
         self._feature_window.clear()
         self._current_estimate = None
         self._score_history.clear()
         self._is_running = False
-    
+        # Clear baseline calibration
+        self._baseline = None
+        self._is_recording_baseline = False
+        self._baseline_samples = {}
+
+    # --- Baseline calibration methods ---
+
+    def start_baseline_recording(self, participant_id: str) -> None:
+        """
+        Start recording baseline metrics for a participant.
+
+        Call this when the participant begins the baseline task (e.g., reading simple text).
+        """
+        self._is_recording_baseline = True
+        self._baseline_start_time = time.time()
+        self._baseline_samples = {
+            "ipa": [],
+            "fixation_duration_ms": [],
+            "anticipation_velocity": [],
+            "perceived_difficulty_std": [],
+            "ipi": [],  # Information Processing Index from crunchwiz
+        }
+        self._logger.system(
+            "baseline_recording_started",
+            {"participant_id": participant_id},
+            level="INFO"
+        )
+
+    def stop_baseline_recording(self, participant_id: str) -> Optional[ParticipantBaseline]:
+        """
+        Stop recording and compute baseline statistics.
+
+        Call this when the baseline task is complete.
+
+        Returns:
+            ParticipantBaseline object with computed statistics, or None if insufficient data.
+        """
+        if not self._is_recording_baseline:
+            return None
+
+        self._is_recording_baseline = False
+        duration = time.time() - self._baseline_start_time
+
+        # Compute statistics for each metric
+        metrics: Dict[str, MetricBaseline] = {}
+        for metric_name, values in self._baseline_samples.items():
+            if len(values) >= 3:  # Need at least 3 samples
+                mean_val = sum(values) / len(values)
+                std_val = math.sqrt(sum((v - mean_val) ** 2 for v in values) / len(values))
+                metrics[metric_name] = MetricBaseline(
+                    mean=mean_val,
+                    std=max(std_val, 0.001),  # Avoid zero std
+                    min_value=min(values),
+                    max_value=max(values),
+                    sample_count=len(values),
+                )
+
+        if not metrics:
+            self._logger.system(
+                "baseline_recording_failed",
+                {"participant_id": participant_id, "reason": "insufficient_data"},
+                level="WARNING"
+            )
+            return None
+
+        self._baseline = ParticipantBaseline(
+            participant_id=participant_id,
+            recorded_at=self._baseline_start_time,
+            duration_seconds=duration,
+            metrics=metrics,
+            is_valid=True,
+        )
+
+        self._logger.system(
+            "baseline_recording_completed",
+            {
+                "participant_id": participant_id,
+                "duration_seconds": round(duration, 1),
+                "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
+                           for k, v in metrics.items()},
+            },
+            level="INFO"
+        )
+
+        return self._baseline
+
+    def set_baseline(self, baseline: ParticipantBaseline) -> None:
+        """Set a pre-recorded baseline for normalization."""
+        self._baseline = baseline
+        self._logger.system(
+            "baseline_loaded",
+            {"participant_id": baseline.participant_id},
+            level="INFO"
+        )
+
+    def clear_baseline(self) -> None:
+        """Clear the current baseline (revert to static thresholds)."""
+        self._baseline = None
+        self._logger.system("baseline_cleared", {}, level="INFO")
+
+    def has_baseline(self) -> bool:
+        """Check if a valid baseline is loaded."""
+        return self._baseline is not None and self._baseline.is_valid
+
     def set_model_type(self, model_type: ModelType) -> None:
         """
         Set the type of model to use for estimation.
@@ -232,6 +347,7 @@ class ReactiveTool:
                 "raw_score": raw_score,
                 "feature_window_size": len(windows),
                 "avg_valid_sample_ratio": self._avg_valid_ratio(windows),
+                "using_baseline": self.has_baseline(),
             },
         )
 
@@ -308,80 +424,101 @@ class ReactiveTool:
     
     def _estimate_rule_based(self, windows: List[WindowFeatures]) -> float:
         """
-        Estimate user state using rule-based heuristics.
+        Estimate user state using rule-based heuristics with 5 equal-weight metrics.
 
-        Each enabled metric group contributes a normalised [0,1] sub-score
-        with a base weight.  Weights are re-normalised at runtime so the
-        estimate degrades gracefully when some metrics are unavailable.
+        Uses baseline-relative normalization if a baseline is available,
+        otherwise falls back to static thresholds.
 
-        TODO - make the normalization ramps configurable later. (eg. via calibration values)
-        TODO - as mentioned over, pupil mean, fixation duration, sacecade amplitude, gaze dispersion
-            should use values from the calculation stage and not the raw features. 
+        Metrics (each weighted 0.2):
+        1. IPA (Index of Pupillary Activity) - cognitive load from pupil dynamics
+        2. Fixation Duration - longer fixations indicate processing difficulty
+        3. Anticipation (saccade velocity) - NOT cognitive load, measures anticipation/preparation
+        4. Perceived Difficulty (saccade velocity std) - variable scanning indicates uncertainty
+        5. IPI (Information Processing Index) - ratio of short vs long fixation-saccade patterns
+           Lower IPI = deeper processing = higher cognitive load
+
         Args:
             windows: List of recent feature windows.
         Returns:
-            Computed user state score.
+            Computed user state score (0.0 to 1.0).
         """
         enabled = self._enabled(windows)
 
         # components: metric_name -> (sub_score, base_weight)
+        # raw_values: metric_name -> raw value (for logging)
+        # All metrics have equal weight of 0.2
         components: dict = {}
+        raw_values: dict = {}
 
-        # --- Pupil diameter (base weight 0.50) ---
+        # --- 1. IPA - Index of Pupillary Activity (weight 0.2) ---
         if "pupil_diameter" in enabled:
-            load_keys = METRIC_KEYGROUPS["pupil_diameter"]["load"]
+            ipa_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["pupil_diameter"]["load"]["ipa"]
+            )
+            if ipa_series:
+                mean_ipa = sum(ipa_series) / len(ipa_series)
+                raw_values["ipa"] = mean_ipa
+                score = self._normalize_metric("ipa", mean_ipa, fallback_lo=0.5, fallback_hi=2.5)
+                components["ipa"] = (score, 0.2)
 
-            mean_series  = self._metric_series(windows, load_keys["mean"])
-            slope_series = self._metric_series(windows, load_keys["slope"])
-            vel_series   = self._metric_series(windows, load_keys["vel"])
-            std_series   = self._metric_series(windows, load_keys["std"])
-            range_series = self._metric_series(windows, load_keys["range"])
-
-            if mean_series or slope_series or vel_series or std_series or range_series:
-                pupil_mean  = sum(mean_series)  / len(mean_series)  if mean_series  else 0.0
-                pupil_slope = sum(slope_series) / len(slope_series) if slope_series else 0.0
-                pupil_vel   = sum(vel_series)   / len(vel_series)   if vel_series   else 0.0
-                pupil_std   = sum(std_series)   / len(std_series)   if std_series   else 0.0
-                pupil_range = sum(range_series) / len(range_series) if range_series else 0.0
-
-                pupil_score = (
-                    0.4 * self._ramp(pupil_mean,  lo=3.8,  hi=4.6)  +
-                    0.2 * self._ramp(pupil_slope, lo=0.00, hi=0.30) +
-                    0.2 * self._ramp(pupil_vel,   lo=5.0,  hi=15.0) +
-                    0.1 * self._ramp(pupil_std,   lo=0.1,  hi=0.5)  +
-                    0.1 * self._ramp(pupil_range, lo=1.0,  hi=3.0)
-                )
-                components["pupil"] = (pupil_score, 0.50)
-
-        # --- Fixation duration (base weight 0.25) ---
-        # Longer mean fixation → higher cognitive load
+        # --- 2. Fixation Duration (weight 0.2) ---
         if "fixation_duration" in enabled:
             dur_series = self._metric_series(
                 windows, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
             )
             if dur_series:
                 mean_dur = sum(dur_series) / len(dur_series)
-                components["fixation"] = (self._ramp(mean_dur, lo=150.0, hi=500.0), 0.25)
+                raw_values["fixation_duration_ms"] = mean_dur
+                score = self._normalize_metric("fixation_duration_ms", mean_dur, fallback_lo=150.0, fallback_hi=500.0)
+                components["fixation_duration"] = (score, 0.2)
 
-        # --- Saccade amplitude (base weight 0.15) ---
-        # Larger mean saccade amplitude → more scattered attention
+        # --- 3. Anticipation - Saccade Velocity (weight 0.2) ---
         if "saccade_amplitude" in enabled:
-            amp_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_amplitude"]
+            vel_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
             )
-            if amp_series:
-                mean_amp = sum(amp_series) / len(amp_series)
-                components["saccade"] = (self._ramp(mean_amp, lo=0.03, hi=0.20), 0.15)
+            if vel_series:
+                mean_vel = sum(vel_series) / len(vel_series)
+                raw_values["anticipation_velocity"] = mean_vel
+                score = self._normalize_metric("anticipation_velocity", mean_vel, fallback_lo=1.0, fallback_hi=5.0)
+                components["anticipation"] = (score, 0.2)
 
-        # --- Gaze dispersion (base weight 0.10) ---
-        # Higher total dispersion → less focused gaze
-        if "gaze_dispersion" in enabled:
-            disp_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["gaze_dispersion"]["load"]["total"]
+        # --- 4. Perceived Difficulty - Saccade Velocity Variability (weight 0.2) ---
+        # Compute std of mean velocities across windows (aggregated approach)
+        if "saccade_amplitude" in enabled:
+            vel_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
             )
-            if disp_series:
-                mean_disp = sum(disp_series) / len(disp_series)
-                components["dispersion"] = (self._ramp(mean_disp, lo=0.02, hi=0.10), 0.10)
+            if len(vel_series) >= 2:
+                # Compute std of velocities across windows
+                mean_vel = sum(vel_series) / len(vel_series)
+                variance = sum((v - mean_vel) ** 2 for v in vel_series) / len(vel_series)
+                velocity_std = math.sqrt(variance)
+                raw_values["perceived_difficulty_std"] = velocity_std
+                score = self._normalize_metric("perceived_difficulty_std", velocity_std, fallback_lo=0.5, fallback_hi=10.0)
+                components["perceived_difficulty"] = (score, 0.2)
+
+        # --- 5. Information Processing Index (weight 0.2) ---
+        # Uses IPI from signal processing (crunchwiz formula)
+        # IPI = count(short_fix_short_sac) / count(long_fix_short_sac)
+        # Higher IPI = rapid scanning, Lower IPI = deeper processing
+        if "ipi" in enabled:
+            ipi_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["ipi"]["load"]["value"]
+            )
+            if ipi_series:
+                mean_ipi = sum(ipi_series) / len(ipi_series)
+                raw_values["ipi"] = mean_ipi
+                # Lower IPI indicates deeper processing (higher cognitive load)
+                # So we invert: high IPI (scanning) = low load, low IPI (focused) = high load
+                score = 1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0)
+                components["ipi"] = (score, 0.2)
+
+        # Record samples if in baseline recording mode
+        if self._is_recording_baseline:
+            for metric_name, value in raw_values.items():
+                if metric_name in self._baseline_samples:
+                    self._baseline_samples[metric_name].append(value)
 
         if not components:
             return 0.5
@@ -390,7 +527,49 @@ class ReactiveTool:
         total_weight = sum(w for _, w in components.values())
         score = sum(v * (w / total_weight) for v, w in components.values())
 
+        # Log individual metrics with raw values and normalized scores
+        self._logger.system(
+            "user_state_metrics",
+            {
+                "raw_values": {k: round(v, 4) if v is not None else None for k, v in raw_values.items()},
+                "normalized_scores": {k: round(s, 3) for k, (s, _) in components.items()},
+                "final_score": round(score, 3),
+                "active_metrics": list(components.keys()),
+                "using_baseline": self.has_baseline(),
+            },
+            level="INFO"
+        )
+
         return float(max(0.0, min(1.0, score)))
+
+    def _normalize_metric(
+        self,
+        metric_name: str,
+        value: float,
+        fallback_lo: float,
+        fallback_hi: float
+    ) -> float:
+        """
+        Normalize a metric value to 0-1 range.
+
+        Uses baseline-relative normalization if available, otherwise static thresholds.
+
+        Args:
+            metric_name: Name of the metric
+            value: Raw metric value
+            fallback_lo: Static low threshold (if no baseline)
+            fallback_hi: Static high threshold (if no baseline)
+
+        Returns:
+            Normalized score (0.0 to 1.0)
+        """
+        if self._baseline is not None:
+            normalized = self._baseline.get_normalized_score(metric_name, value)
+            if normalized is not None:
+                return normalized
+
+        # Fallback to static ramp
+        return self._ramp(value, lo=fallback_lo, hi=fallback_hi)
     
     def _estimate_ml_classifier(
         self, features: List[WindowFeatures]
@@ -522,59 +701,79 @@ class ReactiveTool:
         self, features: List[WindowFeatures]
     ) -> dict:
         """
-        Identify features that contributed most to the estimate.
-        
+        Extract the 5 key metrics used in scoring.
+
         Args:
             features: Feature window used for estimation.
-            
+
         Returns:
-            Dictionary of feature contributions.
+            Dictionary with raw metric values and normalized scores.
         """
         contribs = {}
-
         enabled = self._enabled(features)
+
+        # --- 1. IPA (Index of Pupillary Activity) ---
         if "pupil_diameter" in enabled:
-            load_keys = METRIC_KEYGROUPS["pupil_diameter"]["load"]
-            mean_series = self._metric_series(features, load_keys["mean"])
-            slope_series = self._metric_series(features, load_keys["slope"])
-            vel_series = self._metric_series(features, load_keys["vel"])
-            std_series = self._metric_series(features, load_keys["std"])
-            range_series = self._metric_series(features, load_keys["range"])
+            ipa_series = self._metric_series(
+                features, METRIC_KEYGROUPS["pupil_diameter"]["load"]["ipa"]
+            )
+            if ipa_series:
+                mean_ipa = sum(ipa_series) / len(ipa_series)
+                contribs["ipa_raw"] = round(mean_ipa, 4)
+                contribs["ipa_score"] = round(
+                    self._normalize_metric("ipa", mean_ipa, fallback_lo=0.5, fallback_hi=2.5), 3
+                )
 
-            if mean_series:
-                contribs["pupil_mean"] = sum(mean_series) / len(mean_series)
-            if slope_series:
-                contribs["pupil_slope"] = sum(slope_series) / len(slope_series)
-            if vel_series:
-                contribs["pupil_mean_abs_vel"] = sum(vel_series) / len(vel_series)
-            if std_series:
-                contribs["pupil_std"] = sum(std_series) / len(std_series)
-            if range_series:
-                contribs["pupil_range"] = sum(range_series) / len(range_series)
-
+        # --- 2. Fixation Duration ---
         if "fixation_duration" in enabled:
-            load_keys = METRIC_KEYGROUPS["fixation_duration"]["load"]
-            dur_series = self._metric_series(features, load_keys["mean_duration_ms"])
+            dur_series = self._metric_series(
+                features, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
+            )
             if dur_series:
-                contribs["fixation_mean_duration_ms"] = sum(dur_series) / len(dur_series)
-            count_series = self._metric_series(features, load_keys["count"])
-            if count_series:
-                contribs["fixation_count"] = sum(count_series) / len(count_series)
+                mean_dur = sum(dur_series) / len(dur_series)
+                contribs["fixation_duration_ms"] = round(mean_dur, 1)
+                contribs["fixation_duration_score"] = round(
+                    self._normalize_metric("fixation_duration_ms", mean_dur, fallback_lo=150.0, fallback_hi=500.0), 3
+                )
 
+        # --- 3. Anticipation (Saccade Velocity) ---
         if "saccade_amplitude" in enabled:
-            load_keys = METRIC_KEYGROUPS["saccade_amplitude"]["load"]
-            amp_series = self._metric_series(features, load_keys["mean_amplitude"])
-            if amp_series:
-                contribs["saccade_mean_amplitude"] = sum(amp_series) / len(amp_series)
-            count_series = self._metric_series(features, load_keys["count"])
-            if count_series:
-                contribs["saccade_count"] = sum(count_series) / len(count_series)
+            vel_series = self._metric_series(
+                features, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
+            )
+            if vel_series:
+                mean_vel = sum(vel_series) / len(vel_series)
+                contribs["anticipation_velocity"] = round(mean_vel, 4)
+                contribs["anticipation_score"] = round(
+                    self._normalize_metric("anticipation_velocity", mean_vel, fallback_lo=1.0, fallback_hi=5.0), 3
+                )
 
-        if "gaze_dispersion" in enabled:
-            load_keys = METRIC_KEYGROUPS["gaze_dispersion"]["load"]
-            disp_series = self._metric_series(features, load_keys["total"])
-            if disp_series:
-                contribs["gaze_disp_total"] = sum(disp_series) / len(disp_series)
+        # --- 4. Perceived Difficulty (Saccade Velocity Std across windows) ---
+        if "saccade_amplitude" in enabled:
+            vel_series = self._metric_series(
+                features, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
+            )
+            if len(vel_series) >= 2:
+                mean_vel = sum(vel_series) / len(vel_series)
+                variance = sum((v - mean_vel) ** 2 for v in vel_series) / len(vel_series)
+                velocity_std = math.sqrt(variance)
+                contribs["perceived_difficulty_std"] = round(velocity_std, 4)
+                contribs["perceived_difficulty_score"] = round(
+                    self._normalize_metric("perceived_difficulty_std", velocity_std, fallback_lo=0.5, fallback_hi=10.0), 3
+                )
+
+        # --- 5. Information Processing Index (from signal processing) ---
+        if "ipi" in enabled:
+            ipi_series = self._metric_series(
+                features, METRIC_KEYGROUPS["ipi"]["load"]["value"]
+            )
+            if ipi_series:
+                mean_ipi = sum(ipi_series) / len(ipi_series)
+                contribs["ipi_raw"] = round(mean_ipi, 4)
+                # Inverted: low IPI = high load
+                contribs["ipi_score"] = round(
+                    1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0), 3
+                )
 
         return contribs
 
