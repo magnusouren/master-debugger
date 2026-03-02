@@ -195,9 +195,10 @@ def save_model(
     latest_model = output_dir / "latest.json"
     latest_metadata = output_dir / "latest_metadata.json"
 
-    if latest_model.exists():
+    # Remove existing symlinks (use is_symlink() to catch broken symlinks too)
+    if latest_model.is_symlink() or latest_model.exists():
         latest_model.unlink()
-    if latest_metadata.exists():
+    if latest_metadata.is_symlink() or latest_metadata.exists():
         latest_metadata.unlink()
 
     latest_model.symlink_to(model_path.name)

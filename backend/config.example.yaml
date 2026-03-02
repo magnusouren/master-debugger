@@ -29,22 +29,24 @@ forecasting:
   update_rate_hz: 5.0
   model_path: null  # Path to trained model, e.g., models/trained/latest.json
   model_type: xgboost  # xgboost, lstm
-  history_window_seconds: 5.0
+  history_window_seconds: 60.0  # Must match training.history_window_size (120 × 0.5s)
   min_confidence_threshold: 0.5
 
 # Training Configuration (for offline model training)
 training:
   data_path: null  # Path to processed features parquet file
-  history_window_size: 5  # Number of past windows as input
-  prediction_horizon: 2  # Windows to look ahead for target
+  # With 1s windows at 50% overlap, windows arrive every 0.5s
+  # history_window_size=120 means 120 × 0.5s = 60 seconds of history
+  history_window_size: 120  # Number of past windows as input
+  prediction_horizon: 60    # Windows to look ahead (~30 seconds)
   train_ratio: 0.7
   val_ratio: 0.15
   test_ratio: 0.15
   # XGBoost hyperparameters
   n_estimators: 500
-  max_depth: 6
-  learning_rate: 0.05
-  early_stopping_rounds: 20
+  max_depth: 8              # Increased for larger feature space
+  learning_rate: 0.03       # Reduced for larger model
+  early_stopping_rounds: 30
   random_state: 42
 
 # Reactive Tool

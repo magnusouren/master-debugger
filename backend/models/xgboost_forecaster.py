@@ -21,12 +21,14 @@ FEATURE_COLUMNS = [
     'pupil_std',
     'pupil_slope',
     'pupil_range',
+    'pupil_mean_abs_vel',
     'fixation_count',
     'fixation_mean_duration_ms',
     'saccade_count',
     'saccade_mean_amplitude',
     'saccade_mean_velocity',
     'saccade_velocity_std',
+    'gaze_disp_total',
 ]
 
 
@@ -126,21 +128,24 @@ class XGBoostForecaster:
                 'pupil_std': 'pupil_std',
                 'pupil_slope': 'pupil_slope',
                 'pupil_range': 'pupil_range',
+                'pupil_mean_abs_vel': 'pupil_mean_abs_vel',
                 'fixation_count': 'fixation_count',
                 'fixation_mean_duration_ms': 'fixation_mean_duration_ms',
                 'saccade_count': 'saccade_count',
                 'saccade_mean_amplitude': 'saccade_mean_amplitude',
                 'saccade_mean_velocity': 'saccade_mean_velocity',
                 'saccade_velocity_std': 'saccade_velocity_std',
+                'gaze_disp_total': 'gaze_disp_total',
             }
 
             key = key_mapping.get(col, col)
             value = window_features.get(key)
 
-            if value is None or (isinstance(value, float) and np.isnan(value)):
-                value = 0.0
-
-            features.append(float(value))
+            # Keep NaN values - XGBoost handles them natively
+            if value is None:
+                features.append(np.nan)
+            else:
+                features.append(float(value))
 
         return features
 
