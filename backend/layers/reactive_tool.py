@@ -84,15 +84,15 @@ METRIC_KEYGROUPS = {
             "max_amplitude": "saccade_max_amplitude",
             "count": "saccade_count",
             "mean_duration_ms": "saccade_mean_duration_ms",
-            "mean_velocity": "saccade_mean_velocity",  # For anticipation
+            "mean_velocity": "saccade_mean_velocity",  # For anticipation (NOT cognitive load)
             "velocity_std": "saccade_velocity_std",    # For perceived difficulty
         },
     },
-    "gaze_dispersion": {
+    "ipi": {
         "load": {
-            "total": "gaze_disp_total",
-            "x_std": "gaze_disp_x_std",
-            "y_std": "gaze_disp_y_std",
+            "value": "ipi_value",  # Information Processing Index from crunchwiz
+            "ratio_count": "ipi_ratio_count",
+            "calibrated": "ipi_calibrated",
         },
     },
 }
@@ -179,7 +179,7 @@ class ReactiveTool:
             "fixation_duration_ms": [],
             "anticipation_velocity": [],
             "perceived_difficulty_std": [],
-            "info_processing_index": [],
+            "ipi": [],  # Information Processing Index from crunchwiz
         }
         self._logger.system(
             "baseline_recording_started",
@@ -432,9 +432,10 @@ class ReactiveTool:
         Metrics (each weighted 0.2):
         1. IPA (Index of Pupillary Activity) - cognitive load from pupil dynamics
         2. Fixation Duration - longer fixations indicate processing difficulty
-        3. Anticipation (saccade velocity) - rapid scanning indicates anticipation
+        3. Anticipation (saccade velocity) - NOT cognitive load, measures anticipation/preparation
         4. Perceived Difficulty (saccade velocity std) - variable scanning indicates uncertainty
-        5. Information Processing Index - composite of fixation and saccade patterns
+        5. IPI (Information Processing Index) - ratio of short vs long fixation-saccade patterns
+           Lower IPI = deeper processing = higher cognitive load
 
         Args:
             windows: List of recent feature windows.
@@ -498,27 +499,20 @@ class ReactiveTool:
                 components["perceived_difficulty"] = (score, 0.2)
 
         # --- 5. Information Processing Index (weight 0.2) ---
-        if "fixation_duration" in enabled and "saccade_amplitude" in enabled:
-            fix_dur_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
+        # Uses IPI from signal processing (crunchwiz formula)
+        # IPI = count(short_fix_short_sac) / count(long_fix_short_sac)
+        # Higher IPI = rapid scanning, Lower IPI = deeper processing
+        if "ipi" in enabled:
+            ipi_series = self._metric_series(
+                windows, METRIC_KEYGROUPS["ipi"]["load"]["value"]
             )
-            sac_amp_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_amplitude"]
-            )
-            sac_count_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["count"]
-            )
-
-            if fix_dur_series and sac_amp_series and sac_count_series:
-                mean_fix_dur = sum(fix_dur_series) / len(fix_dur_series)
-                mean_sac_amp = sum(sac_amp_series) / len(sac_amp_series)
-                mean_sac_count = sum(sac_count_series) / len(sac_count_series)
-
-                if mean_sac_count > 0:
-                    info_proc_index = (mean_fix_dur / 1000.0) * mean_sac_amp / mean_sac_count
-                    raw_values["info_processing_index"] = info_proc_index
-                    score = self._normalize_metric("info_processing_index", info_proc_index, fallback_lo=0.001, fallback_hi=0.05)
-                    components["info_processing"] = (score, 0.2)
+            if ipi_series:
+                mean_ipi = sum(ipi_series) / len(ipi_series)
+                raw_values["ipi"] = mean_ipi
+                # Lower IPI indicates deeper processing (higher cognitive load)
+                # So we invert: high IPI (scanning) = low load, low IPI (focused) = high load
+                score = 1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0)
+                components["ipi"] = (score, 0.2)
 
         # Record samples if in baseline recording mode
         if self._is_recording_baseline:
@@ -768,29 +762,18 @@ class ReactiveTool:
                     self._normalize_metric("perceived_difficulty_std", velocity_std, fallback_lo=0.5, fallback_hi=10.0), 3
                 )
 
-        # --- 5. Information Processing Index ---
-        if "fixation_duration" in enabled and "saccade_amplitude" in enabled:
-            fix_dur_series = self._metric_series(
-                features, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
+        # --- 5. Information Processing Index (from signal processing) ---
+        if "ipi" in enabled:
+            ipi_series = self._metric_series(
+                features, METRIC_KEYGROUPS["ipi"]["load"]["value"]
             )
-            sac_amp_series = self._metric_series(
-                features, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_amplitude"]
-            )
-            sac_count_series = self._metric_series(
-                features, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["count"]
-            )
-
-            if fix_dur_series and sac_amp_series and sac_count_series:
-                mean_fix_dur = sum(fix_dur_series) / len(fix_dur_series)
-                mean_sac_amp = sum(sac_amp_series) / len(sac_amp_series)
-                mean_sac_count = sum(sac_count_series) / len(sac_count_series)
-
-                if mean_sac_count > 0:
-                    info_proc_index = (mean_fix_dur / 1000.0) * mean_sac_amp / mean_sac_count
-                    contribs["info_processing_index"] = round(info_proc_index, 6)
-                    contribs["info_processing_score"] = round(
-                        self._normalize_metric("info_processing_index", info_proc_index, fallback_lo=0.001, fallback_hi=0.05), 3
-                    )
+            if ipi_series:
+                mean_ipi = sum(ipi_series) / len(ipi_series)
+                contribs["ipi_raw"] = round(mean_ipi, 4)
+                # Inverted: low IPI = high load
+                contribs["ipi_score"] = round(
+                    1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0), 3
+                )
 
         return contribs
 

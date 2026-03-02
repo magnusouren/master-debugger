@@ -8,22 +8,28 @@ signal_processing:
   window_overlap_ratio: 0.5
   output_frequency_hz: 2.0
   enabled_metrics:
+    - fixation_duration
+    - saccade_amplitude
     - pupil_diameter
+    - blink_rate
     - data_quality
-    # add more metrics as needed
+    - ipi
   min_valid_sample_ratio: 0.5
   interpolate_missing: true
   max_gap_to_interpolate_ms: 100.0
   require_both_eyes_valid: false
+  saccade_velocity_threshold: 5.0
+  min_fixation_duration_ms: 60.0
+  ipa_window_seconds: 60.0  # Rolling window for IPA (Index of Pupillary Activity)
 
 # Forecasting Tool (proactive mode only)
 forecasting:
   enabled: false
-  prediction_horizon_seconds: 2.0
+  prediction_horizon_seconds: 30.0
   update_rate_hz: 5.0
-  model_path: null
-  model_type: lstm
-  history_window_seconds: 5.0
+  model_path: null  # Path to trained model, e.g., models/trained/latest.json
+  model_type: xgboost  # xgboost, lstm
+  history_window_seconds: 60.0
   min_confidence_threshold: 0.5
 
 # Reactive Tool
@@ -41,10 +47,10 @@ reactive_tool:
 # Feedback Layer
 feedback_layer:
   llm_provider: null  # openai, anthropic, local, development (no LLM-calls)
-  llm_model: null # e.g., gpt-4, claude-2
-  llm_api_key: null # sk-...
-  max_feedback_items: 2 
-  max_message_length: 200 
+  llm_model: null  # e.g., gpt-4, claude-2
+  llm_api_key: null  # sk-...
+  max_feedback_items: 2
+  max_message_length: 200
   enable_cache: true
   cache_ttl_seconds: 300.0
   max_generations_per_minute: 10

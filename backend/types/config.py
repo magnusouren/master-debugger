@@ -117,10 +117,10 @@ class SignalProcessingConfig:
     enabled_metrics: List[str] = field(default_factory=lambda: [
         "fixation_duration",
         "saccade_amplitude",
-        "gaze_dispersion",
         "pupil_diameter",
         "blink_rate",
-        "data_quality"
+        "data_quality",
+        "ipi"
     ])
 
     # Data quality settings

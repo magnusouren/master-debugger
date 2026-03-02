@@ -63,6 +63,13 @@ class SignalProcessingLayer:
         # Stores (timestamp, pupil_diameter) tuples for IPA calculation
         self._ipa_buffer: deque[tuple[float, float]] = deque()
         self._ipa_window_seconds: float = self._config.ipa_window_seconds
+
+        # IPI (Information Processing Index) calibration buffer
+        # Stores fixation_duration/saccade_length ratios for threshold calibration
+        self._ipi_ratio_buffer: deque[float] = deque(maxlen=1000)
+        self._ipi_short_threshold: Optional[float] = None  # 25th percentile
+        self._ipi_long_threshold: Optional[float] = None   # 75th percentile
+        self._ipi_calibrated: bool = False
     
     def configure(self, config: SignalProcessingConfig) -> None:
         """
@@ -103,6 +110,10 @@ class SignalProcessingLayer:
         """Reset internal state and buffers."""
         self._sample_buffer.clear()
         self._ipa_buffer.clear()
+        self._ipi_ratio_buffer.clear()
+        self._ipi_calibrated = False
+        self._ipi_short_threshold = None
+        self._ipi_long_threshold = None
         self._next_window_end_ts = None
         self._is_running = False
     
@@ -317,6 +328,10 @@ class SignalProcessingLayer:
                 elif metric == "blink_rate":
                     features.update(
                         self._extract_blink_rate(samples)
+                    )
+                elif metric == "ipi":
+                    features.update(
+                        self._extract_ipi_metrics(cleaned_samples)
                     )
                 else:
                     self._logger.system(
@@ -871,6 +886,122 @@ class SignalProcessingLayer:
             "blink_rate_per_min": count / window_duration_min if window_duration_min > 0 else 0.0,
             "blink_mean_duration_ms": sum(blink_durations) / count if count > 0 else None,
         }
+
+    def _extract_ipi_metrics(self, samples: List[GazeSample]) -> Dict[str, Any]:
+        """
+        Extract Information Processing Index (IPI) metrics.
+
+        IPI measures the ratio of short-fixation-short-saccade patterns to
+        long-fixation-short-saccade patterns. Based on crunchwiz implementation.
+
+        Formula:
+        - For each fixation: ratio = fixation_duration / saccade_length_to_next
+        - IPI = count(ratio < 25th_percentile) / count(ratio > 75th_percentile)
+
+        Higher IPI = more rapid scanning behavior
+        Lower IPI = deeper, more focused processing
+        """
+        positions = self._get_gaze_positions(samples)
+
+        if len(positions) < 3:
+            return {
+                "ipi_value": None,
+                "ipi_ratio_count": 0,
+                "ipi_calibrated": self._ipi_calibrated,
+            }
+
+        # Segment into fixations and saccades
+        segments = self._segment_by_ivt(positions)
+        min_dur_ms = self._config.min_fixation_duration_ms
+
+        # Collect fixation-saccade ratios
+        ratios: List[float] = []
+
+        # We need pairs of (fixation, next_fixation) to compute saccade length
+        fixations: List[Tuple[float, float, float, float]] = []  # (duration_ms, center_x, center_y, end_time)
+
+        for is_saccade, seg_positions in segments:
+            if is_saccade or len(seg_positions) < 2:
+                continue
+
+            dur_ms = (seg_positions[-1][0] - seg_positions[0][0]) * 1000.0
+            if dur_ms < min_dur_ms:
+                continue
+
+            # Compute fixation center
+            n = len(seg_positions)
+            cx = sum(p[1] for p in seg_positions) / n
+            cy = sum(p[2] for p in seg_positions) / n
+
+            fixations.append((dur_ms, cx, cy, seg_positions[-1][0]))
+
+        # Compute ratios: fixation_duration / saccade_length_to_next_fixation
+        for i in range(len(fixations) - 1):
+            fix_dur = fixations[i][0]
+            x1, y1 = fixations[i][1], fixations[i][2]
+            x2, y2 = fixations[i + 1][1], fixations[i + 1][2]
+
+            saccade_length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+            if saccade_length > 0:
+                ratio = fix_dur / saccade_length
+                ratios.append(ratio)
+                self._ipi_ratio_buffer.append(ratio)
+
+        # Update calibration thresholds if we have enough data
+        if len(self._ipi_ratio_buffer) >= 20 and not self._ipi_calibrated:
+            self._calibrate_ipi_thresholds()
+
+        # Compute IPI from rolling buffer (like crunchwiz uses all data)
+        # Using last 30 ratios gives finer-grained values than per-window
+        ipi_value = None
+        if self._ipi_calibrated and len(self._ipi_ratio_buffer) >= 10:
+            recent_ratios = list(self._ipi_ratio_buffer)[-30:]
+            short_count = sum(1 for r in recent_ratios if r < self._ipi_short_threshold)
+            long_count = max(sum(1 for r in recent_ratios if r > self._ipi_long_threshold), 1)
+            ipi_value = short_count / long_count
+
+        return {
+            "ipi_value": ipi_value,
+            "ipi_ratio_count": len(ratios),
+            "ipi_calibrated": self._ipi_calibrated,
+        }
+
+    def _calibrate_ipi_thresholds(self) -> None:
+        """
+        Calibrate IPI thresholds from collected ratio data.
+
+        Sets short_threshold to 25th percentile and long_threshold to 75th percentile.
+        """
+        if len(self._ipi_ratio_buffer) < 20:
+            return
+
+        ratios = list(self._ipi_ratio_buffer)
+        self._ipi_short_threshold = float(np.percentile(ratios, 25))
+        self._ipi_long_threshold = float(np.percentile(ratios, 75))
+        self._ipi_calibrated = True
+
+        self._logger.system(
+            "ipi_calibration_complete",
+            {
+                "short_threshold": self._ipi_short_threshold,
+                "long_threshold": self._ipi_long_threshold,
+                "sample_count": len(ratios),
+            },
+            level="INFO"
+        )
+
+    def set_ipi_thresholds(self, short_threshold: float, long_threshold: float) -> None:
+        """
+        Manually set IPI thresholds (e.g., from a baseline calibration session).
+
+        Args:
+            short_threshold: 25th percentile threshold for short ratios.
+            long_threshold: 75th percentile threshold for long ratios.
+        """
+        self._ipi_short_threshold = short_threshold
+        self._ipi_long_threshold = long_threshold
+        self._ipi_calibrated = True
 
     # --- IPA (Index of Pupillary Activity) calculation ---
 
