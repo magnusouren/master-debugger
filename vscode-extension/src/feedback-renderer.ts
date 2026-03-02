@@ -122,7 +122,18 @@ export class FeedbackRenderer {
         const diagnostic = new vscode.Diagnostic(range, item.message, severity);
         diagnostic.code = item.metadata.feedback_id;
 
-        this.diagnosticCollection.set(editor.document.uri, [diagnostic]);
+        // Get existing diagnostics and filter out any with the same feedback_id
+        const existingDiagnostics =
+            this.diagnosticCollection.get(editor.document.uri) || [];
+        const filteredDiagnostics = existingDiagnostics.filter(
+            (d) => d.code !== item.metadata.feedback_id,
+        );
+
+        // Merge with the new diagnostic
+        this.diagnosticCollection.set(editor.document.uri, [
+            ...filteredDiagnostics,
+            diagnostic,
+        ]);
     }
 
     /**
