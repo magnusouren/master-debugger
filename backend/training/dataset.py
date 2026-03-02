@@ -84,9 +84,8 @@ def compute_cognitive_load_score(windows: List[WindowFeatures]) -> float:
 
     This reuses the exact same logic used at runtime.
     """
-    config = ReactiveToolConfig(
-        enabled_metrics=['pupil_diameter', 'fixation_duration', 'saccade_amplitude', 'gaze_dispersion'],
-    )
+    # Use default config - enabled_metrics comes from WindowFeatures, not config
+    config = ReactiveToolConfig()
     tool = ReactiveTool(config=config)
 
     # Use the internal method directly
@@ -136,11 +135,12 @@ def create_sequences(
             target_score = compute_cognitive_load_score(target_windows)
 
             # Flatten history features
+            # Note: NaN values are kept as np.nan - XGBoost handles them natively
             features = []
             for _, row in history_rows.iterrows():
                 for col in FEATURE_COLUMNS:
                     val = row.get(col)
-                    features.append(float(val) if pd.notna(val) else 0.0)
+                    features.append(float(val) if pd.notna(val) else np.nan)
 
             X_list.append(features)
             y_list.append(target_score)
