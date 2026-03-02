@@ -163,10 +163,13 @@ export class FeedbackRenderer {
         const startLine = clamp(range.start.line, 0, document.lineCount - 1);
         const endLine = clamp(range.end.line, 0, document.lineCount - 1);
 
-        const start = document.lineAt(startLine).range.start;
-        const end = document.lineAt(endLine).range.end;
+        const startLineLength = document.lineAt(startLine).text.length;
+        const endLineLength = document.lineAt(endLine).text.length;
 
-        return new vscode.Range(start, end);
+        const startChar = clamp(range.start.character, 0, startLineLength);
+        const endChar = clamp(range.end.character, 0, endLineLength);
+
+        return new vscode.Range(startLine, startChar, endLine, endChar);
     }
 
     /**
