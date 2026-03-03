@@ -1,8 +1,8 @@
 /**
  * Status bar manager - shows connection and system status.
  */
-import * as vscode from "vscode";
-import { SystemStatusMessage, SystemStatus } from "./types";
+import * as vscode from 'vscode';
+import { SystemStatusMessage, SystemStatus } from './types';
 
 export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
@@ -13,9 +13,9 @@ export class StatusBarManager {
     constructor(context: vscode.ExtensionContext) {
         this.statusBarItem = vscode.window.createStatusBarItem(
             vscode.StatusBarAlignment.Right,
-            100
+            100,
         );
-        this.statusBarItem.command = "eyeTrackingDebugger.showStatus";
+        this.statusBarItem.command = 'eyeTrackingDebugger.showStatus';
         context.subscriptions.push(this.statusBarItem);
         this.updateDisplay();
         this.statusBarItem.show();
@@ -48,7 +48,7 @@ export class StatusBarManager {
     /**
      * Set the operation mode.
      */
-    setMode(mode: "reactive" | "proactive"): void {
+    setMode(mode: 'reactive' | 'proactive'): void {
         if (!this.currentStatus) return;
 
         this.currentStatus.operation_mode = mode;
@@ -79,31 +79,36 @@ export class StatusBarManager {
 
     async showStatusDetails(): Promise<void> {
         if (!this.currentStatus) {
-            vscode.window.showInformationMessage("No status available");
+            vscode.window.showInformationMessage('No status available');
             return;
         }
 
         if (this.statusPanel) {
-            this.statusPanel.reveal(this.statusPanel.viewColumn ?? vscode.ViewColumn.Active, true);
+            this.statusPanel.reveal(
+                this.statusPanel.viewColumn ?? vscode.ViewColumn.Active,
+                true,
+            );
             this.postStatusToPanel(this.currentStatus);
             return;
         }
 
         this.statusPanel = vscode.window.createWebviewPanel(
-            "eyeTrackingDebugger.status",
-            "Eye Tracking Debugger – Status",
+            'eyeTrackingDebugger.status',
+            'Eye Tracking Debugger – Status',
             { viewColumn: vscode.ViewColumn.Active, preserveFocus: true },
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-            }
+            },
         );
 
         this.statusPanel.onDidDispose(() => {
             this.statusPanel = null;
         });
 
-        this.statusPanel.webview.html = this.getStatusPanelHtml(this.statusPanel.webview);
+        this.statusPanel.webview.html = this.getStatusPanelHtml(
+            this.statusPanel.webview,
+        );
         this.postStatusToPanel(this.currentStatus);
     }
 
@@ -116,66 +121,72 @@ export class StatusBarManager {
         this.statusBarItem.color = undefined;
 
         if (!this.connectedToBackend || !this.currentStatus) {
-            this.statusBarItem.text = "Eye Tracking Debugger: Disconnected";
-            this.statusBarItem.backgroundColor =
-                new vscode.ThemeColor("statusBarItem.errorBackground");
-            this.statusBarItem.color = "black";
+            this.statusBarItem.text = 'Eye Tracking Debugger: Disconnected';
+            this.statusBarItem.backgroundColor = new vscode.ThemeColor(
+                'statusBarItem.errorBackground',
+            );
+            this.statusBarItem.color = 'black';
             return;
         }
 
         const statusIcon = this.getStatusIcon(this.currentStatus.status);
         const modeText =
-            this.currentStatus.operation_mode === "proactive"
-                ? "Proactive"
-                : "Reactive";
+            this.currentStatus.operation_mode === 'proactive'
+                ? 'Proactive'
+                : 'Reactive';
 
         const eyeTrackerText = this.currentStatus.eye_tracker_connected
-            ? "Eye Tracker: Connected"
-            : "Eye Tracker: Disconnected";
+            ? 'Eye Tracker: Connected'
+            : 'Eye Tracker: Disconnected';
 
         const experimentText = this.currentStatus.experiment_active
-            ? "Experiment: Running"
-            : "Experiment: Stopped";
+            ? 'Experiment: Running'
+            : 'Experiment: Stopped';
 
-        this.statusBarItem.text =
-            `Debugger: ${statusIcon} | Connected | ${modeText} | ${eyeTrackerText} | ${experimentText}`;
+        this.statusBarItem.text = `Debugger: ${statusIcon} | Connected | ${modeText} | ${eyeTrackerText} | ${experimentText}`;
 
-        this.statusBarItem.color = this.getStatusColor(this.currentStatus.status);
+        this.statusBarItem.color = this.getStatusColor(
+            this.currentStatus.status,
+        );
     }
 
     private getStatusIcon(status: SystemStatus): string {
         switch (status) {
             case SystemStatus.INITIALIZING:
-                return "$(loading~spin)";
+                return '$(loading~spin)';
             case SystemStatus.READY:
-                return "$(check)";
-            case SystemStatus.PROCESSING:
-                return "$(sync~spin)";
+                return '$(check)';
+            case SystemStatus.CALIBRATING:
+                return '$(sync~spin)';
+            case SystemStatus.RUNNING:
+                return '$(play)';
             case SystemStatus.DISCONNECTED:
-                return "$(circle-slash)";
-            case SystemStatus.PAUSED:
-                return "$(debug-pause)";
+                return '$(circle-slash)';
+            case SystemStatus.STOPPED:
+                return '$(debug-pause)';
             case SystemStatus.ERROR:
-                return "$(error)";
+                return '$(error)';
             default:
-                return "$(question)";
+                return '$(question)';
         }
     }
 
     private getStatusColor(status: SystemStatus): string {
         switch (status) {
             case SystemStatus.INITIALIZING:
-                return "orange";
+                return 'orange';
             case SystemStatus.READY:
-                return "green";
-            case SystemStatus.PROCESSING:
-                return "yellow";
-            case SystemStatus.PAUSED:
-                return "blue";
+                return 'green';
+            case SystemStatus.CALIBRATING:
+                return 'yellow';
+            case SystemStatus.RUNNING:
+                return 'green';
+            case SystemStatus.STOPPED:
+                return 'gray';
             case SystemStatus.ERROR:
-                return "red";
+                return 'red';
             default:
-                return "gray";
+                return 'gray';
         }
     }
 
@@ -189,7 +200,7 @@ export class StatusBarManager {
         const tsMs = status.timestamp * 1000;
 
         this.statusPanel.webview.postMessage({
-            type: "status_update",
+            type: 'status_update',
             payload: {
                 ...status,
                 connected_to_backend: this.connectedToBackend,
