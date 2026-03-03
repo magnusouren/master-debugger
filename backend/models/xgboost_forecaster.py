@@ -7,29 +7,13 @@ import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import numpy as np
+from backend.models.forecast_feature_schema import FEATURE_COLUMNS, compute_contributor_features
 
 try:
     import xgboost as xgb
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
-
-
-# Feature columns (must match dataset.py)
-FEATURE_COLUMNS = [
-    'pupil_mean',
-    'pupil_std',
-    'pupil_slope',
-    'pupil_range',
-    'pupil_mean_abs_vel',
-    'fixation_count',
-    'fixation_mean_duration_ms',
-    'saccade_count',
-    'saccade_mean_amplitude',
-    'saccade_mean_velocity',
-    'saccade_velocity_std',
-    'gaze_disp_total',
-]
 
 
 class XGBoostForecaster:
@@ -120,32 +104,8 @@ class XGBoostForecaster:
         Returns:
             List of feature values in the expected order
         """
-        features = []
-        for col in FEATURE_COLUMNS:
-            # Map our column names to WindowFeatures keys
-            key_mapping = {
-                'pupil_mean': 'pupil_mean',
-                'pupil_std': 'pupil_std',
-                'pupil_slope': 'pupil_slope',
-                'pupil_range': 'pupil_range',
-                'pupil_mean_abs_vel': 'pupil_mean_abs_vel',
-                'fixation_count': 'fixation_count',
-                'fixation_mean_duration_ms': 'fixation_mean_duration_ms',
-                'saccade_count': 'saccade_count',
-                'saccade_mean_amplitude': 'saccade_mean_amplitude',
-                'saccade_mean_velocity': 'saccade_mean_velocity',
-                'saccade_velocity_std': 'saccade_velocity_std',
-                'gaze_disp_total': 'gaze_disp_total',
-            }
-
-            key = key_mapping.get(col, col)
-            value = window_features.get(key)
-
-            # Keep NaN values - XGBoost handles them natively
-            if value is None:
-                features.append(np.nan)
-            else:
-                features.append(float(value))
+        contribs = compute_contributor_features(window_features)
+        features = [float(contribs[col]) for col in FEATURE_COLUMNS]
 
         return features
 
