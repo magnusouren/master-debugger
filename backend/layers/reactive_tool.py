@@ -424,7 +424,7 @@ class ReactiveTool:
     
     def _estimate_rule_based(self, windows: List[WindowFeatures]) -> float:
         """
-        Estimate user state using rule-based heuristics with 5 equal-weight metrics.
+        Estimate user state using rule-based heuristics with strict 5 equal-weight metrics.
 
         Uses baseline-relative normalization if a baseline is available,
         otherwise falls back to static thresholds.
@@ -444,11 +444,11 @@ class ReactiveTool:
         """
         enabled = self._enabled(windows)
 
-        # components: metric_name -> (sub_score, base_weight)
-        # raw_values: metric_name -> raw value (for logging)
-        # All metrics have equal weight of 0.2
-        components: dict = {}
+        # components: metric_name -> sub_score
+        # All metrics contribute exactly 0.2 each. Missing values fallback to neutral 0.5.
+        components: dict[str, float] = {}
         raw_values: dict = {}
+        missing_metrics: list[str] = []
 
         # --- 1. IPA - Index of Pupillary Activity (weight 0.2) ---
         if "pupil_diameter" in enabled:
@@ -459,7 +459,7 @@ class ReactiveTool:
                 mean_ipa = sum(ipa_series) / len(ipa_series)
                 raw_values["ipa"] = mean_ipa
                 score = self._normalize_metric("ipa", mean_ipa, fallback_lo=0.5, fallback_hi=2.5)
-                components["ipa"] = (score, 0.2)
+                components["ipa"] = score
 
         # --- 2. Fixation Duration (weight 0.2) ---
         if "fixation_duration" in enabled:
@@ -470,7 +470,7 @@ class ReactiveTool:
                 mean_dur = sum(dur_series) / len(dur_series)
                 raw_values["fixation_duration_ms"] = mean_dur
                 score = self._normalize_metric("fixation_duration_ms", mean_dur, fallback_lo=150.0, fallback_hi=500.0)
-                components["fixation_duration"] = (score, 0.2)
+                components["fixation_duration"] = score
 
         # --- 3. Anticipation - Saccade Velocity (weight 0.2) ---
         if "saccade_amplitude" in enabled:
@@ -481,7 +481,7 @@ class ReactiveTool:
                 mean_vel = sum(vel_series) / len(vel_series)
                 raw_values["anticipation_velocity"] = mean_vel
                 score = self._normalize_metric("anticipation_velocity", mean_vel, fallback_lo=1.0, fallback_hi=5.0)
-                components["anticipation"] = (score, 0.2)
+                components["anticipation"] = score
 
         # --- 4. Perceived Difficulty - Saccade Velocity Variability (weight 0.2) ---
         # Compute std of mean velocities across windows (aggregated approach)
@@ -496,7 +496,7 @@ class ReactiveTool:
                 velocity_std = math.sqrt(variance)
                 raw_values["perceived_difficulty_std"] = velocity_std
                 score = self._normalize_metric("perceived_difficulty_std", velocity_std, fallback_lo=0.5, fallback_hi=10.0)
-                components["perceived_difficulty"] = (score, 0.2)
+                components["perceived_difficulty"] = score
 
         # --- 5. Information Processing Index (weight 0.2) ---
         # Uses IPI from signal processing (crunchwiz formula)
@@ -512,29 +512,43 @@ class ReactiveTool:
                 # Lower IPI indicates deeper processing (higher cognitive load)
                 # So we invert: high IPI (scanning) = low load, low IPI (focused) = high load
                 score = 1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0)
-                components["ipi"] = (score, 0.2)
+                components["ipi"] = score
+
+        expected_components = [
+            "ipa",
+            "fixation_duration",
+            "anticipation",
+            "perceived_difficulty",
+            "ipi",
+        ]
+        for name in expected_components:
+            if name not in components:
+                components[name] = 0.5
+                missing_metrics.append(name)
 
         # Record samples if in baseline recording mode
         if self._is_recording_baseline:
             for metric_name, value in raw_values.items():
                 if metric_name in self._baseline_samples:
                     self._baseline_samples[metric_name].append(value)
-
-        if not components:
-            return 0.5
-
-        # Re-normalise weights so they sum to 1.0
-        total_weight = sum(w for _, w in components.values())
-        score = sum(v * (w / total_weight) for v, w in components.values())
+        # Strict equal weighting: each of 5 components contributes exactly 0.2
+        score = (
+            0.2 * components["ipa"]
+            + 0.2 * components["fixation_duration"]
+            + 0.2 * components["anticipation"]
+            + 0.2 * components["perceived_difficulty"]
+            + 0.2 * components["ipi"]
+        )
 
         # Log individual metrics with raw values and normalized scores
         self._logger.system(
             "user_state_metrics",
             {
                 "raw_values": {k: round(v, 4) if v is not None else None for k, v in raw_values.items()},
-                "normalized_scores": {k: round(s, 3) for k, (s, _) in components.items()},
+                "normalized_scores": {k: round(s, 3) for k, s in components.items()},
                 "final_score": round(score, 3),
-                "active_metrics": list(components.keys()),
+                "active_metrics": [k for k in expected_components if k not in missing_metrics],
+                "missing_metrics_fallback": missing_metrics,
                 "using_baseline": self.has_baseline(),
             },
             level="INFO"

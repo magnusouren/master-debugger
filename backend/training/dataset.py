@@ -18,23 +18,7 @@ from typing import Tuple, List, Dict, Optional
 
 from backend.types import WindowFeatures, ReactiveToolConfig, TrainingConfig
 from backend.layers.reactive_tool import ReactiveTool
-
-
-# Feature columns from SignalProcessingLayer output
-FEATURE_COLUMNS = [
-    'pupil_mean',
-    'pupil_std',
-    'pupil_slope',
-    'pupil_range',
-    'pupil_mean_abs_vel',
-    'fixation_count',
-    'fixation_mean_duration_ms',
-    'saccade_count',
-    'saccade_mean_amplitude',
-    'saccade_mean_velocity',
-    'saccade_velocity_std',
-    'gaze_disp_total',
-]
+from backend.models.forecast_feature_schema import FEATURE_COLUMNS, compute_contributor_features
 
 # Number of historical windows to use as input
 HISTORY_WINDOW_SIZE = 5
@@ -62,10 +46,11 @@ def load_processed_data(data_path: Optional[Path] = None) -> pd.DataFrame:
 
 def row_to_window_features(row: pd.Series) -> WindowFeatures:
     """Convert a DataFrame row to WindowFeatures object."""
+    # Keep all raw metrics in WindowFeatures so rule-based target scoring
+    # can read the fields it expects (e.g., pupil_ipa, ipi_value, velocities).
     features = {}
-    for col in FEATURE_COLUMNS:
-        val = row.get(col)
-        if pd.notna(val):
+    for col, val in row.items():
+        if isinstance(val, (int, float, np.integer, np.floating)) and pd.notna(val):
             features[col] = float(val)
 
     return WindowFeatures(
@@ -74,7 +59,15 @@ def row_to_window_features(row: pd.Series) -> WindowFeatures:
         features=features,
         sample_count=int(row.get('sample_count', 0)),
         valid_sample_ratio=float(row.get('valid_ratio', 0)),
-        enabled_metrics=['pupil_diameter', 'fixation_duration', 'saccade_amplitude', 'gaze_dispersion'],
+        # Match SignalProcessingConfig defaults used in main.
+        enabled_metrics=[
+            'pupil_diameter',
+            'fixation_duration',
+            'saccade_amplitude',
+            'blink_rate',
+            'data_quality',
+            'ipi',
+        ],
     )
 
 
@@ -135,12 +128,12 @@ def create_sequences(
             target_score = compute_cognitive_load_score(target_windows)
 
             # Flatten history features
-            # Note: NaN values are kept as np.nan - XGBoost handles them natively
+            # Exactly 5 calculated contributor values are used as model inputs.
             features = []
             for _, row in history_rows.iterrows():
+                contribs = compute_contributor_features(row.to_dict())
                 for col in FEATURE_COLUMNS:
-                    val = row.get(col)
-                    features.append(float(val) if pd.notna(val) else np.nan)
+                    features.append(float(contribs[col]))
 
             X_list.append(features)
             y_list.append(target_score)
