@@ -640,25 +640,32 @@ class FeedbackLayer:
                 # Parse code_range if present
                 code_range: Optional[CodeRange] = None
                 raw_range = it.get("code_range")
-                if raw_range and isinstance(raw_range, dict):
+                if isinstance(raw_range, dict):
                     try:
-                        start = raw_range.get("start", {})
-                        end = raw_range.get("end", {})
+                        start = self._normalize_pos(raw_range.get("start"))
+                        end = self._normalize_pos(raw_range.get("end"))
+
                         code_range = CodeRange(
                             start=CodePosition(
-                                line=int(start.get("line", 0)),
-                                character=int(start.get("character", 0)),
+                                line=start["line"],
+                                character=start["character"],
                             ),
                             end=CodePosition(
-                                line=int(end.get("line", 0)),
-                                character=int(end.get("character", 0)),
+                                line=end["line"],
+                                character=end["character"],
                             ),
                         )
-                    except (TypeError, ValueError):
+
+                    except (TypeError, ValueError) as e:
                         code_range = None
                         self._logger.system(
                             "invalid_code_range",
-                            {"raw_range": raw_range},
+                            {
+                                "error": str(e),
+                                "raw_range": raw_range,
+                                "start_type": type(raw_range.get("start")).__name__,
+                                "end_type": type(raw_range.get("end")).__name__,
+                            },
                             level="DEBUG",
                         )
                 # Parse confidence (0.0 to 1.0)
@@ -847,3 +854,15 @@ class FeedbackLayer:
         # prune
         cutoff = now - 60.0
         self._rate_limit_window = [t for t in self._rate_limit_window if t >= cutoff]
+
+
+    def _normalize_pos(self, x: Any) -> Dict[str, int]:
+        # Accept various formats for code positions, but normalize to {"line": int, "character": int}
+        if isinstance(x, dict):
+            return {
+                "line": int(x.get("line", 0)),
+                "character": int(x.get("character", 0)),
+            }
+        if isinstance(x, int):
+            return {"line": x, "character": 0}
+        return {"line": 0, "character": 0}
