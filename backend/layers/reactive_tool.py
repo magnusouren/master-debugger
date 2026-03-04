@@ -220,7 +220,7 @@ class ReactiveTool:
             self._logger.system(
                 "baseline_recording_failed",
                 {"participant_id": participant_id, "reason": "insufficient_data"},
-                level="WARNING"
+                level="ERROR"
             )
             return None
 
@@ -537,7 +537,7 @@ class ReactiveTool:
                 "active_metrics": list(components.keys()),
                 "using_baseline": self.has_baseline(),
             },
-            level="INFO"
+            level="DEBUG"
         )
 
         return float(max(0.0, min(1.0, score)))

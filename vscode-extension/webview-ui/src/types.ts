@@ -63,7 +63,14 @@ export type InteractionType =
   | "dismissed"; // User dismissed the shown feedback
 
 export interface SystemStatus {
-  status: "initializing" | "ready" | "processing" | "paused" | "error" | "disconnected";
+  status:
+    | "initializing"
+    | "ready"
+    | "calibrating"
+    | "running"
+    | "stopped"
+    | "error"
+    | "disconnected";
   timestamp: number;
   eye_tracker_connected: boolean;
   operation_mode: "reactive" | "proactive";

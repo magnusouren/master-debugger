@@ -31,8 +31,9 @@ class SystemStatus(Enum):
     """System status states."""
     INITIALIZING = "initializing"
     READY = "ready"
-    PROCESSING = "processing"
-    PAUSED = "paused"
+    CALIBRATING = "calibrating"
+    RUNNING = "running"
+    STOPPED = "stopped"
     ERROR = "error"
     DISCONNECTED = "disconnected"
 

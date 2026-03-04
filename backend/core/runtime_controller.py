@@ -145,8 +145,8 @@ class RuntimeController:
         Returns:
             True if initialization successful.
         """
+        self._status = SystemStatus.INITIALIZING
         self._logger.system("runtime_controller_initializing", {}, level="DEBUG")
-        self._status = SystemStatus.READY
         self._stats["session_start"] = asyncio.get_event_loop().time()
         
         # Get event loop reference
@@ -165,6 +165,7 @@ class RuntimeController:
         # Start main loop as background task - store it to prevent garbage collection
         self._main_loop_task = asyncio.create_task(self._run_main_loop())
         
+        self._status = SystemStatus.READY
         self._logger.system("runtime_controller_ready", self.get_system_status(), level="INFO")
 
         return True
@@ -172,7 +173,11 @@ class RuntimeController:
     async def shutdown(self) -> None:
         """Shutdown all system components gracefully."""
         self._logger.system("runtime_controller_shutdown", {"final_stats": self._stats}, level="INFO")
-        self._status = SystemStatus.DISCONNECTED
+
+        if self._experiment_is_active:
+            self.end_experiment()
+        
+        self._status = SystemStatus.STOPPED
 
         # Disconnect eye tracker
         if self._eye_tracker_adapter:
@@ -189,6 +194,8 @@ class RuntimeController:
             self._main_loop_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._main_loop_task
+
+        self._status = SystemStatus.DISCONNECTED
 
     def configure(self, config: SystemConfig) -> None:
         """
@@ -479,7 +486,9 @@ class RuntimeController:
         if self._can_start_feedback_generation():
             self._feedback_generation_task = asyncio.create_task(
                 self._generate_feedback_for_version(current_version, context)
-            )   
+            )  
+
+        self._stats["code_window_samples_processed"] += 1 
 
     def manual_send_feedback(self) -> bool:
         """
@@ -584,7 +593,7 @@ class RuntimeController:
         Returns:
             True if feedback generation can be started.
         """
-        if self._status != SystemStatus.READY:
+        if self._status != SystemStatus.RUNNING:
             return False
 
         if self._current_code_context is None:
@@ -605,7 +614,7 @@ class RuntimeController:
         Returns:
             True if feedback should be delivered.
         """
-        if self._status != SystemStatus.READY:
+        if self._status != SystemStatus.RUNNING:
             return False
 
         # No pending feedback or already delivered
@@ -682,18 +691,13 @@ class RuntimeController:
         pending feedback if available.
         """
         if force:
-            if self._status != SystemStatus.READY:
+            if self._status != SystemStatus.RUNNING:
                 return False
             if self._pending_feedback is None:
                 return False
 
             feedback = self._pending_feedback
             version = self._pending_feedback_version
-
-            # Optional: if you still want to prevent re-sending same version manually,
-            # keep this check. If manual should re-send, remove it.
-            # if version <= self._last_delivered_version:
-            #     return False
 
         else:
             if not self._should_deliver_feedback():
@@ -864,19 +868,25 @@ class RuntimeController:
 
     # --- Baseline Calibration ---
 
-    async def _run_baseline_calibration(self, participant_id: str) -> None:
+    async def _run_baseline_calibration(self, duration_seconds: float) -> None:
         """
         Automatic baseline calibration sequence.
 
-        Waits 5 seconds, then records baseline for 60 seconds.
+        Waits 5 seconds, then records baseline for the amount of seconds specified.
         """
         try:
             # Wait 5 seconds for things to settle
             self._logger.system(
                 "baseline_calibration_waiting",
-                {"wait_seconds": 5, "participant_id": participant_id},
+                {
+                    "wait_seconds": 5, 
+                    "participant_id": self._participant_id,
+                    "experiment_id": self._experiment_id,
+                },
                 level="INFO"
             )
+            self.set_feedback_cooldown(5)
+
             await asyncio.sleep(5)
 
             # Check if experiment is still active
@@ -884,52 +894,71 @@ class RuntimeController:
                 return
 
             # Start baseline recording
-            self._reactive_tool.start_baseline_recording(participant_id)
+            self._status = SystemStatus.CALIBRATING
+            self._reactive_tool.start_baseline_recording(self._participant_id)
 
-            # Record for 60 seconds
+            # Record for the specified duration
             self._logger.system(
                 "baseline_calibration_recording",
-                {"duration_seconds": 60, "participant_id": participant_id},
+                {
+                    "duration_seconds": duration_seconds, 
+                    "participant_id": self._participant_id,
+                    "experiment_id": self._experiment_id,   
+                },
                 level="INFO"
             )
-            await asyncio.sleep(60)
+            await asyncio.sleep(duration_seconds)
 
             # Check if experiment is still active
             if not self._experiment_is_active:
                 return
 
             # Stop baseline recording
-            baseline = self._reactive_tool.stop_baseline_recording(participant_id)
+            baseline = self._reactive_tool.stop_baseline_recording(self._participant_id)
 
             if baseline:
                 self._logger.system(
                     "baseline_calibration_completed",
                     {
-                        "participant_id": participant_id,
+                        "participant_id": self._participant_id,
                         "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
                                    for k, v in baseline.metrics.items()},
                     },
                     level="INFO"
                 )
+
+                if self._experiment_is_active:
+                    self._status = SystemStatus.RUNNING
+                    self.set_feedback_cooldown(self._config.controller.feedback_cooldown_seconds)
+                else:
+                    self._status = SystemStatus.READY
             else:
                 self._logger.system(
                     "baseline_calibration_failed",
-                    {"participant_id": participant_id, "reason": "insufficient_data"},
-                    level="WARNING"
+                    {
+                        "reason": "insufficient_data",
+                        "participant_id": self._participant_id, 
+                        "experiment_id": self._experiment_id,
+                    },
+                    level="ERROR"
                 )
+                self._status = SystemStatus.ERROR
 
         except asyncio.CancelledError:
             self._logger.system(
                 "baseline_calibration_cancelled",
-                {"participant_id": participant_id},
+                {"participant_id": self._participant_id, "experiment_id": self._experiment_id},
                 level="INFO"
             )
+            self._status = SystemStatus.ERROR
+
         except Exception as e:
             self._logger.system(
                 "baseline_calibration_error",
-                {"participant_id": participant_id, "error": str(e)},
+                {"participant_id": self._participant_id, "experiment_id": self._experiment_id, "error": str(e)},
                 level="ERROR"
             )
+            self._status = SystemStatus.ERROR
 
     def start_baseline_recording(self, participant_id: str) -> None:
         """
@@ -1177,7 +1206,7 @@ class RuntimeController:
 
         # Schedule automatic baseline recording
         # Wait 5 seconds, then record baseline for 60 seconds
-        asyncio.create_task(self._run_baseline_calibration(participant_id))
+        asyncio.create_task(self._run_baseline_calibration(self._config.controller.calibration_duration_seconds))
 
         self._logger.system(
             "experiment_started",
@@ -1198,6 +1227,8 @@ class RuntimeController:
             },
             level="INFO",
         )
+
+        self._status = SystemStatus.RUNNING
 
         # Publish domain event for experiment start
         self._publish(DomainEvent(
@@ -1244,6 +1275,7 @@ class RuntimeController:
         self._experiment_is_active = False
 
         self.export_experiment_data()
+        self._status = SystemStatus.STOPPED
 
         # Stop processing layers and reset state
         self._signal_processing.stop()
@@ -1352,7 +1384,7 @@ class RuntimeController:
         """Main processing loop."""
 
         self._logger.system("runtime_controller_main_loop_started", {}, level="DEBUG")
-        while self._status == SystemStatus.READY:
+        while self._status != SystemStatus.DISCONNECTED:
             await asyncio.sleep(1)  # Main loop tick
             
             # Update statistics

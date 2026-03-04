@@ -29,8 +29,9 @@ export enum MessageType {
 export enum SystemStatus {
     INITIALIZING = 'initializing',
     READY = 'ready',
-    PROCESSING = 'processing',
-    PAUSED = 'paused',
+    CALIBRATING = 'calibrating',
+    RUNNING = 'running',
+    STOPPED = 'stopped',
     ERROR = 'error',
     DISCONNECTED = 'disconnected',
 }

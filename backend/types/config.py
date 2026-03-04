@@ -237,7 +237,10 @@ class ControllerConfig:
     # Feedback timing
     feedback_cooldown_seconds: float = 5.0
     min_score_for_feedback: float = 0.6
-    
+
+    # Calibration
+    calibration_duration_seconds: float = 60
+
     # WebSocket settings
     websocket_host: str = "localhost"
     websocket_port: int = 8765
