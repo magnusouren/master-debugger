@@ -885,7 +885,8 @@ class RuntimeController:
                 },
                 level="INFO"
             )
-            self.set_feedback_cooldown(5)
+            original_cooldown = self._config.controller.feedback_cooldown_seconds
+            self.set_feedback_cooldown(duration_seconds + original_cooldown)
 
             await asyncio.sleep(5)
 
@@ -929,7 +930,7 @@ class RuntimeController:
 
                 if self._experiment_is_active:
                     self._status = SystemStatus.RUNNING
-                    self.set_feedback_cooldown(self._config.controller.feedback_cooldown_seconds)
+                    self.set_feedback_cooldown(original_cooldown)
                 else:
                     self._status = SystemStatus.READY
             else:
