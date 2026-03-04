@@ -497,6 +497,15 @@ class RuntimeController:
         Returns:
             True if something was delivered, False otherwise.
         """
+        self._logger.system(
+            "manual_feedback_triggered",
+            {
+                "pending_feedback_version": self._pending_feedback_version,
+                "last_delivered_version": self._last_delivered_version,
+                "cooldown_remaining": self.get_feedback_cooldown_remaining(),
+            },
+        )
+
         return self._try_deliver_feedback(force=True)
     
     async def handle_feedback_interaction(
