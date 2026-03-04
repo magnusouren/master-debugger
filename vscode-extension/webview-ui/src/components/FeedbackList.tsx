@@ -71,11 +71,9 @@ function FeedbackAlertCard({ item, onInteraction }: FeedbackAlertCardProps) {
           </div>
           <p className="feedback-message">Do you want to be presented this feedback?</p>
           <div className="feedback-actions">
-            {item.actionable && (
-              <button className="feedback-action-btn" onClick={handleAccept} disabled={accepted}>
-                Yes
-              </button>
-            )}
+            <button className="feedback-action-btn" onClick={handleAccept} disabled={accepted}>
+              Yes
+            </button>
             {item.dismissible && (
               <button className="feedback-action-btn" onClick={handleReject}>
                 No
@@ -108,7 +106,7 @@ function FeedbackItemCard({ item, onHighlight, onDismiss }: FeedbackItemCardProp
       </div>
       <p className="feedback-message">{item.message}</p>
       <div className="feedback-actions">
-        {item.code_range && (
+        {item.code_range && item.actionable && (
           <button className="feedback-action-btn" onClick={onHighlight}>
             Show in Code
           </button>
