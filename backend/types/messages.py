@@ -103,7 +103,7 @@ class SystemStatusMessage:
     timestamp: float
     
     # Component statuses
-    eye_tracker_connected: bool = False
+    eye_tracker_model: Optional[str] = None
     
     # Current state
     operation_mode: str = "reactive"

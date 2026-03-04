@@ -176,7 +176,7 @@ export interface FeedbackDeliveryPayload {
 export interface SystemStatusMessage {
     status: SystemStatus;
     timestamp: number;
-    eye_tracker_connected: boolean;
+    eye_tracker_model?: string | null;
     operation_mode: 'reactive' | 'proactive';
     eye_samples_processed: number;
     code_window_samples_processed: number;

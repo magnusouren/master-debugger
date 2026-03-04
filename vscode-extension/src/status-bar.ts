@@ -135,8 +135,8 @@ export class StatusBarManager {
                 ? 'Proactive'
                 : 'Reactive';
 
-        const eyeTrackerText = this.currentStatus.eye_tracker_connected
-            ? 'Eye Tracker: Connected'
+        const eyeTrackerText = this.currentStatus.eye_tracker_model
+            ? `Eye Tracker: ${this.currentStatus.eye_tracker_model}`
             : 'Eye Tracker: Disconnected';
 
         const experimentText = this.currentStatus.experiment_active
@@ -284,7 +284,7 @@ export class StatusBarManager {
                     <div class="value" id="mode">–</div>
 
                     <div class="label">Eye Tracker</div>
-                    <div class="value" id="eye_tracker_connected">–</div>
+                    <div class="value" id="eye_tracker_model">–</div>
 
                     <div class="label">Experiment</div>
                     <div class="value" id="experiment_active">–</div>
@@ -358,7 +358,7 @@ export class StatusBarManager {
                     pillForStatus(s.status);
                     setText("time_local", s.time_local);
                     setText("mode", s.operation_mode);
-                    setText("eye_tracker_connected", s.eye_tracker_connected ? "Connected" : "Disconnected");
+                    setText("eye_tracker_model", s.eye_tracker_model || "Disconnected");
                     setText("experiment_active", s.experiment_active ? "Running" : "Stopped");
                     setText("llm_model", s.llm_model);
                     setText("experiment_id", s.experiment_id);
