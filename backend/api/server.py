@@ -168,6 +168,7 @@ class Server:
                 DomainEventType.SYSTEM_STATUS_UPDATED: MessageType.STATUS_UPDATE,
                 DomainEventType.EXPERIMENT_STARTED: MessageType.STATUS_UPDATE,
                 DomainEventType.EXPERIMENT_ENDED: MessageType.STATUS_UPDATE,
+                DomainEventType.CODE_CONTEXT_NEEDED: MessageType.CONTEXT_REQUEST,
             }
 
             message_type = event_to_message_type.get(event.event_type)
