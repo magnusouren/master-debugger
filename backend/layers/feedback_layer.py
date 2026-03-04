@@ -18,6 +18,7 @@ import json
 import time
 import hashlib
 from dataclasses import dataclass
+import traceback
 from typing import Optional, List, Dict, Any, Tuple
 import uuid
 
@@ -707,9 +708,17 @@ class FeedbackLayer:
 
             return items
         except Exception as e:
+            tb = traceback.format_exc()  # full stacktrace som string
+
             self._logger.system(
                 "llm_response_parsing_error",
-                {"error": str(e), "response_snippet": response[:200]},
+                {
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "traceback": tb[-4000:],
+                    "response_len": len(response),
+                    "response_snippet": response[:200],
+                },
                 level="WARNING",
             )
             return self._generate_fallback_feedback(context)
