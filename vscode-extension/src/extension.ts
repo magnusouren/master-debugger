@@ -13,7 +13,6 @@ import { FeedbackViewProvider } from './webview-provider';
 import {
     MessageType,
     FeedbackDeliveryPayload,
-    ContextRequestPayload,
     SystemStatus,
     FeedbackInteraction,
 } from './types';
@@ -304,7 +303,21 @@ async function connectToBackend(): Promise<void> {
     }
 }
 
-function disconnectFromBackend(): void {
+async function disconnectFromBackend(): Promise<void> {
+    const result = await vscode.window.showInformationMessage(
+        'Do you want to disconnect from the Eye Tracking backend?',
+        { modal: true },
+        'Yes',
+        'No',
+    );
+
+    if (result !== 'Yes') {
+        vscode.window.showInformationMessage(
+            'Disconnect cancelled - still connected to backend',
+        );
+        return;
+    }
+
     wsClient?.disconnect();
     statusBar?.setConnected(false);
     webviewProvider?.updateConnectionStatus(false);
@@ -385,12 +398,6 @@ async function showStatus(): Promise<void> {
 }
 
 async function connectToEyeTracker(): Promise<void> {
-    // // Let the user enter identifier of the eye tracker to connect to
-    // const eyeTrackerId = await vscode.window.showInputBox({
-    //     prompt: "Enter Eye Tracker Identifier",
-    //     placeHolder: "e.g., Tobii Pro X3-120",
-    // });
-
     try {
         await fetch(`http://${host}:${port}/eye_tracker/connect`, {
             method: 'POST',
@@ -408,6 +415,20 @@ async function connectToEyeTracker(): Promise<void> {
 }
 
 async function disconnectFromEyeTracker(): Promise<void> {
+    const result = await vscode.window.showInformationMessage(
+        'Do you want to disconnect from the eye tracker?',
+        { modal: true },
+        'Yes',
+        'No',
+    );
+
+    if (result !== 'Yes') {
+        vscode.window.showInformationMessage(
+            'Eye tracker disconnect cancelled',
+        );
+        return;
+    }
+
     try {
         await fetch(`http://${host}:${port}/eye_tracker/disconnect`, {
             method: 'POST',
@@ -603,10 +624,25 @@ async function startExperiment(
             placeHolder: 'e.g., participant456',
         });
     }
+
     if (!experimentID || !participantID) {
         vscode.window.showWarningMessage(
             'Experiment start cancelled - missing experiment or participant ID',
         );
+        return;
+    }
+
+    const result = await vscode.window.showInformationMessage(
+        'Do you want to start the experiment?',
+        { modal: true },
+        'Yes',
+        'No',
+    );
+
+    if (result === 'Yes') {
+        vscode.window.showInformationMessage('Experiment started!');
+    } else {
+        vscode.window.showInformationMessage('Experiment start cancelled');
         return;
     }
 
@@ -628,6 +664,20 @@ async function startExperiment(
 }
 
 async function stopExperiment(): Promise<void> {
+    const result = await vscode.window.showInformationMessage(
+        'Do you want to stop the experiment?',
+        { modal: true },
+        'Yes',
+        'No',
+    );
+
+    if (result === 'Yes') {
+        vscode.window.showInformationMessage('Experiment stopping!');
+    } else {
+        vscode.window.showInformationMessage('Experiment stop cancelled');
+        return;
+    }
+
     try {
         await fetch(`http://${host}:${port}/experiment/end`, {
             method: 'POST',
