@@ -308,11 +308,7 @@ class SignalProcessingLayer:
                     features.update(
                         self._extract_pupil_metrics(cleaned_samples)
                     )
-                elif metric == "data_quality":
-                    # Use raw samples to measure actual data quality, not pre-filtered ones
-                    features.update(
-                        self._extract_data_quality_metrics(samples)
-                    )
+
                 elif metric == "gaze_dispersion":
                     features.update(
                         self._extract_gaze_dispersion_metrics(cleaned_samples)
@@ -339,6 +335,11 @@ class SignalProcessingLayer:
                         {"metric": metric},
                         level="WARNING",
                     )
+
+                # Always compute data quality metrics for monitoring, even if not explicitly enabled
+                features.update(
+                    self._extract_data_quality_metrics(samples)
+                )
 
             except Exception as e:
                 self._logger.system(

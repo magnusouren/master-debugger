@@ -740,7 +740,6 @@ class RuntimeController:
         self._logger.system(
             "feedback_delivered",
             {
-                "feedback_id": feedback.metadata.feedback_id,
                 "trigger": event_meta["trigger"],
                 "recipient_id": recipient_id,
                 "feedback_version": version,
@@ -753,11 +752,8 @@ class RuntimeController:
         self._logger.experiment(
             "feedback_delivered",
             {
-                "feedback_id": feedback.metadata.feedback_id,
                 "trigger": event_meta["trigger"],
-                "recipient_id": recipient_id,
                 "feedback_version": version,
-                "item_count": len(feedback.items),
                 "item_ids": [item.metadata.feedback_id for item in feedback.items],
             },
             level="INFO",
@@ -868,12 +864,6 @@ class RuntimeController:
             level="INFO",
         )
         
-        self._logger.experiment(
-            "feedback_cooldown_changed",
-            {"new_cooldown_seconds": cooldown_seconds},
-            level="INFO",
-        )
-        
         # Publish status update
         self._publish(DomainEvent(
             event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
@@ -922,6 +912,14 @@ class RuntimeController:
                 },
                 level="INFO"
             )
+
+            self._logger.experiment(
+                "baseline_calibration_recording",
+                {
+                    "duration_seconds": duration_seconds, 
+                },
+                level="INFO"
+            )
             await asyncio.sleep(duration_seconds)
 
             # Check if experiment is still active
@@ -935,7 +933,15 @@ class RuntimeController:
                 self._logger.system(
                     "baseline_calibration_completed",
                     {
-                        "participant_id": self._participant_id,
+                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
+                                   for k, v in baseline.metrics.items()},
+                    },
+                    level="INFO"
+                )
+
+                self._logger.experiment(
+                    "baseline_calibration_completed",
+                    {
                         "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
                                    for k, v in baseline.metrics.items()},
                     },
@@ -1106,9 +1112,9 @@ class RuntimeController:
         self._logger.system(
             "user_state_estimate_updated",
             {
-                "score": estimate.score,
+                "score": estimate.score.score,
+                "confidence": estimate.score.confidence,
                 "contributing_features": estimate.contributing_features,
-                "model_version": estimate.model_version,
                 "model_type": estimate.model_type,
                 "metadata": estimate.metadata,
             },
@@ -1118,9 +1124,9 @@ class RuntimeController:
         self._logger.experiment(
             "user_state_estimate_logged",
             {
-                "score": estimate.score,
+                "score": estimate.score.score,
+                "confidence": estimate.score.confidence,
                 "contributing_features": estimate.contributing_features,
-                "model_version": estimate.model_version,
                 "model_type": estimate.model_type,
                 "metadata": estimate.metadata,
             },
