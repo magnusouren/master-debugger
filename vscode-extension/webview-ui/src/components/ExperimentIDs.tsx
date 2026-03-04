@@ -23,6 +23,7 @@ export function ExperimentIDs({
       return;
     }
     try {
+      setErrorMessage("");
       await startExperiment(experimentId, participantId);
     } catch (error) {
       setErrorMessage("Failed to start experiment. Please check connection and try again.");
