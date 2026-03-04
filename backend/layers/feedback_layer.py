@@ -136,6 +136,11 @@ class FeedbackLayer:
         start = time.time()
 
         if self.is_rate_limited():
+            self._logger.system(
+                "feedback_generation_rate_limited",
+                {"pending_requests": len(self._rate_limit_window)},
+                level="WARNING",
+            )
             items = self._generate_fallback_feedback(context)
             items = self._filter_and_rank_feedback(items)
             return FeedbackResponse(
@@ -693,7 +698,14 @@ class FeedbackLayer:
                     ),
                 ))
 
-            return items or self._generate_fallback_feedback(context)
+            if not items:
+                self._logger.system(
+                    "llm_response_no_items",
+                    {"response_snippet": response[:200]},
+                    level="INFO",
+                )
+
+            return items
         except Exception as e:
             self._logger.system(
                 "llm_response_parsing_error",

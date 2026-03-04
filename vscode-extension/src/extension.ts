@@ -122,10 +122,30 @@ function initializeComponents(context: vscode.ExtensionContext): void {
     // Update UI when connection state changes (e.g., server shutdown)
     wsClient.onConnectionChange((connected: boolean) => {
         statusBar?.setConnected(connected);
+        webviewProvider?.updateConnectionStatus(connected);
     });
 
     // Set up message handlers
     setupMessageHandlers();
+}
+
+function refreshStatus(): void {
+    // Fetch system status from REST API and update status bar
+    fetchStatus(host, port)
+        .then((statusPayload) => {
+            if (isStatusUpdatePayload(statusPayload)) {
+                statusBar?.setStatus(statusPayload);
+                webviewProvider?.updateStatus(statusPayload);
+            } else {
+                console.warn(
+                    '/status response did not match expected shape',
+                    statusPayload,
+                );
+            }
+        })
+        .catch((err) => {
+            console.warn('Failed to fetch /status from backend:', err);
+        });
 }
 
 /**
@@ -274,22 +294,8 @@ async function connectToBackend(): Promise<void> {
         // Send initial context immediately
         sendContextUpdate();
 
-        // Fetch system status from REST API and update status bar
-        try {
-            const statusPayload = await fetchStatus(host, port);
-
-            if (isStatusUpdatePayload(statusPayload)) {
-                statusBar?.setStatus(statusPayload);
-                webviewProvider?.updateStatus(statusPayload);
-            } else {
-                console.warn(
-                    '/status response did not match expected shape',
-                    statusPayload,
-                );
-            }
-        } catch (err) {
-            console.warn('Failed to fetch /status from backend:', err);
-        }
+        // Refresh status from backend
+        refreshStatus();
     } else {
         vscode.window.showErrorMessage(
             'Failed to connect to Eye Tracking backend',
@@ -435,6 +441,7 @@ function onActiveEditorChanged(editor: vscode.TextEditor | undefined): void {
         console.log(`Active editor changed: ${editor.document.uri.toString()}`);
         // Send context immediately when switching files
         sendContextUpdate();
+        refreshStatus();
     } else {
         console.log('No active editor');
     }
@@ -447,18 +454,19 @@ function onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
         console.log(`Document changed: ${event.document.uri.toString()}`);
         // Debounce context updates during typing
         scheduleContextUpdate();
+        refreshStatus();
     }
 }
 
 function onSelectionChanged(
     event: vscode.TextEditorSelectionChangeEvent,
 ): void {
-    // TODO - only track selection changes in the active editor, dont send the whole file again
     console.log(
         `Selection changed in: ${event.textEditor.document.uri.toString()}`,
     );
     // Debounce selection changes (cursor movement)
     scheduleContextUpdate();
+    refreshStatus();
 }
 
 /**
