@@ -166,7 +166,7 @@ export function App() {
             onTriggerFeedback={handleTriggerFeedback}
             onConnectEyeTracker={handleConnectEyeTracker}
             onDisconnectEyeTracker={handleDisconnectEyeTracker}
-            eyeTrackerConnected={status?.eye_tracker_connected ?? false}
+            eyeTrackerConnected={!!status?.eye_tracker_model}
           />
         </div>
         {status &&

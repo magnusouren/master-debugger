@@ -29,7 +29,7 @@ export function StatusPanel({ status }: StatusPanelProps) {
                     <span className="value">{status.operation_mode}</span>
 
                     <span className="label">Eye Tracker</span>
-                    <span className="value">{status.eye_tracker_connected ? "✓ Connected" : "✗ Disconnected"}</span>
+                    <span className="value">{status.eye_tracker_model ? `✓ ${status.eye_tracker_model}` : "✗ Disconnected"}</span>
 
                     <span className="label">Eye Samples</span>
                     <span className="value">{status.eye_samples_processed}</span>

@@ -9,7 +9,7 @@ export function isStatusUpdatePayload(x: unknown): x is SystemStatusMessage {
   if (typeof o.timestamp !== "number") return false;
 
   // required fields
-  if (typeof o.eye_tracker_connected !== "boolean") return false;
+  if ("eye_tracker_model" in o && o.eye_tracker_model !== undefined && o.eye_tracker_model !== null && typeof o.eye_tracker_model !== "string") return false;
   if (typeof o.operation_mode !== "string") return false;
   if (typeof o.eye_samples_processed !== "number") return false;
   if (typeof o.code_window_samples_processed !== "number") return false;

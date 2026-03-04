@@ -282,7 +282,7 @@ class RuntimeController:
         return SystemStatusMessage(
             status=self.get_status().value,
             timestamp=datetime.now(timezone.utc).timestamp(),
-            eye_tracker_connected=self.is_eye_tracker_connected(),
+            eye_tracker_model=self.get_eye_tracker_model(),
             operation_mode=self._operation_mode.value,
             eye_samples_processed=self._stats["eye_samples_processed"],
             code_window_samples_processed=self._stats["code_window_samples_processed"],
@@ -421,14 +421,19 @@ class RuntimeController:
             )
             self._eye_tracker_connected = False
     
-    def is_eye_tracker_connected(self) -> bool:
+    def get_eye_tracker_model(self) -> Optional[str]:
         """
-        Check if eye tracker is connected.
-        
+        Get model name of connected eye tracker.
+
         Returns:
-            True if connected.
+            Eye tracker model if connected, otherwise None.
         """
-        return self._eye_tracker_connected
+        if not self._eye_tracker_connected or not self._eye_tracker_adapter:
+            return None
+
+        device_info = self._eye_tracker_adapter.get_device_info()
+        model = device_info.get("model") if device_info else None
+        return str(model) if model else None
     
     # --- VS Code Communication ---
     
