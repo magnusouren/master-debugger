@@ -497,6 +497,15 @@ class RuntimeController:
         Returns:
             True if something was delivered, False otherwise.
         """
+        self._logger.system(
+            "manual_feedback_triggered",
+            {
+                "pending_feedback_version": self._pending_feedback_version,
+                "last_delivered_version": self._last_delivered_version,
+                "cooldown_remaining": self.get_feedback_cooldown_remaining(),
+            },
+        )
+
         return self._try_deliver_feedback(force=True)
     
     async def handle_feedback_interaction(
@@ -929,8 +938,11 @@ class RuntimeController:
                 )
 
                 if self._experiment_is_active:
-                    self._status = SystemStatus.RUNNING
                     self.set_feedback_cooldown(original_cooldown)
+                    self._status = SystemStatus.RUNNING
+                    self._publish(DomainEvent(
+                        event_type=DomainEventType.CODE_CONTEXT_NEEDED,
+                    ))
                 else:
                     self._status = SystemStatus.READY
             else:
@@ -1393,13 +1405,12 @@ class RuntimeController:
 
             # Publish system status periodically
             self._broadcast_system_status()
-            
-            # # Check for feedback generation
-            # if self.should_generate_feedback():
-            #     feedback = await self.trigger_feedback_generation()
-            #     if feedback:
-            #         # Send feedback back to VS Code
-            #         await self.send_feedback(feedback)
+
+            # Request code context if we don't have one and experiment is active (and we're close to cooldown expiring)
+            if self._status == SystemStatus.RUNNING and self._current_code_context is None and self.get_feedback_cooldown_remaining() <= 10.0:
+                self._publish(DomainEvent(
+                    event_type=DomainEventType.CODE_CONTEXT_NEEDED,
+                ))
 
         self._logger.system("runtime_controller_main_loop_ended", {}, level="DEBUG")
     

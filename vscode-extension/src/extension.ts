@@ -547,11 +547,9 @@ function handleStatusUpdate(message: {
     }
 }
 
-function handleContextRequest(message: {
+function handleContextRequest(_message: {
     payload: Record<string, unknown>;
 }): void {
-    // TODO: Implement context request handling
-    const payload = message.payload as unknown as ContextRequestPayload;
     const context = contextCollector?.collectContext();
     if (context && wsClient) {
         wsClient.sendContextUpdate(context);

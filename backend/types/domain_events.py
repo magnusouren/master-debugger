@@ -23,6 +23,9 @@ class DomainEventType(Enum):
     EXPERIMENT_STARTED = "experiment_started"
     EXPERIMENT_ENDED = "experiment_ended"
 
+    # Code context events
+    CODE_CONTEXT_NEEDED = "code_context_needed"
+
 
 @dataclass
 class DomainEvent:
