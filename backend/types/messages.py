@@ -25,6 +25,8 @@ class MessageType(Enum):
     PING = "ping"
     PONG = "pong"
     CONFIG_UPDATE = "config_update"
+    CALIBRATION_REQUEST = "calibration_request"
+    CALIBRATION_RESPONSE = "calibration_response"
 
 
 class SystemStatus(Enum):

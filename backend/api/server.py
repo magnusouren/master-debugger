@@ -169,6 +169,7 @@ class Server:
                 DomainEventType.EXPERIMENT_STARTED: MessageType.STATUS_UPDATE,
                 DomainEventType.EXPERIMENT_ENDED: MessageType.STATUS_UPDATE,
                 DomainEventType.CODE_CONTEXT_NEEDED: MessageType.CONTEXT_REQUEST,
+                DomainEventType.CALIBRATION_CONFIRMATION_REQUESTED: MessageType.CALIBRATION_REQUEST,
             }
 
             message_type = event_to_message_type.get(event.event_type)
@@ -471,11 +472,26 @@ class Server:
             )
             await self._websocket_server.send_to_client(client_id, pong_msg)
 
+        async def on_calibration_response(message: WebSocketMessage, client_id: str) -> None:
+            request_id = str(message.payload.get("request_id", ""))
+            confirmed = bool(message.payload.get("confirmed", False))
+            phase = message.payload.get("phase")
+
+            self._logger.system(
+                "calibration_response_received",
+                {"client_id": client_id, "request_id": request_id, "confirmed": confirmed, "phase": phase},
+                level="INFO",
+            )
+
+            if request_id:
+                self._controller.handle_calibration_confirmation(request_id, confirmed)
+
         # Register handlers here
 
         # Register the handler for context updates
         self._websocket_server.register_handler(MessageType.CONTEXT_UPDATE, on_context_update)
         self._websocket_server.register_handler(MessageType.PING, on_ping)
+        self._websocket_server.register_handler(MessageType.CALIBRATION_RESPONSE, on_calibration_response)
     
     async def _shutdown_handler(self, sig: signal.Signals) -> None:
         """

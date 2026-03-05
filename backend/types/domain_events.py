@@ -26,6 +26,33 @@ class DomainEventType(Enum):
     # Code context events
     CODE_CONTEXT_NEEDED = "code_context_needed"
 
+    # UI/UX domain requests
+    CALIBRATION_CONFIRMATION_REQUESTED = "calibration_confirmation_requested"
+
+
+class DomainRequestType(Enum):
+    """Types of domain-level requests emitted by RuntimeController."""
+
+    CALIBRATION_MODE_TRANSITION = "calibration_mode_transition"
+
+
+@dataclass
+class DomainRequest:
+    """Domain request payload for client-facing interactions over WebSocket."""
+
+    request_type: DomainRequestType
+    request_id: str
+    payload: Dict[str, Any]
+    metadata: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "request_type": self.request_type.value,
+            "request_id": self.request_id,
+            "payload": self.payload,
+            "metadata": self.metadata,
+        }
+
 
 @dataclass
 class DomainEvent:

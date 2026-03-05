@@ -21,6 +21,8 @@ export enum MessageType {
     PING = 'ping',
     PONG = 'pong',
     CONFIG_UPDATE = 'config_update',
+    CALIBRATION_REQUEST = 'calibration_request',
+    CALIBRATION_RESPONSE = 'calibration_response',
 }
 
 /**
@@ -188,6 +190,16 @@ export interface SystemStatusMessage {
     participant_id?: string;
     user_state_score?: number | null;
     error_message?: string;
+}
+
+
+export interface CalibrationRequestPayload {
+    request_id: string;
+    phase: 'start' | 'end';
+    title: string;
+    message: string;
+    confirm_label?: string;
+    cancel_label?: string;
 }
 
 /**
