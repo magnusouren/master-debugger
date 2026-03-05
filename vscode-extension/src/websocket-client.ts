@@ -173,7 +173,17 @@ export class WebSocketClient {
         return this.send(message);
     }
 
-    
+
+
+    sendCalibrationResponse(requestId: string, confirmed: boolean, phase: 'start' | 'end'): boolean {
+        const message = this.createMessage(MessageType.CALIBRATION_RESPONSE, {
+            request_id: requestId,
+            confirmed,
+            phase,
+        });
+        return this.send(message);
+    }
+
     /**
      * Register a handler for a specific message type.
      */

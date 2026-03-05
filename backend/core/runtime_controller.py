@@ -17,6 +17,7 @@ import contextlib
 from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime, timezone
 import asyncio
+import uuid
 
 
 from backend.layers.signal_processing import SignalProcessingLayer
@@ -31,7 +32,7 @@ from backend.types.config import OperationMode, SystemConfig
 from backend.types.eye_tracking import PredictedFeatures, WindowFeatures, GazeSample
 from backend.types.feedback import FeedbackInteraction, FeedbackResponse
 from backend.types.messages import SystemStatus, SystemStatusMessage
-from backend.types.domain_events import DomainEvent, DomainEventType
+from backend.types.domain_events import DomainEvent, DomainEventType, DomainRequest, DomainRequestType
 from backend.types.user_state import UserStateEstimate
 
 
@@ -125,6 +126,9 @@ class RuntimeController:
         
         # main loop
         self._main_loop_task: Optional[asyncio.Task] = None
+
+        # Calibration confirmation state
+        self._pending_calibration_confirmations: Dict[str, asyncio.Future] = {}
 
         # Log initialization complete
         self._logger.system(
@@ -872,85 +876,132 @@ class RuntimeController:
 
     # --- Baseline Calibration ---
 
-    async def _run_baseline_calibration(self, duration_seconds: float) -> None:
-        """
-        Automatic baseline calibration sequence.
+    async def _request_calibration_confirmation(self, phase: str) -> bool:
+        """Request a calibration mode transition confirmation from connected clients."""
+        request_id = f"calibration_{phase}_{uuid.uuid4().hex[:10]}"
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._pending_calibration_confirmations[request_id] = future
 
-        Waits 5 seconds, then records baseline for the amount of seconds specified.
-        """
+        title = "Start calibration mode?" if phase == "start" else "End calibration mode?"
+        message = (
+            "Eksperimentet går nå inn i kalibreringsmodus. Bekreft for å starte kalibrering."
+            if phase == "start"
+            else "Kalibreringsmodus er ferdig. Bekreft for å gå tilbake til vanlig modus."
+        )
+
+        self._publish(DomainEvent(
+            event_type=DomainEventType.CALIBRATION_CONFIRMATION_REQUESTED,
+            payload=DomainRequest(
+                request_type=DomainRequestType.CALIBRATION_MODE_TRANSITION,
+                request_id=request_id,
+                payload={
+                    "request_id": request_id,
+                    "phase": phase,
+                    "title": title,
+                    "message": message,
+                    "confirm_label": "Bekreft",
+                    "cancel_label": "Avbryt",
+                },
+            ).to_dict(),
+        ))
+
         try:
-            # Wait 5 seconds for things to settle
+            return bool(await asyncio.wait_for(future, timeout=60.0))
+        except asyncio.TimeoutError:
             self._logger.system(
-                "baseline_calibration_waiting",
+                "baseline_calibration_confirmation_timeout",
+                {"phase": phase, "request_id": request_id},
+                level="WARNING",
+            )
+            return False
+        finally:
+            self._pending_calibration_confirmations.pop(request_id, None)
+
+    def handle_calibration_confirmation(self, request_id: str, confirmed: bool) -> None:
+        """Handle calibration confirmation responses from WebSocket clients."""
+        fut = self._pending_calibration_confirmations.get(request_id)
+        if fut and not fut.done():
+            fut.set_result(confirmed)
+
+    async def _run_baseline_calibration(self, duration_seconds: float) -> None:
+        """Automatic baseline calibration sequence with UI confirmations."""
+        try:
+            original_cooldown = self._config.controller.feedback_cooldown_seconds
+            self.set_feedback_cooldown(duration_seconds + original_cooldown)
+
+            if not await self._request_calibration_confirmation("start"):
+                self._logger.system(
+                    "baseline_calibration_start_not_confirmed",
+                    {"participant_id": self._participant_id, "experiment_id": self._experiment_id},
+                    level="WARNING",
+                )
+                self.set_feedback_cooldown(original_cooldown)
+                return
+
+            if not self._experiment_is_active:
+                self.set_feedback_cooldown(original_cooldown)
+                return
+
+            self._status = SystemStatus.CALIBRATING
+            self._publish(DomainEvent(
+                event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+                payload=self.get_system_status(),
+            ))
+            self._reactive_tool.start_baseline_recording(self._participant_id)
+
+            self._logger.system(
+                "baseline_calibration_recording",
                 {
-                    "wait_seconds": 5, 
+                    "duration_seconds": duration_seconds,
                     "participant_id": self._participant_id,
                     "experiment_id": self._experiment_id,
                 },
                 level="INFO"
             )
-            original_cooldown = self._config.controller.feedback_cooldown_seconds
-            self.set_feedback_cooldown(duration_seconds + original_cooldown)
-
-            await asyncio.sleep(5)
-
-            # Check if experiment is still active
-            if not self._experiment_is_active:
-                return
-
-            # Start baseline recording
-            self._status = SystemStatus.CALIBRATING
-            self._reactive_tool.start_baseline_recording(self._participant_id)
-
-            # Record for the specified duration
-            self._logger.system(
-                "baseline_calibration_recording",
-                {
-                    "duration_seconds": duration_seconds, 
-                    "participant_id": self._participant_id,
-                    "experiment_id": self._experiment_id,   
-                },
-                level="INFO"
-            )
-
             self._logger.experiment(
                 "baseline_calibration_recording",
-                {
-                    "duration_seconds": duration_seconds, 
-                },
+                {"duration_seconds": duration_seconds},
                 level="INFO"
             )
+
             await asyncio.sleep(duration_seconds)
 
-            # Check if experiment is still active
             if not self._experiment_is_active:
+                self.set_feedback_cooldown(original_cooldown)
                 return
 
-            # Stop baseline recording
             baseline = self._reactive_tool.stop_baseline_recording(self._participant_id)
 
             if baseline:
                 self._logger.system(
                     "baseline_calibration_completed",
                     {
-                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
-                                   for k, v in baseline.metrics.items()},
+                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)} for k, v in baseline.metrics.items()},
+                    },
+                    level="INFO"
+                )
+                self._logger.experiment(
+                    "baseline_calibration_completed",
+                    {
+                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)} for k, v in baseline.metrics.items()},
                     },
                     level="INFO"
                 )
 
-                self._logger.experiment(
-                    "baseline_calibration_completed",
-                    {
-                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
-                                   for k, v in baseline.metrics.items()},
-                    },
-                    level="INFO"
-                )
+                if not await self._request_calibration_confirmation("end"):
+                    self._logger.system(
+                        "baseline_calibration_end_not_confirmed",
+                        {"participant_id": self._participant_id, "experiment_id": self._experiment_id},
+                        level="WARNING",
+                    )
 
                 if self._experiment_is_active:
                     self.set_feedback_cooldown(original_cooldown)
                     self._status = SystemStatus.RUNNING
+                    self._publish(DomainEvent(
+                        event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+                        payload=self.get_system_status(),
+                    ))
                     self._publish(DomainEvent(
                         event_type=DomainEventType.CODE_CONTEXT_NEEDED,
                     ))
@@ -961,7 +1012,7 @@ class RuntimeController:
                     "baseline_calibration_failed",
                     {
                         "reason": "insufficient_data",
-                        "participant_id": self._participant_id, 
+                        "participant_id": self._participant_id,
                         "experiment_id": self._experiment_id,
                     },
                     level="ERROR"

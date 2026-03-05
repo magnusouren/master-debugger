@@ -15,6 +15,7 @@ import {
     FeedbackDeliveryPayload,
     SystemStatus,
     FeedbackInteraction,
+    CalibrationRequestPayload,
 } from './types';
 import { isStatusUpdatePayload } from './utils/typeguard';
 import { fetchStatus } from './api';
@@ -275,6 +276,7 @@ function setupMessageHandlers(): void {
     wsClient.onMessage(MessageType.STATUS_UPDATE, handleStatusUpdate);
     wsClient.onMessage(MessageType.CONTEXT_REQUEST, handleContextRequest);
     wsClient.onMessage(MessageType.ERROR, handleError);
+    wsClient.onMessage(MessageType.CALIBRATION_REQUEST, handleCalibrationRequest);
 }
 
 // --- Command Handlers ---
@@ -575,6 +577,37 @@ function handleContextRequest(_message: {
     if (context && wsClient) {
         wsClient.sendContextUpdate(context);
     }
+}
+
+
+function handleCalibrationRequest(message: {
+    payload: Record<string, unknown>;
+}): void {
+    const payload = message.payload as unknown as CalibrationRequestPayload;
+
+    if (!payload.request_id || !payload.phase) {
+        return;
+    }
+
+    void (async () => {
+        const result = await vscode.window.showInformationMessage(
+            payload.message,
+            { modal: true, detail: payload.title },
+            payload.confirm_label ?? 'Bekreft',
+            payload.cancel_label ?? 'Avbryt',
+        );
+
+        const confirmed = result === (payload.confirm_label ?? 'Bekreft');
+        wsClient?.sendCalibrationResponse(payload.request_id, confirmed, payload.phase);
+
+        if (confirmed) {
+            vscode.window.showInformationMessage(
+                payload.phase === 'start'
+                    ? 'Kalibreringsmodus startet.'
+                    : 'Kalibreringsmodus avsluttet.',
+            );
+        }
+    })();
 }
 
 function handleError(message: { payload: Record<string, unknown> }): void {
