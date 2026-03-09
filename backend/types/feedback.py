@@ -110,6 +110,8 @@ class InteractionType(Enum):
     HIGHLIGHTED = "highlighted"  # User clicked to highlight in code
     DISMISSED = "dismissed"      # User dismissed the shown feedback
 
+    DONE = "done"                # User marked feedback as done
+
 
 @dataclass
 class FeedbackInteraction:
@@ -118,7 +120,7 @@ class FeedbackInteraction:
     Received from VS Code extension.
     """
     feedback_id: str
-    interaction_type: str  # See InteractionType enum
+    interaction_type: InteractionType  # See InteractionType enum
     timestamp: float  # When interaction occurred
     metadata: Dict[str, Any] = field(default_factory=dict)
 
