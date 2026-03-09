@@ -104,7 +104,7 @@ export function App() {
 
   const handleFeedbackInteraction = (feedbackId: string, interactionType: InteractionType) => {
     // Remove from list when rejected or dismissed
-    if (interactionType === "rejected" || interactionType === "dismissed") {
+    if (interactionType === "rejected" || interactionType === "dismissed" || interactionType === "done") {
       setFeedbackItems((prevItems) =>
         prevItems.filter(item => item.metadata.feedback_id !== feedbackId)
       );
