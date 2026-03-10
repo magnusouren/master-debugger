@@ -111,13 +111,6 @@ class RuntimeController:
         self._experiment_id: Optional[str] = self._config.controller.experiment_id
         self._participant_id: Optional[str] = self._config.controller.participant_id
 
-        # Baseline recording state
-        self._baseline_recording: bool = False
-        self._baseline_start_time: Optional[float] = None
-        self._baseline_features: List[WindowFeatures] = []
-        self._baseline_duration_seconds: float = 30.0
-        self._baseline_computed: Optional[Dict[str, float]] = None
-
         # Generate session ID only if both participant_id and experiment_id are available
         if self._config.controller.participant_id and self._config.controller.experiment_id:
             self._session_id: Optional[str] = f"{self._config.controller.participant_id}_{self._config.controller.experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
@@ -258,25 +251,6 @@ class RuntimeController:
             event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
             payload=self.get_system_status(),
         ))
-
-        
-    def get_operation_mode(self) -> OperationMode:
-        """
-        Get current operation mode.
-        
-        Returns:
-            Current operation mode.
-        """
-        return self._operation_mode
-    
-    def get_status(self) -> SystemStatus:
-        """
-        Get current system status.
-        
-        Returns:
-            Current system status.
-        """
-        return self._status
     
     def get_system_status(self) -> SystemStatusMessage:
         """
@@ -286,7 +260,7 @@ class RuntimeController:
             SystemStatusMessage with current status details.
         """
         return SystemStatusMessage(
-            status=self.get_status().value,
+            status=self._status.value,
             timestamp=datetime.now(timezone.utc).timestamp(),
             eye_tracker_model=self.get_eye_tracker_model(),
             operation_mode=self._operation_mode.value,
@@ -300,15 +274,6 @@ class RuntimeController:
             participant_id=self._participant_id,
             user_state_score=self._current_user_state.score.score if self._current_user_state else None,
         )
-    
-    def get_statistics(self) -> Dict[str, Any]:
-        """
-        Get system statistics.
-        
-        Returns:
-            Dictionary of statistics.
-        """
-        return self._stats
     
     # --- Eye Tracker Interface ---
     
@@ -341,18 +306,12 @@ class RuntimeController:
             self._eye_tracker_connected = ok
             
             if ok:
-                # Start signal processing
-                self._signal_processing.start()
-
                 device_info = self._eye_tracker_adapter.get_device_info()
                 self._logger.system(
                     "eye_tracker_connected",
                     device_info,
                     level="INFO"
                 )
-                
-                # Start streaming
-                await self._eye_tracker_adapter.start_streaming()
                 
                 # Publish status update
                 self._publish(DomainEvent(
@@ -444,6 +403,9 @@ class RuntimeController:
     # --- VS Code Communication ---
     
     async def handle_context_update(self, context: CodeContext) -> None:
+        if not self._experiment_is_active:
+            return
+
         self._stats["code_window_samples_received"] += 1
 
         incoming_meta = context.metadata or {}
@@ -779,8 +741,6 @@ class RuntimeController:
 
             feedback = await self._feedback_layer.generate_feedback_cached(
                 context=context,
-                user_state=self._current_user_state,
-                feedback_types=None,
             )
 
             for item in feedback.items:
@@ -1126,71 +1086,9 @@ class RuntimeController:
         # Attempt to deliver feedback if conditions are met
         self._try_deliver_feedback(force=False)
 
-    def _finish_baseline_recording(self) -> None:
-        """
-        Finish baseline recording and compute average metrics.
-
-        Called automatically after baseline_duration_seconds have elapsed.
-        Computes averages of all collected window features and logs them.
-        """
-        self._baseline_recording = False
-
-        if not self._baseline_features:
-            self._logger.system(
-                "baseline_recording_empty",
-                {"message": "No features collected during baseline period"},
-                level="WARNING",
-            )
-            return
-
-        # Compute averages for all metrics
-        num_windows = len(self._baseline_features)
-
-        # Collect all numeric values from features
-        sums: Dict[str, float] = {}
-        counts: Dict[str, int] = {}
-
-        for window in self._baseline_features:
-            # WindowFeatures stores metrics in a features dictionary
-            for key, value in window.features.items():
-                if value is not None:
-                    sums[key] = sums.get(key, 0.0) + value
-                    counts[key] = counts.get(key, 0) + 1
-
-        # Compute averages
-        baseline_averages: Dict[str, float] = {}
-        for key in sums:
-            if counts[key] > 0:
-                baseline_averages[key] = sums[key] / counts[key]
-
-        self._baseline_computed = baseline_averages
-
-        self._logger.system(
-            "baseline_recording_completed",
-            {
-                "num_windows": num_windows,
-                "duration_seconds": self._baseline_duration_seconds,
-                "baseline_averages": baseline_averages,
-            },
-            level="INFO",
-        )
-
-        self._logger.experiment(
-            "baseline_recorded",
-            {
-                "num_windows": num_windows,
-                "duration_seconds": self._baseline_duration_seconds,
-                "baseline_averages": baseline_averages,
-            },
-            level="INFO",
-        )
-
-        # Clear the collected features to free memory
-        self._baseline_features = []
-
     # --- Logging and Experiment Control ---
     
-    def start_experiment(
+    async def start_experiment(
         self, 
         experiment_id: str, 
         participant_id: str
@@ -1217,6 +1115,10 @@ class RuntimeController:
 
         # Start reactive tool
         self._reactive_tool.start()
+
+        # Start streaming from eye tracker if not already started
+        await self._eye_tracker_adapter.start_streaming()
+
 
         # Schedule automatic baseline recording
         # Wait 5 seconds, then record baseline for 60 seconds
@@ -1265,7 +1167,7 @@ class RuntimeController:
 
         return self.get_system_status()
 
-    def end_experiment(self) -> SystemStatusMessage:
+    async def end_experiment(self) -> SystemStatusMessage:
         """End the current experiment session."""
         self._logger.system(
             "experiment_ended",
@@ -1306,6 +1208,9 @@ class RuntimeController:
         self._reactive_tool.stop()
         self._reactive_tool.reset()
 
+        # Stop eye tracker streaming (but keep connection for potential future sessions)
+        await self._eye_tracker_adapter.stop_streaming()
+
         # Publish domain event for experiment end (before clearing IDs)
         self._publish(DomainEvent(
             event_type=DomainEventType.EXPERIMENT_ENDED,
@@ -1322,23 +1227,6 @@ class RuntimeController:
         self._session_id = None
 
         return self.get_system_status()
-
-    def get_experiment_data(self) -> Dict[str, Any]:
-        """
-        Get collected experiment data.
-        
-        Returns:
-            Dictionary of experiment data.
-        """
-        if self._experiment_id is None or self._participant_id is None:
-            self._logger.system(
-                "get_experiment_data_no_experiment",
-                {},
-                level="WARNING",
-            )
-            return {}
-        
-        return self._logger.get_experiment_logs() # TODO - filter by experiment/participant/session if needed
     
     def export_experiment_data(self) -> bool:
         """
@@ -1425,16 +1313,6 @@ class RuntimeController:
         )
 
         self._logger.system("layer_callbacks_configured", {}, level="DEBUG")
-
-    
-    def _validate_system_state(self) -> bool:
-        """
-        Validate that system is in a valid state.
-        
-        Returns:
-            True if state is valid.
-        """
-        pass  # TODO: Implement state validation
     
     async def _run_main_loop(self) -> None:
         """Main processing loop."""
