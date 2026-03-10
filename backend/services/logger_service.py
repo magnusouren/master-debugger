@@ -47,7 +47,7 @@ class LoggerService:
         self,
         experiment_level: str = "INFO",
         system_level: str = "INFO",
-        max_entries: int = math.inf,
+        max_entries: int = 100000,
         experiment_mode: str = "unknown",
     ):
         """
