@@ -1094,6 +1094,20 @@ class RuntimeController:
             participant_id: Unique participant identifier.
         """
 
+        # Start streaming from eye tracker if not already started
+        if self._eye_tracker_adapter and self._eye_tracker_adapter.is_connected():
+            await self._eye_tracker_adapter.start_streaming()
+        else:
+            self._logger.system(
+                "eye_tracker_not_connected_on_experiment_start",
+                {
+                    "message": "Eye tracker is not connected at experiment start. Eye tracking data will not be available.",
+                },
+                level="ERROR"
+            )
+            return self.get_system_status()
+            # TODO - handle this case with the UI
+
         self._experiment_id = experiment_id
         self._participant_id = participant_id
         self._experiment_is_active = True
@@ -1109,12 +1123,8 @@ class RuntimeController:
         # Start reactive tool
         self._reactive_tool.start()
 
-        # Start streaming from eye tracker if not already started
-        await self._eye_tracker_adapter.start_streaming()
-
-
         # Schedule automatic baseline recording
-        # Wait 5 seconds, then record baseline for 60 seconds
+        # Wait 5 seconds, then record baseline calibration for the amount of seconds specified in config
         asyncio.create_task(self._run_baseline_calibration(self._config.controller.calibration_duration_seconds))
 
         self._logger.system(
