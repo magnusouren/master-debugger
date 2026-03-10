@@ -64,7 +64,7 @@ function FeedbackAlertCard({ item, onInteraction }: FeedbackAlertCardProps) {
 
   const handleDone = () => {
     onInteraction("done");
-  }
+  };
 
   return (
     <>
@@ -110,7 +110,7 @@ function FeedbackItemCard({ item, onHighlight, onDismiss, onDone }: FeedbackItem
   const handleHighlight = () => {
     setHighlighted(true);
     onHighlight();
-  }
+  };
 
   return (
     <div className={`feedback-item ${item.feedback_type}`}>
