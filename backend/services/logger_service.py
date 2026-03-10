@@ -35,7 +35,7 @@ class LogEntry:
     event_type: str
     data: Dict[str, Any]
     category: str  # "experiment" or "system"
-    mode: Optional[str]  # "reactive" or "proactive"
+    mode: Optional[str] = None  # e.g., "reactive", "proactive", or "unknown"
 
 
 class LoggerService:
@@ -48,6 +48,7 @@ class LoggerService:
         experiment_level: str = "INFO",
         system_level: str = "INFO",
         max_entries: int = math.inf,
+        experiment_mode: str = "unknown",
     ):
         """
         Initialize the logger service.
@@ -56,6 +57,7 @@ class LoggerService:
             experiment_level: Log level for experiment logs (DEBUG, INFO, WARNING, ERROR).
             system_level: Log level for system logs (DEBUG, INFO, WARNING, ERROR).
             max_entries: Maximum entries per category before rotating.
+            experiment_mode: Operation mode for experiment logs (e.g., "reactive", "proactive").
         """
         self.experiment_logs: List[LogEntry] = []
         self.system_logs: List[LogEntry] = []
@@ -64,17 +66,21 @@ class LoggerService:
         self.system_level = LogLevel[system_level.upper()]
         
         self.max_entries = max_entries
+        self.experiment_mode = experiment_mode
 
-        # --- Console dedup state (system prints only) ---
-        self._last_print_signature: Optional[str] = None
-        self._last_print_line: Optional[str] = None
-        self._last_print_repeat_count: int = 0
+    def set_experiment_mode(self, mode: str) -> None:
+        """
+        Set the operation mode for logging.
+        
+        Args:
+            mode: Operation mode (e.g., "reactive", "proactive").
+        """
+        self.experiment_mode = mode
     
     def experiment(
         self,
         event_type: str,
         data: Optional[Dict[str, Any]] = None,
-        mode: Optional[str] = None,
         level: str = "INFO",
     ) -> None:
         """
@@ -83,7 +89,6 @@ class LoggerService:
         Args:
             event_type: Type of event (e.g., "feedback_generated", "context_updated").
             data: Event data as dictionary.
-            mode: Operation mode (e.g., "reactive", "proactive").
             level: Log level (DEBUG, INFO, WARNING, ERROR).
         """
         if not self._should_log(level, category="experiment"):
@@ -91,11 +96,11 @@ class LoggerService:
         
         entry = LogEntry(
             timestamp=datetime.now(timezone.utc).timestamp(),
-            mode=mode.upper() if mode else None,
             level=level.upper(),
             event_type=event_type,
             data=data or {},
             category="experiment",
+            mode=self.experiment_mode,
         )
         
         self.experiment_logs.append(entry)
@@ -127,7 +132,7 @@ class LoggerService:
             event_type=event_type,
             data=data or {},
             category="system",
-            mode=None,
+            mode=self.experiment_mode,
         )
         
         self.system_logs.append(entry)
@@ -249,7 +254,7 @@ class LoggerService:
             
             with open(filepath, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["timestamp", "level", "mode", "event_type", "data"])
+                writer.writerow(["timestamp", "level", "event_type", "data", "mode"])
 
                 for entry in logs_data:
                     dt = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
@@ -258,7 +263,7 @@ class LoggerService:
                     writer.writerow([
                         timestamp_str,
                         entry["level"],
-                        entry["mode"],
+                        entry["mode"].upper() if entry["mode"] else "UNKNOWN",
                         entry["event_type"],
                         json.dumps(json_safe(entry["data"])),
                     ])
@@ -278,6 +283,7 @@ class LoggerService:
                 LogEntry(
                     timestamp=datetime.now(timezone.utc).timestamp(),
                     level="ERROR",
+                    mode=self.experiment_mode,
                     event_type="export_experiment_logs_error",
                     data={"error": str(e)},
                     category="system",
@@ -308,6 +314,7 @@ class LoggerService:
                 {
                     "timestamp": entry.timestamp,
                     "level": entry.level,
+                    "mode": entry.mode,
                     "event_type": entry.event_type,
                     "data": entry.data,
                 }
@@ -316,7 +323,7 @@ class LoggerService:
 
             with open(filepath, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["timestamp", "level", "event_type", "data"])
+                writer.writerow(["timestamp", "level", "event_type", "data", "mode"])
 
                 for entry in logs_data:
                     dt = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
@@ -325,6 +332,7 @@ class LoggerService:
                     writer.writerow([
                         timestamp_str,
                         entry["level"],
+                        entry["mode"].upper() if entry["mode"] else "UNKNOWN",
                         entry["event_type"],
                         json.dumps(json_safe(entry["data"])),
                     ])
@@ -333,6 +341,7 @@ class LoggerService:
                 LogEntry(
                     timestamp=datetime.now(timezone.utc).timestamp(),
                     level="INFO",
+                    mode=self.experiment_mode,
                     event_type="export_system_logs",
                     data={"filepath": filepath, "count": len(logs_data)},
                     category="system",
@@ -344,6 +353,7 @@ class LoggerService:
                 LogEntry(
                     timestamp=datetime.now(timezone.utc).timestamp(),
                     level="ERROR",
+                    mode=self.experiment_mode,
                     event_type="export_system_logs_error",
                     data={"error": str(e)},
                     category="system",
@@ -424,42 +434,9 @@ class LoggerService:
         data_obj = json_safe(entry.data) if entry.data else None
         data_str = json.dumps(data_obj) if data_obj else ""
 
-        base_line = f"{color}[{timestamp}] [{entry.level}] {entry.event_type}{reset} {data_str}"
-
-        signature = json.dumps(
-            {
-                "level": entry.level,
-                "event_type": entry.event_type,
-                "data": data_obj,
-            },
-            sort_keys=True,
-        )
-
-        # First line
-        if self._last_print_signature is None:
-            print(base_line, end="", flush=True)
-            self._last_print_signature = signature
-            self._last_print_line = base_line
-            self._last_print_repeat_count = 1
-            return
-
-        # Same as previous → update same line
-        if signature == self._last_print_signature:
-            self._last_print_repeat_count += 1
-            updated = f"{base_line} ×{self._last_print_repeat_count}"
-            # Pad if shorter than previous (important!)
-            padded = updated.ljust(len(self._last_print_line))
-            print(f"\r{padded}", end="", flush=True)
-            self._last_print_line = padded
-            return
-
-        # New message → end previous line
-        print()
-        print(base_line, end="", flush=True)
-
-        self._last_print_signature = signature
-        self._last_print_line = base_line
-        self._last_print_repeat_count = 1
+        line = f"{color}[{timestamp}] [{entry.level}] {entry.event_type}{reset} {data_str}"
+        
+        print(line, flush=True)
 
 
 # Global logger instance
