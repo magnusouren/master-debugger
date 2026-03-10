@@ -254,7 +254,7 @@ class LoggerService:
             
             with open(filepath, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["timestamp", "level", "event_type", "data", "mode"])
+                writer.writerow(["timestamp", "level", "mode", "event_type", "data"])
 
                 for entry in logs_data:
                     dt = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
@@ -323,7 +323,7 @@ class LoggerService:
 
             with open(filepath, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["timestamp", "level", "event_type", "data", "mode"])
+                writer.writerow(["timestamp", "level", "mode", "event_type", "data"])
 
                 for entry in logs_data:
                     dt = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
