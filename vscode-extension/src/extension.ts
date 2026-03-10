@@ -37,7 +37,9 @@ const port = config.get<number>('apiPort') || 8080;
 /**
  * Extension activation.
  */
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(
+    context: vscode.ExtensionContext,
+): Promise<void> {
     console.log('Eye Tracking Debugger extension is now active');
 
     // Initialize components
@@ -51,19 +53,42 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Auto-connect if configured
     if (config.get<boolean>('autoConnectBackend')) {
-        connectToBackend();
+        await connectToBackend();
     }
 
     if (config.get<boolean>('autoConnectEyeTracker')) {
-        connectToEyeTracker();
+        await fetchStatus(host, port)
+            .then((status) => {
+                if (isStatusUpdatePayload(status)) {
+                    if (status.eye_tracker_model) {
+                        console.log(
+                            'Eye tracker already connected according to status',
+                        );
+                    } else {
+                        console.log(
+                            'Auto-connecting to eye tracker as per configuration',
+                        );
+                        connectToEyeTracker();
+                    }
+                } else {
+                    console.warn(
+                        '/status response did not match expected shape',
+                        status,
+                    );
+                }
+            })
+            .catch((err) => {
+                console.warn('Failed to fetch /status from backend:', err);
+            });
     }
+
+    refreshStatus();
 }
 
 /**
  * Extension deactivation.
  */
-export function deactivate(): void {
-    // TODO: Implement cleanup
+export async function deactivate(): Promise<void> {
     wsClient?.disconnect();
     feedbackRenderer?.dispose();
     statusBar?.dispose();
@@ -73,7 +98,6 @@ export function deactivate(): void {
  * Initialize all extension components.
  */
 function initializeComponents(context: vscode.ExtensionContext): void {
-    // TODO: Implement component initialization
     const config = vscode.workspace.getConfiguration('eyeTrackingDebugger');
     const host = config.get<string>('backendHost') || 'localhost';
     const port = config.get<number>('websocketPort') || 8765;
@@ -135,6 +159,10 @@ function refreshStatus(): void {
             if (isStatusUpdatePayload(statusPayload)) {
                 statusBar?.setStatus(statusPayload);
                 webviewProvider?.updateStatus(statusPayload);
+
+                webviewProvider?.updateConnectionStatus(
+                    statusPayload.status !== SystemStatus.DISCONNECTED,
+                );
             } else {
                 console.warn(
                     '/status response did not match expected shape',
