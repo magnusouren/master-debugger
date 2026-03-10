@@ -28,7 +28,6 @@ from backend.types.config import FeedbackLayerConfig
 from backend.services.llm_client import LLMClient, create_llm_client, LLMResponse
 from backend.services.logger_service import LoggerService
 from backend.types.feedback import FeedbackItem, FeedbackMetadata, FeedbackPriority, FeedbackResponse, FeedbackType
-from backend.types.user_state import UserStateEstimate
 
 
 @dataclass
@@ -120,8 +119,6 @@ class FeedbackLayer:
     async def generate_feedback(
         self,
         context: CodeContext,
-        user_state: Optional[UserStateEstimate] = None,
-        feedback_types: Optional[List[FeedbackType]] = None,
     ) -> FeedbackResponse:
         """
         The non-cached core. This should be:
@@ -131,7 +128,6 @@ class FeedbackLayer:
         """
         self._logger.system(
             "feedback_generation_started",
-            {"has_user_state": user_state is not None},
             level="DEBUG",
         )
         start = time.time()
@@ -172,7 +168,7 @@ class FeedbackLayer:
                     {"model": self._llm_client.get_model_name()},
                     level="DEBUG",
                 )
-                prompt = self._build_llm_prompt(context, user_state)
+                prompt = self._build_llm_prompt(context)
                 raw = await self._call_llm(prompt)
                 items = self._parse_llm_response(raw, context)
             else:
@@ -239,7 +235,7 @@ class FeedbackLayer:
                 ),
             )
 
-    async def generate_feedback_cached(self, context, user_state=None, feedback_types=None) -> FeedbackResponse:
+    async def generate_feedback_cached(self, context) -> FeedbackResponse:
         """
         Generate feedback with caching.
 
@@ -249,7 +245,7 @@ class FeedbackLayer:
         cache_key = self._compute_cache_key(context)
 
         if not self._config.enable_cache:
-            return await self.generate_feedback(context, user_state, feedback_types)
+            return await self.generate_feedback(context)
 
         cached = self._check_cache(cache_key)
         if cached is not None:
@@ -275,7 +271,7 @@ class FeedbackLayer:
 
         # creator
         try:
-            resp = await self.generate_feedback(context, user_state, feedback_types)
+            resp = await self.generate_feedback(context)
             self._store_in_cache(cache_key, resp)
             fut.set_result(resp)
             return resp
@@ -288,24 +284,14 @@ class FeedbackLayer:
                 if self._inflight.get(cache_key) is fut:
                     self._inflight.pop(cache_key, None)
 
-    def invalidate_cache(self, file_path: Optional[str] = None) -> None:
+    def invalidate_cache(self) -> None:
         """
-        TODO - fix
-        
+        Invalidate the entire cache. 
+        Not in use yet, but can be called on certain events (e.g. file change) to prevent stale feedback.
+    
         """
-        self._cache.clear()
-        
 
-    def get_cache_stats(self) -> Dict[str, Any]:
-        # Prune expired first to keep stats meaningful
-        self._prune_expired_cache()
-        return {
-            "enabled": self._config.enable_cache,
-            "size": len(self._cache),
-            "ttl_seconds": self._config.cache_ttl_seconds,
-            "hits": self._cache_hits,
-            "misses": self._cache_misses,
-        }
+        self._cache.clear()
 
     def is_rate_limited(self) -> bool:
         now = time.time()
@@ -321,9 +307,6 @@ class FeedbackLayer:
             )
         return limited
 
-    def set_feedback_priority_filter(self, min_priority: FeedbackPriority) -> None:
-        self._min_priority = min_priority
-
     # --- Internal methods ---
 
     def _make_request_id(self, context: CodeContext) -> str:
@@ -333,13 +316,7 @@ class FeedbackLayer:
 
     def _get_session_id(self, context: CodeContext) -> str:
         """
-        Docstring for _get_session_id
-        
-        :param self: Object instance
-        :param context: Code context
-        :type context: CodeContext
-        :return: Session ID string
-        :rtype: str
+        Extract session ID from context metadata if available, otherwise return "unknown".
         """
 
         md = context.metadata or {}
@@ -428,7 +405,6 @@ class FeedbackLayer:
     def _build_llm_prompt(
         self,
         context: CodeContext,
-        user_state: Optional["UserStateEstimate"] = None,
     ) -> str:
         def _fmt_pos(p: CodePosition) -> str:
             return f"line {p.line}, col {p.character}"
@@ -495,16 +471,6 @@ class FeedbackLayer:
         # Add line numbers to the full code, marking the cursor line
         numbered_code = self._with_line_numbers(full_code, base_line_one_based, cursor_line_one_based)
         # NOTE - big files may be really expensive to send, a better extraction strategy may be needed in practice (e.g. a focused window around the cursor, or just the visible range)
-        
-        # TODO - give more details about user state for better personalized feedback
-        # Optional user_state snippet (kept generic so it doesn't break if UserStateEstimate changes)
-        user_state_text = "(none)"
-        if user_state is not None:
-            # keep it robust: don't assume exact fields exist
-            try:
-                user_state_text = str(user_state)
-            except Exception:
-                user_state_text = "<unprintable user_state>"
 
         return (
             "You are an expert programming assistant. You will receive VS Code code context.\n"
@@ -554,7 +520,6 @@ class FeedbackLayer:
             f"- cursor_position: {_fmt_pos(cursor)}\n"
             f"- selection: {selection_text}\n"
             f"- visible_range: {visible_text}\n"
-            f"- user_state: {user_state_text}\n\n"
 
             "Diagnostics (DiagnosticInfo.severity is one of: error, warning, info, hint):\n"
             f"{diag_text}\n\n"
