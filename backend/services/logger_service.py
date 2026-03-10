@@ -8,6 +8,7 @@ Provides structured logging with two main categories:
 Supports configurable log levels and thresholds per category.
 """
 import csv
+import math
 from typing import Dict, Any, List, Optional
 from enum import Enum
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ class LogEntry:
     event_type: str
     data: Dict[str, Any]
     category: str  # "experiment" or "system"
+    mode: Optional[str]  # "reactive" or "proactive"
 
 
 class LoggerService:
@@ -45,7 +47,7 @@ class LoggerService:
         self,
         experiment_level: str = "INFO",
         system_level: str = "INFO",
-        max_entries: int = 10000,
+        max_entries: int = math.inf,
     ):
         """
         Initialize the logger service.
@@ -72,6 +74,7 @@ class LoggerService:
         self,
         event_type: str,
         data: Optional[Dict[str, Any]] = None,
+        mode: Optional[str] = None,
         level: str = "INFO",
     ) -> None:
         """
@@ -80,6 +83,7 @@ class LoggerService:
         Args:
             event_type: Type of event (e.g., "feedback_generated", "context_updated").
             data: Event data as dictionary.
+            mode: Operation mode (e.g., "reactive", "proactive").
             level: Log level (DEBUG, INFO, WARNING, ERROR).
         """
         if not self._should_log(level, category="experiment"):
@@ -87,6 +91,7 @@ class LoggerService:
         
         entry = LogEntry(
             timestamp=datetime.now(timezone.utc).timestamp(),
+            mode=mode.upper() if mode else None,
             level=level.upper(),
             event_type=event_type,
             data=data or {},
@@ -122,6 +127,7 @@ class LoggerService:
             event_type=event_type,
             data=data or {},
             category="system",
+            mode=None,
         )
         
         self.system_logs.append(entry)
@@ -233,6 +239,7 @@ class LoggerService:
                 {
                     "timestamp": entry.timestamp,
                     "level": entry.level,
+                    "mode": entry.mode,
                     "event_type": entry.event_type,
                     "data": entry.data,
                 }
@@ -242,7 +249,7 @@ class LoggerService:
             
             with open(filepath, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["timestamp", "level", "event_type", "data"])
+                writer.writerow(["timestamp", "level", "mode", "event_type", "data"])
 
                 for entry in logs_data:
                     dt = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
@@ -251,6 +258,7 @@ class LoggerService:
                     writer.writerow([
                         timestamp_str,
                         entry["level"],
+                        entry["mode"],
                         entry["event_type"],
                         json.dumps(json_safe(entry["data"])),
                     ])
