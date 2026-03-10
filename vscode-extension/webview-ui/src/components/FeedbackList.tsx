@@ -69,7 +69,7 @@ function FeedbackAlertCard({ item, onInteraction }: FeedbackAlertCardProps) {
   return (
     <>
       {!accepted ? (
-        <div className={`feedback-item ${item.feedback_type}`}>
+        <div className="feedback-item">
           <div className="feedback-header">
             <span className="feedback-title">Feedback Available</span>
           </div>
@@ -113,7 +113,7 @@ function FeedbackItemCard({ item, onHighlight, onDismiss, onDone }: FeedbackItem
   };
 
   return (
-    <div className={`feedback-item ${item.feedback_type}`}>
+    <div className="feedback-item">
       <div className="feedback-header">
         <span className="feedback-title">{item.title}</span>
       </div>
