@@ -79,12 +79,7 @@ def create_eye_tracker_adapter(
         )
         logger.system(
             "eye_tracker_adapter_created",
-            {
-                "type": "tobii",
-                "device_id": device_id,
-                "batch_size": batch_size,
-                "flush_interval_ms": flush_interval_ms,
-            },
+            {"type": "tobii"},
             level="INFO"
         )
         
