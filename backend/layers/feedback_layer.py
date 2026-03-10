@@ -17,7 +17,7 @@ import asyncio
 import json
 import time
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import traceback
 from typing import Optional, List, Dict, Any, Tuple
 import uuid
@@ -187,7 +187,11 @@ class FeedbackLayer:
 
             self._logger.system(
                 "feedback_generation_completed",
-                {"num_items": len(items), "generation_time_ms": (time.time() - start) * 1000.0},
+                {
+                    "num_items": len(items),
+                    "generation_time_ms": (time.time() - start) * 1000.0,
+                    "feedback_ids": [item.metadata.feedback_id for item in items],
+                },
                 level="INFO",
             )
 
@@ -356,38 +360,30 @@ class FeedbackLayer:
         raw = json.dumps(key_obj, sort_keys=True, ensure_ascii=False).encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
 
+    
     def _check_cache(self, cache_key: str) -> Optional[FeedbackResponse]:
         self._prune_expired_cache()
         entry = self._cache.get(cache_key)
         if not entry:
             self._cache_misses += 1
-            self._logger.system(
-                "feedback_cache_miss",
-                {"total_misses": self._cache_misses},
-                level="DEBUG",
-            )
             return None
 
         self._cache_hits += 1
-        self._logger.system(
-            "feedback_cache_hit",
-            {"total_hits": self._cache_hits},
-            level="DEBUG",
-        )
         resp = entry.response
 
-        # Mark metadata as cached (if you have that field)
-        try:
-            if getattr(resp, "metadata", None):
-                resp.metadata.cached = True
-        except Exception as e:
-            self._logger.system(
-                "feedback_cache_metadata_error",
-                {"error": str(e)},
-                level="WARNING",
+        copied_items = [
+            replace(
+                item,
+                metadata=replace(item.metadata, cached=True) if item.metadata else None
             )
+            for item in resp.items
+        ]
 
-        return resp
+        return replace(
+            resp,
+            items=copied_items,
+            metadata=replace(resp.metadata, cached=True) if resp.metadata else None,
+        )
 
     def _store_in_cache(self, cache_key: str, response: FeedbackResponse) -> None:
         self._cache[cache_key] = _CacheEntry(response=response, created_at=time.time())
