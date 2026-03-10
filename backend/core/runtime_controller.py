@@ -229,43 +229,36 @@ class RuntimeController:
         """
         old_mode = self._operation_mode
 
-        try:
+        self._operation_mode = mode
+        self._logger.set_experiment_mode(mode.value)
 
-            self._operation_mode = mode
-            self._logger.set_experiment_mode(mode.value)
+        # Keep the stored configuration in sync with the current operation mode
+        if self._config is not None and getattr(self._config, "controller", None) is not None:
+            self._config.controller.operation_mode = mode
+        
+        self._logger.system(
+            "operation_mode_changed",
+            {"new_mode": self._operation_mode.name, "old_mode": old_mode.name},
+            level="INFO",
+        )
 
-            # Keep the stored configuration in sync with the current operation mode
-            if self._config is not None and getattr(self._config, "controller", None) is not None:
-                self._config.controller.operation_mode = mode
-            
-            self._logger.system(
-                "operation_mode_changed",
-                {"new_mode": self._operation_mode.name, "old_mode": old_mode.name},
-                level="INFO",
-            )
+        self._logger.experiment(
+            "operation_mode_changed",
+            {"new_mode": self._operation_mode.name, "old_mode": old_mode.name},
+            level="INFO",
 
-            self._logger.experiment(
-                "operation_mode_changed",
-                {"new_mode": self._operation_mode.name, "old_mode": old_mode.name},
-                level="INFO",
+        )
 
-            )
+        # Reconfigure layers as needed using the updated configuration
+        if self._config is not None:
+            self.configure(self._config)
 
-            # Reconfigure layers as needed using the updated configuration
-            if self._config is not None:
-                self.configure(self._config)
+        # Publish status update
+        self._publish(DomainEvent(
+            event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+            payload=self.get_system_status(),
+        ))
 
-            # Publish status update
-            self._publish(DomainEvent(
-                event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
-                payload=self.get_system_status(),
-            ))
-        except Exception as e:
-            self._logger.system(
-                "operation_mode_change_error",
-                {"error": str(e), "attempted_mode": mode.value},
-                level="ERROR",
-            )
         
     def get_operation_mode(self) -> OperationMode:
         """
