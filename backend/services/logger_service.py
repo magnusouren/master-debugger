@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from backend.api.serialization import json_safe
+from backend.types.feedback import FeedbackItem
 
 
 
@@ -37,6 +38,13 @@ class LogEntry:
     category: str  # "experiment" or "system"
     mode: Optional[str] = None  # e.g., "reactive", "proactive", or "unknown"
 
+@dataclass
+class LogFeedbackItem:
+    """A log entry for generated feedback."""
+    timestamp: float
+    event_type: str
+    feedback_item: Optional[FeedbackItem] = None
+    feedback_id: Optional[str] = None
 
 class LoggerService:
     """
@@ -61,6 +69,7 @@ class LoggerService:
         """
         self.experiment_logs: List[LogEntry] = []
         self.system_logs: List[LogEntry] = []
+        self.feedback_logs: List[LogFeedbackItem] = []
         
         self.experiment_level = LogLevel[experiment_level.upper()]
         self.system_level = LogLevel[system_level.upper()]
@@ -141,6 +150,29 @@ class LoggerService:
         # Rotate if exceeding max entries
         if len(self.system_logs) > self.max_entries:
             self.system_logs = self.system_logs[-self.max_entries:]
+
+    def feedback(
+        self,
+        event_type: str,
+        feedback_item: FeedbackItem,
+    ) -> None:
+        """
+        Log a generated feedback item.
+        
+        Args:
+            feedback_item: The FeedbackItem instance to log.
+        """
+        entry = LogFeedbackItem(
+            timestamp=datetime.now(timezone.utc).timestamp(),
+            event_type=event_type,
+            feedback_id=feedback_item.metadata.feedback_id if feedback_item.metadata else "unknown",
+            feedback_item=feedback_item,
+        )
+        self.feedback_logs.append(entry)
+
+        # Rotate if exceeding max entries        
+        if len(self.feedback_logs) > self.max_entries:
+            self.feedback_logs = self.feedback_logs[-self.max_entries:]
     
     def set_level(self, category: str, level: str) -> None:
         """
@@ -221,6 +253,9 @@ class LoggerService:
         
         if category.lower() in ("system", "all"):
             self.system_logs = []
+
+        if category.lower() in ("feedback", "all"):
+            self.feedback_logs = []
     
     def export_experiment_logs(self, filepath: str) -> bool:
         """
@@ -360,6 +395,72 @@ class LoggerService:
                 )
             )
             return False
+        
+    def export_feedback_logs(self, filepath: str) -> bool:
+        """
+        Export feedback logs to CSV file.
+        
+        Args:
+            filepath: Path to export file.
+            
+        Returns:
+            True if successful.
+        """
+        try:
+            filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
+            filepath = Path(filepath)
+
+            # Ensure parent directories exist
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+
+            logs_data = [
+                {
+                    "timestamp": entry.timestamp,
+                    "event_type": entry.event_type,
+                    "feedback_id": entry.feedback_id,
+                    "feedback_item": entry.feedback_item,
+                }
+                for entry in self.feedback_logs
+            ]
+
+            with open(filepath, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["timestamp", "event_type", "feedback_id", "feedback_item"])
+
+                for entry in logs_data:
+                    dt = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
+                    timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+                    writer.writerow([
+                        timestamp_str,
+                        entry["event_type"],
+                        entry["feedback_id"],
+                        json.dumps(json_safe(entry["feedback_item"] or {})),
+                    ])
+            
+            self._print_log(
+                LogEntry(
+                    timestamp=datetime.now(timezone.utc).timestamp(),
+                    level="INFO",
+                    mode=self.experiment_mode,
+                    event_type="export_feedback_logs",
+                    data={"filepath": filepath, "count": len(logs_data)},
+                    category="system",
+                )
+            )
+            return True
+        except Exception as e:
+            self._print_log(
+                LogEntry(
+                    timestamp=datetime.now(timezone.utc).timestamp(),
+                    level="ERROR",
+                    mode=self.experiment_mode,
+                    event_type="export_feedback_logs_error",
+                    data={"error": str(e)},
+                    category="system",
+                )
+            )
+            return False
 
     
     def get_statistics(self) -> Dict[str, Any]:
@@ -389,6 +490,9 @@ class LoggerService:
                 "by_level": sys_by_level,
                 "level_threshold": self.system_level.name,
             },
+            "feedback": {
+                "total": len(self.feedback_logs),
+            }
         }
     
     # --- Internal Methods ---

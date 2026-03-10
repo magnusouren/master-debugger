@@ -783,6 +783,12 @@ class RuntimeController:
                 feedback_types=None,
             )
 
+            for item in feedback.items:
+                self._logger.feedback(
+                    "feedback_item_generated",
+                    item
+                )
+                
             # Check if this version is still current
             if version != self._context_version:
                 self._logger.system(
@@ -1056,15 +1062,6 @@ class RuntimeController:
         Args:
             features: Computed window features.
         """
-        # Baseline recording (commented out - kept for future use)
-        # if self._baseline_recording:
-        #     self._baseline_features.append(features)
-        #     current_time = asyncio.get_event_loop().time()
-        #     elapsed = current_time - self._baseline_start_time
-        #
-        #     if elapsed >= self._baseline_duration_seconds:
-        #         self._finish_baseline_recording()
-
         if self._operation_mode == OperationMode.REACTIVE:
             # Baseline: observed features -> reactive
             self._reactive_tool.add_features(features)
@@ -1294,6 +1291,8 @@ class RuntimeController:
         self._experiment_is_active = False
 
         self.export_experiment_data()
+        self.export_system_logs()
+        self.export_feedback_logs()
         self._status = SystemStatus.STOPPED
 
         # Stop processing layers and reset state
@@ -1359,6 +1358,44 @@ class RuntimeController:
 
         filepath = f"logs/experiments/experiment_{self._session_id}.csv"
         success = self._logger.export_experiment_logs(filepath)
+        return success
+    
+    def export_system_logs(self) -> bool:
+        """
+        Export system logs to file.
+        
+        Returns:
+            True if export successful.
+        """
+        if self._experiment_id is None or self._participant_id is None:
+            self._logger.system(
+                "export_system_logs_no_experiment",
+                {},
+                level="WARNING",
+            )
+            return False
+
+        filepath = f"logs/system/system_{self._session_id}.csv"
+        success = self._logger.export_system_logs(filepath)
+        return success
+
+    def export_feedback_logs(self) -> bool:
+        """
+        Export feedback logs to file.
+        
+        Returns:
+            True if export successful.
+        """
+        if self._experiment_id is None or self._participant_id is None:
+            self._logger.system(
+                "export_feedback_logs_no_experiment",
+                {},
+                level="WARNING",
+            )
+            return False
+
+        filepath = f"logs/feedback/feedback_{self._session_id}.csv"
+        success = self._logger.export_feedback_logs(filepath)
         return success
 
 
