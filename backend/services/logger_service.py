@@ -43,7 +43,7 @@ class LogFeedbackItem:
     """A log entry for generated feedback."""
     timestamp: float
     event_type: str
-    feedback_item: FeedbackItem = None
+    feedback_item: Optional[FeedbackItem] = None
     feedback_id: Optional[str] = None
 
 class LoggerService:
@@ -169,6 +169,10 @@ class LoggerService:
             feedback_item=feedback_item,
         )
         self.feedback_logs.append(entry)
+
+        # Rotate if exceeding max entries        
+        if len(self.feedback_logs) > self.max_entries:
+            self.feedback_logs = self.feedback_logs[-self.max_entries:]
     
     def set_level(self, category: str, level: str) -> None:
         """
@@ -431,7 +435,7 @@ class LoggerService:
                         timestamp_str,
                         entry["event_type"],
                         entry["feedback_id"],
-                        json.dumps(json_safe(entry["feedback_item"].__dict__ if entry["feedback_item"] else {})),
+                        json.dumps(json_safe(entry["feedback_item"] or {})),
                     ])
             
             self._print_log(

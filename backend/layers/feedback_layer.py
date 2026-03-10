@@ -763,6 +763,17 @@ class FeedbackLayer:
                     dismissible=True,
                     actionable=False,
                     action_label=None,
+                    metadata=self._create_feedback_metadata(
+                        generated_at=time.time(),
+                        generation_time_ms=0.0,
+                        cache_key=self._compute_cache_key(context),
+                        feedback_id=str(uuid.uuid4()),
+                        session_id=self._get_session_id(context),
+                        extra={
+                            "diagnostic_source": getattr(d0, "source", None),
+                            "diagnostic_code": getattr(d0, "code", None),
+                        },
+                    ),
                 )
             ]
 
