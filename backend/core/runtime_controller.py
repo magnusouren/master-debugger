@@ -51,6 +51,7 @@ class RuntimeController:
         
         # Initialize logger first (shared by all layers)
         self._logger = get_logger()
+        self._logger.set_experiment_mode(self._config.controller.operation_mode.value)
         
         # Initialize layers with shared logger
         self._signal_processing = SignalProcessingLayer(
@@ -226,36 +227,46 @@ class RuntimeController:
         Args:
             mode: REACTIVE or PROACTIVE mode.
         """
-        self._operation_mode = mode
+        old_mode = self._operation_mode
 
-        # Keep the stored configuration in sync with the current operation mode
-        if self._config is not None and getattr(self._config, "controller", None) is not None:
-            self._config.controller.operation_mode = mode
+        try:
+
+            self._operation_mode = mode
+            self._logger.set_experiment_mode(mode.value)
+
+            # Keep the stored configuration in sync with the current operation mode
+            if self._config is not None and getattr(self._config, "controller", None) is not None:
+                self._config.controller.operation_mode = mode
+            
+            self._logger.system(
+                "operation_mode_changed",
+                {"new_mode": self._operation_mode.name, "old_mode": old_mode.name},
+                level="INFO",
+            )
+
+            self._logger.experiment(
+                "operation_mode_changed",
+                {"new_mode": self._operation_mode.name, "old_mode": old_mode.name},
+                level="INFO",
+
+            )
+
+            # Reconfigure layers as needed using the updated configuration
+            if self._config is not None:
+                self.configure(self._config)
+
+            # Publish status update
+            self._publish(DomainEvent(
+                event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
+                payload=self.get_system_status(),
+            ))
+        except Exception as e:
+            self._logger.system(
+                "operation_mode_change_error",
+                {"error": str(e), "attempted_mode": mode.value},
+                level="ERROR",
+            )
         
-        self._logger.system(
-            "operation_mode_changed",
-            {"new_mode": self._operation_mode.name},
-            level="INFO",
-        )
-
-        self._logger.experiment(
-            "operation_mode_changed",
-            {"new_mode": self._operation_mode.name},
-            mode=self._operation_mode.value,
-            level="INFO",
-
-        )
-
-        # Reconfigure layers as needed using the updated configuration
-        if self._config is not None:
-            self.configure(self._config)
-
-        # Publish status update
-        self._publish(DomainEvent(
-            event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
-            payload=self.get_system_status(),
-        ))
-    
     def get_operation_mode(self) -> OperationMode:
         """
         Get current operation mode.
@@ -549,7 +560,6 @@ class RuntimeController:
                 "feedback_id": interaction.feedback_id,
                 "action_taken": interaction.interaction_type,
             },
-            mode=self._operation_mode.value,
             level="INFO",
         )
 
@@ -683,7 +693,6 @@ class RuntimeController:
                     "threshold": threshold,
                     "pending_version": self._pending_feedback_version,
                 },
-                mode=self._operation_mode.value,
                 level="INFO",
             )
         return True
@@ -748,7 +757,6 @@ class RuntimeController:
                 "item_ids": [item.metadata.feedback_id for item in feedback.items],
             },
             level="INFO",
-            mode=self._operation_mode.value,
         )
 
         return True
@@ -910,7 +918,6 @@ class RuntimeController:
                 {
                     "duration_seconds": duration_seconds, 
                 },
-                mode=self._operation_mode.value,
                 level="INFO"
             )
             await asyncio.sleep(duration_seconds)
@@ -938,7 +945,6 @@ class RuntimeController:
                         "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
                                    for k, v in baseline.metrics.items()},
                     },
-                    mode=self._operation_mode.value,
                     level="INFO"
                 )
 
@@ -1124,7 +1130,6 @@ class RuntimeController:
                 "model_type": estimate.model_type,
                 "metadata": estimate.metadata,
             },
-            mode=self._operation_mode.value,
             level="INFO",
         )
 
@@ -1187,7 +1192,6 @@ class RuntimeController:
                 "duration_seconds": self._baseline_duration_seconds,
                 "baseline_averages": baseline_averages,
             },
-            mode=self._operation_mode.value,
             level="INFO",
         )
 
@@ -1247,7 +1251,6 @@ class RuntimeController:
                 "session_id": self._session_id,
                 "mode": self._operation_mode.value,
             },
-            mode=self._operation_mode.value,
             level="INFO",
         )
 
@@ -1291,7 +1294,6 @@ class RuntimeController:
                 "participant_id": self._participant_id,
                 "session_id": self._session_id
             },
-            mode=self._operation_mode.value,
             level="INFO",
         )
         
