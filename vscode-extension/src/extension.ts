@@ -592,7 +592,11 @@ async function handleFeedbackInteraction(
     }
 
     if (feedbackInteraction.interaction_type === 'dismissed') {
-        feedbackRenderer?.dismissFeedback(feedbackInteraction.feedback_id);
+        feedbackRenderer?.removeHighlightById(feedbackInteraction.feedback_id);
+    }
+
+    if (feedbackInteraction.interaction_type === 'done') {
+        feedbackRenderer?.removeHighlightById(feedbackInteraction.feedback_id);
     }
 
     try {
