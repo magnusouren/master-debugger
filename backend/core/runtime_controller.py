@@ -241,7 +241,9 @@ class RuntimeController:
         self._logger.experiment(
             "operation_mode_changed",
             {"new_mode": self._operation_mode.name},
+            mode=self._operation_mode.value,
             level="INFO",
+
         )
 
         # Reconfigure layers as needed using the updated configuration
@@ -455,18 +457,6 @@ class RuntimeController:
         self._context_version += 1
         current_version = self._context_version
 
-        self._logger.experiment(
-            "context_update_received",
-            {
-                "metadata": merged_meta,
-                "experiment_id": self._experiment_id,
-                "participant_id": self._participant_id,
-                "session_id": self._session_id,
-                "context_version": current_version,
-            },
-            level="DEBUG",
-        )
-
         self._logger.system(
             "context_update_received",
             {
@@ -559,6 +549,7 @@ class RuntimeController:
                 "feedback_id": interaction.feedback_id,
                 "action_taken": interaction.interaction_type,
             },
+            mode=self._operation_mode.value,
             level="INFO",
         )
 
@@ -692,6 +683,7 @@ class RuntimeController:
                     "threshold": threshold,
                     "pending_version": self._pending_feedback_version,
                 },
+                mode=self._operation_mode.value,
                 level="INFO",
             )
         return True
@@ -756,6 +748,7 @@ class RuntimeController:
                 "item_ids": [item.metadata.feedback_id for item in feedback.items],
             },
             level="INFO",
+            mode=self._operation_mode.value,
         )
 
         return True
@@ -917,6 +910,7 @@ class RuntimeController:
                 {
                     "duration_seconds": duration_seconds, 
                 },
+                mode=self._operation_mode.value,
                 level="INFO"
             )
             await asyncio.sleep(duration_seconds)
@@ -944,6 +938,7 @@ class RuntimeController:
                         "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
                                    for k, v in baseline.metrics.items()},
                     },
+                    mode=self._operation_mode.value,
                     level="INFO"
                 )
 
@@ -1129,6 +1124,7 @@ class RuntimeController:
                 "model_type": estimate.model_type,
                 "metadata": estimate.metadata,
             },
+            mode=self._operation_mode.value,
             level="INFO",
         )
 
@@ -1191,6 +1187,7 @@ class RuntimeController:
                 "duration_seconds": self._baseline_duration_seconds,
                 "baseline_averages": baseline_averages,
             },
+            mode=self._operation_mode.value,
             level="INFO",
         )
 
@@ -1236,7 +1233,8 @@ class RuntimeController:
             {
                 "experiment_id": self._experiment_id,
                 "participant_id": self._participant_id,
-                "session_id": self._session_id
+                "session_id": self._session_id,
+                "mode": self._operation_mode.value,
             },
             level="INFO",
         )
@@ -1246,8 +1244,10 @@ class RuntimeController:
             {
                 "experiment_id": self._experiment_id,
                 "participant_id": self._participant_id,
-                "session_id": self._session_id
+                "session_id": self._session_id,
+                "mode": self._operation_mode.value,
             },
+            mode=self._operation_mode.value,
             level="INFO",
         )
 
@@ -1291,6 +1291,7 @@ class RuntimeController:
                 "participant_id": self._participant_id,
                 "session_id": self._session_id
             },
+            mode=self._operation_mode.value,
             level="INFO",
         )
         
