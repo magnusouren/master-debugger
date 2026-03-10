@@ -51,6 +51,7 @@ class RuntimeController:
         
         # Initialize logger first (shared by all layers)
         self._logger = get_logger()
+        self._logger.set_experiment_mode(self._config.controller.operation_mode.value)
         
         # Initialize layers with shared logger
         self._signal_processing = SignalProcessingLayer(
@@ -226,7 +227,10 @@ class RuntimeController:
         Args:
             mode: REACTIVE or PROACTIVE mode.
         """
+        old_mode = self._operation_mode
+
         self._operation_mode = mode
+        self._logger.set_experiment_mode(mode.value)
 
         # Keep the stored configuration in sync with the current operation mode
         if self._config is not None and getattr(self._config, "controller", None) is not None:
@@ -234,14 +238,15 @@ class RuntimeController:
         
         self._logger.system(
             "operation_mode_changed",
-            {"new_mode": self._operation_mode.name},
+            {"new_mode": self._operation_mode.name, "old_mode": old_mode.name},
             level="INFO",
         )
 
         self._logger.experiment(
             "operation_mode_changed",
-            {"new_mode": self._operation_mode.name},
+            {"new_mode": self._operation_mode.name, "old_mode": old_mode.name},
             level="INFO",
+
         )
 
         # Reconfigure layers as needed using the updated configuration
@@ -253,7 +258,8 @@ class RuntimeController:
             event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
             payload=self.get_system_status(),
         ))
-    
+
+        
     def get_operation_mode(self) -> OperationMode:
         """
         Get current operation mode.
@@ -454,18 +460,6 @@ class RuntimeController:
         # Increment context version to track this update
         self._context_version += 1
         current_version = self._context_version
-
-        self._logger.experiment(
-            "context_update_received",
-            {
-                "metadata": merged_meta,
-                "experiment_id": self._experiment_id,
-                "participant_id": self._participant_id,
-                "session_id": self._session_id,
-                "context_version": current_version,
-            },
-            level="DEBUG",
-        )
 
         self._logger.system(
             "context_update_received",
@@ -1236,7 +1230,8 @@ class RuntimeController:
             {
                 "experiment_id": self._experiment_id,
                 "participant_id": self._participant_id,
-                "session_id": self._session_id
+                "session_id": self._session_id,
+                "mode": self._operation_mode.value,
             },
             level="INFO",
         )
@@ -1246,7 +1241,8 @@ class RuntimeController:
             {
                 "experiment_id": self._experiment_id,
                 "participant_id": self._participant_id,
-                "session_id": self._session_id
+                "session_id": self._session_id,
+                "mode": self._operation_mode.value,
             },
             level="INFO",
         )

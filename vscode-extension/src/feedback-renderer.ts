@@ -31,7 +31,7 @@ export class FeedbackRenderer {
             DISMISS_FEEDBACK_COMMAND,
             (feedbackId: string) => (
                 this.recordInteraction(feedbackId, 'dismissed'),
-                this.dismissFeedback(feedbackId)
+                this.removeHighlightById(feedbackId)
             ),
         );
         context.subscriptions.push(dismissCommand);
@@ -78,7 +78,7 @@ export class FeedbackRenderer {
     /**
      * Clear feedback by ID.
      */
-    dismissFeedback(feedbackId: string): void {
+    removeHighlightById(feedbackId: string): void {
         this.activeFeedback.delete(feedbackId);
         const diagnostics = this.diagnosticCollection.get(
             vscode.window.activeTextEditor?.document.uri ||
