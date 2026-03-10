@@ -431,10 +431,12 @@ class LoggerService:
         reset = "\033[0m"
         color = colors.get(entry.level, "")
 
+        mode = entry.mode.upper() if entry.mode else "UNKNOWN"
+
         data_obj = json_safe(entry.data) if entry.data else None
         data_str = json.dumps(data_obj) if data_obj else ""
 
-        line = f"{color}[{timestamp}] [{entry.level}] {entry.event_type}{reset} {data_str}"
+        line = f"{color}[{timestamp}] [{entry.level}] [{mode}] {entry.event_type}{reset} {data_str}"
         
         print(line, flush=True)
 
