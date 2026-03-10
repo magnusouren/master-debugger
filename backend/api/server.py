@@ -304,6 +304,66 @@ class Server:
             except Exception as e:
                 return {"status": "error", "error": str(e)}
 
+        async def handle_set_cooldown(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            cooldown_seconds = request_data.get("json", {}).get("cooldown_seconds", None)
+            
+            if cooldown_seconds is None:
+                return {"status": "error", "error": "cooldown_seconds is required"}
+            
+            try:
+                cooldown_seconds = float(cooldown_seconds)
+                if cooldown_seconds < 0:
+                    return {"status": "error", "error": "cooldown_seconds must be non-negative"}
+                
+                self._controller.set_feedback_cooldown(cooldown_seconds)
+                return {"status": "cooldown_set", "cooldown_seconds": cooldown_seconds}
+            except (ValueError, TypeError) as e:
+                return {"status": "error", "error": f"Invalid cooldown_seconds: {e}"}    
+
+        async def handle_start_baseline(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            participant_id = request_data.get("json", {}).get("participant_id", None)
+            if not participant_id:
+                return {"status": "error", "error": "participant_id is required"}
+
+            try:
+                self._controller.start_baseline_recording(participant_id)
+                return {"status": "baseline_recording_started", "participant_id": participant_id}
+            except Exception as e:
+                return {"status": "error", "error": str(e)}
+
+        async def handle_stop_baseline(request_data: Dict[str, Any]) -> Dict[str, Any]:
+            participant_id = request_data.get("json", {}).get("participant_id", None)
+            if not participant_id:
+                return {"status": "error", "error": "participant_id is required"}
+
+            try:
+                baseline = self._controller.stop_baseline_recording(participant_id)
+                if baseline:
+                    return {
+                        "status": "baseline_recording_completed",
+                        "participant_id": participant_id,
+                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
+                                   for k, v in baseline.metrics.items()},
+                    }
+                else:
+                    return {"status": "error", "error": "Baseline recording failed - insufficient data"}
+            except Exception as e:
+                return {"status": "error", "error": str(e)}
+
+        async def handle_clear_baseline(_: Dict[str, Any]) -> Dict[str, Any]:
+            try:
+                self._controller.clear_baseline()
+                return {"status": "baseline_cleared"}
+            except Exception as e:
+                return {"status": "error", "error": str(e)}
+
+        async def handle_baseline_status(_: Dict[str, Any]) -> Dict[str, Any]:
+            try:
+                has_baseline = self._controller.has_baseline()
+                return {"status": "ok", "has_baseline": has_baseline}
+            except Exception as e:
+                return {"status": "error", "error": str(e)}
+        
         # ---- Register Routes ----
 
         self._rest_api.register_route(
@@ -354,73 +414,11 @@ class Server:
             handle_set_mode,
         )
 
-        def handle_set_cooldown(request_data: Dict[str, Any]) -> Dict[str, Any]:
-            cooldown_seconds = request_data.get("json", {}).get("cooldown_seconds", None)
-            
-            if cooldown_seconds is None:
-                return {"status": "error", "error": "cooldown_seconds is required"}
-            
-            try:
-                cooldown_seconds = float(cooldown_seconds)
-                if cooldown_seconds < 0:
-                    return {"status": "error", "error": "cooldown_seconds must be non-negative"}
-                
-                self._controller.set_feedback_cooldown(cooldown_seconds)
-                return {"status": "cooldown_set", "cooldown_seconds": cooldown_seconds}
-            except (ValueError, TypeError) as e:
-                return {"status": "error", "error": f"Invalid cooldown_seconds: {e}"}
-
         self._rest_api.register_route(
             "/cooldown",
             HttpMethod.PUT,
             handle_set_cooldown,
         )
-
-        # ---- Baseline calibration routes ----
-
-        def handle_start_baseline(request_data: Dict[str, Any]) -> Dict[str, Any]:
-            participant_id = request_data.get("json", {}).get("participant_id", None)
-            if not participant_id:
-                return {"status": "error", "error": "participant_id is required"}
-
-            try:
-                self._controller.start_baseline_recording(participant_id)
-                return {"status": "baseline_recording_started", "participant_id": participant_id}
-            except Exception as e:
-                return {"status": "error", "error": str(e)}
-
-        def handle_stop_baseline(request_data: Dict[str, Any]) -> Dict[str, Any]:
-            participant_id = request_data.get("json", {}).get("participant_id", None)
-            if not participant_id:
-                return {"status": "error", "error": "participant_id is required"}
-
-            try:
-                baseline = self._controller.stop_baseline_recording(participant_id)
-                if baseline:
-                    return {
-                        "status": "baseline_recording_completed",
-                        "participant_id": participant_id,
-                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
-                                   for k, v in baseline.metrics.items()},
-                    }
-                else:
-                    return {"status": "error", "error": "Baseline recording failed - insufficient data"}
-            except Exception as e:
-                return {"status": "error", "error": str(e)}
-
-        def handle_clear_baseline(_: Dict[str, Any]) -> Dict[str, Any]:
-            try:
-                self._controller.clear_baseline()
-                return {"status": "baseline_cleared"}
-            except Exception as e:
-                return {"status": "error", "error": str(e)}
-
-        def handle_baseline_status(_: Dict[str, Any]) -> Dict[str, Any]:
-            try:
-                has_baseline = self._controller.has_baseline()
-                return {"status": "ok", "has_baseline": has_baseline}
-            except Exception as e:
-                return {"status": "error", "error": str(e)}
 
         self._rest_api.register_route(
             "/baseline/start",

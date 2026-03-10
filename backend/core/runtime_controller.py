@@ -537,6 +537,7 @@ class RuntimeController:
             "rejected": "feedback_rejected_by_user",
             "highlighted": "feedback_highlighted_in_code",
             "dismissed": "feedback_dismissed_by_user",
+            "done": "feedback_marked_done_by_user",
         }
         
         category_msg = category_map.get(
@@ -549,7 +550,6 @@ class RuntimeController:
             {
                 "feedback_id": interaction.feedback_id,
                 "action_taken": interaction.interaction_type,
-                "timestamp": interaction.timestamp,
             },
             level="INFO",
         )
@@ -558,7 +558,6 @@ class RuntimeController:
             {
                 "feedback_id": interaction.feedback_id,
                 "action_taken": interaction.interaction_type,
-                "timestamp": interaction.timestamp,
             },
             level="INFO",
         )

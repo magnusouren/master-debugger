@@ -60,7 +60,8 @@ export type InteractionType =
   | "rejected" // User rejected seeing the feedback
   // Stage 2: After accepting
   | "highlighted" // User clicked to highlight in code
-  | "dismissed"; // User dismissed the shown feedback
+  | "dismissed" // User dismissed the shown feedback
+  | "done"; // User marked feedback as done
 
 export interface SystemStatus {
   status:

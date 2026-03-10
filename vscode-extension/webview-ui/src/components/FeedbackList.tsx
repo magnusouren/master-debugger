@@ -62,6 +62,10 @@ function FeedbackAlertCard({ item, onInteraction }: FeedbackAlertCardProps) {
     onInteraction("dismissed");
   };
 
+  const handleDone = () => {
+    onInteraction("done");
+  };
+
   return (
     <>
       {!accepted ? (
@@ -86,6 +90,7 @@ function FeedbackAlertCard({ item, onInteraction }: FeedbackAlertCardProps) {
           item={item}
           onHighlight={handleHighlight}
           onDismiss={handleDismiss}
+          onDone={handleDone}
         />
       )}
     </>
@@ -96,9 +101,17 @@ interface FeedbackItemCardProps {
   item: FeedbackItem;
   onHighlight: () => void;
   onDismiss: () => void;
+  onDone: () => void;
 }
 
-function FeedbackItemCard({ item, onHighlight, onDismiss }: FeedbackItemCardProps) {
+function FeedbackItemCard({ item, onHighlight, onDismiss, onDone }: FeedbackItemCardProps) {
+  const [highlighted, setHighlighted] = useState(false);
+
+  const handleHighlight = () => {
+    setHighlighted(true);
+    onHighlight();
+  };
+
   return (
     <div className={`feedback-item ${item.feedback_type}`}>
       <div className="feedback-header">
@@ -106,9 +119,13 @@ function FeedbackItemCard({ item, onHighlight, onDismiss }: FeedbackItemCardProp
       </div>
       <p className="feedback-message">{item.message}</p>
       <div className="feedback-actions">
-        {item.code_range && item.actionable && (
-          <button className="feedback-action-btn" onClick={onHighlight}>
+        {item.code_range && item.actionable && !highlighted ? (
+          <button className="feedback-action-btn" onClick={handleHighlight}>
             Show in Code
+          </button>
+        ) : (
+          <button className="feedback-action-btn" onClick={onDone}>
+            Done
           </button>
         )}
         {item.dismissible && (
