@@ -59,7 +59,7 @@ export function ExperimentIDs({
           <div className="experiment-setting">
             <label htmlFor="participant-id-input">Participant ID:</label>
             <input
-              type="text"
+              type="password"
               id="participant-id-input"
               placeholder="Enter participant ID"
               className="text-input"
