@@ -305,14 +305,7 @@ class RuntimeController:
             ok = await self._eye_tracker_adapter.connect(device_id=device_id)
             self._eye_tracker_connected = ok
             
-            if ok:
-                device_info = self._eye_tracker_adapter.get_device_info()
-                self._logger.system(
-                    "eye_tracker_connected",
-                    device_info,
-                    level="INFO"
-                )
-                
+            if ok:                
                 # Publish status update
                 self._publish(DomainEvent(
                     event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
