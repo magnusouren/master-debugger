@@ -169,7 +169,7 @@ class RuntimeController:
         self._logger.system("runtime_controller_shutdown", {"final_stats": self._stats}, level="INFO")
 
         if self._experiment_is_active:
-            self.end_experiment()
+            await self.end_experiment()
         
         self._status = SystemStatus.STOPPED
 
