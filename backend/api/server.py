@@ -238,20 +238,20 @@ class Server:
         """Set up REST API routes with controller handlers."""
 
         # ---- Handlers ----
-        def handle_start_experiment(request_data: Dict[str, Any]) -> Dict[str, Any]:
+        async def handle_start_experiment(request_data: Dict[str, Any]) -> Dict[str, Any]:
             try:    
                 experiment_id = request_data.get("json", {}).get("experiment_id", None)
                 participant_id = request_data.get("json", {}).get("participant_id", None)
 
-                status_msg = self._controller.start_experiment(experiment_id=experiment_id, participant_id=participant_id)
+                status_msg = await self._controller.start_experiment(experiment_id=experiment_id, participant_id=participant_id)
                 return json_safe({"status": status_msg})
 
             except Exception as error:
                 return {"status": "error", "error": str(error)}
             
-        def handle_end_experiment(_: Dict[str, Any]) -> Dict[str, Any]:
+        async def handle_end_experiment(_: Dict[str, Any]) -> Dict[str, Any]:
             try:
-                status_msg = self._controller.end_experiment()
+                status_msg = await self._controller.end_experiment()
                 return json_safe({"status": status_msg})
             except Exception as error:
                 return {"status": "error", "error": str(error)}

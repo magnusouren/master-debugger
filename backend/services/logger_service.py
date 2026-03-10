@@ -191,72 +191,6 @@ class LoggerService:
         else:
             raise ValueError(f"Unknown category: {category}")
     
-    def get_experiment_logs(
-        self,
-        event_type: Optional[str] = None,
-        level: Optional[str] = None,
-    ) -> List[LogEntry]:
-        """
-        Retrieve experiment logs with optional filtering.
-        
-        Args:
-            event_type: Filter by event type.
-            level: Filter by log level.
-            
-        Returns:
-            List of matching log entries.
-        """
-        logs = self.experiment_logs
-        
-        if event_type:
-            logs = [l for l in logs if l.event_type == event_type]
-        
-        if level:
-            logs = [l for l in logs if l.level == level.upper()]
-        
-        return logs
-    
-    def get_system_logs(
-        self,
-        event_type: Optional[str] = None,
-        level: Optional[str] = None,
-    ) -> List[LogEntry]:
-        """
-        Retrieve system logs with optional filtering.
-        
-        Args:
-            event_type: Filter by event type.
-            level: Filter by log level.
-            
-        Returns:
-            List of matching log entries.
-        """
-        logs = self.system_logs
-        
-        if event_type:
-            logs = [l for l in logs if l.event_type == event_type]
-        
-        if level:
-            logs = [l for l in logs if l.level == level.upper()]
-        
-        return logs
-    
-    def clear_logs(self, category: str = "all") -> None:
-        """
-        Clear logs.
-        
-        Args:
-            category: "experiment", "system", or "all".
-        """
-        if category.lower() in ("experiment", "all"):
-            self.experiment_logs = []
-        
-        if category.lower() in ("system", "all"):
-            self.system_logs = []
-
-        if category.lower() in ("feedback", "all"):
-            self.feedback_logs = []
-    
     def export_experiment_logs(self, filepath: str) -> bool:
         """
         Export experiment logs to CSV file.
@@ -308,6 +242,7 @@ class LoggerService:
                     timestamp=datetime.now(timezone.utc).timestamp(),
                     level="INFO",
                     event_type="export_experiment_logs",
+                    mode=self.experiment_mode,
                     data={"filepath": filepath, "count": len(logs_data)},
                     category="system",
                 )
@@ -461,39 +396,6 @@ class LoggerService:
                 )
             )
             return False
-
-    
-    def get_statistics(self) -> Dict[str, Any]:
-        """
-        Get logging statistics.
-        
-        Returns:
-            Dictionary with log counts and levels.
-        """
-        exp_by_level = {}
-        sys_by_level = {}
-        
-        for entry in self.experiment_logs:
-            exp_by_level[entry.level] = exp_by_level.get(entry.level, 0) + 1
-        
-        for entry in self.system_logs:
-            sys_by_level[entry.level] = sys_by_level.get(entry.level, 0) + 1
-        
-        return {
-            "experiment": {
-                "total": len(self.experiment_logs),
-                "by_level": exp_by_level,
-                "level_threshold": self.experiment_level.name,
-            },
-            "system": {
-                "total": len(self.system_logs),
-                "by_level": sys_by_level,
-                "level_threshold": self.system_level.name,
-            },
-            "feedback": {
-                "total": len(self.feedback_logs),
-            }
-        }
     
     # --- Internal Methods ---
     

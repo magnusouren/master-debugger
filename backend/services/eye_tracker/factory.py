@@ -79,7 +79,7 @@ def create_eye_tracker_adapter(
         )
         logger.system(
             "eye_tracker_adapter_created",
-            {"type": "tobii_pro"},
+            {"type": "tobii"},
             level="INFO"
         )
         
