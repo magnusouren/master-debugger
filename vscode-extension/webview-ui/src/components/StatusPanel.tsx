@@ -47,7 +47,7 @@ export function StatusPanel({ status }: StatusPanelProps) {
                     <span className="value">{status.experiment_id || "-"}</span>
 
                     <span className="label">Participant ID</span>
-                    <span className="value">{status.participant_id || "-"}</span>
+                    <span className="value">{status.participant_id ? "Configured" : "-"}</span>
 
 
                     <span className="label">Cooldown</span>
