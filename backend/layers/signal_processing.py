@@ -275,14 +275,7 @@ class SignalProcessingLayer:
             features: The WindowFeatures to pass to callbacks.
         """
         for callback in self._output_callbacks:
-            try:
-                callback(features)
-            except Exception as e:
-                self._logger.system(
-                    "signal_processing_callback_error",
-                    {"error": str(e)},
-                    level="ERROR"
-                )
+            callback(features)
     
     # --- Internal methods ---
     
