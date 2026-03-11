@@ -57,32 +57,22 @@ export async function activate(
     }
 
     if (config.get<boolean>('autoConnectEyeTracker')) {
-        await fetchStatus(host, port)
-            .then((status) => {
-                if (isStatusUpdatePayload(status)) {
-                    if (status.eye_tracker_model) {
-                        console.log(
-                            'Eye tracker already connected according to status',
-                        );
-                    } else {
-                        console.log(
-                            'Auto-connecting to eye tracker as per configuration',
-                        );
-                        connectToEyeTracker();
-                    }
-                } else {
-                    console.warn(
-                        '/status response did not match expected shape',
-                        status,
-                    );
-                }
-            })
-            .catch((err) => {
-                console.warn('Failed to fetch /status from backend:', err);
-            });
+        try {
+            await fetchStatus(host, port);
+            const status = await fetchStatus(host, port);
+
+            if (isStatusUpdatePayload(status) && !status.eye_tracker_model) {
+                await connectToEyeTracker();
+            }
+        } catch (error) {
+            vscode.window.showWarningMessage(
+                'Could not connect to backend to check eye tracker status for auto-connect: ' +
+                    error,
+            );
+        }
     }
 
-    refreshStatus();
+    await refreshStatus();
 }
 
 /**
@@ -152,27 +142,23 @@ function initializeComponents(context: vscode.ExtensionContext): void {
     setupMessageHandlers();
 }
 
-function refreshStatus(): void {
+async function refreshStatus(): Promise<void> {
     // Fetch system status from REST API and update status bar
-    fetchStatus(host, port)
-        .then((statusPayload) => {
-            if (isStatusUpdatePayload(statusPayload)) {
-                statusBar?.setStatus(statusPayload);
-                webviewProvider?.updateStatus(statusPayload);
-
-                webviewProvider?.updateConnectionStatus(
-                    statusPayload.status !== SystemStatus.DISCONNECTED,
-                );
-            } else {
-                console.warn(
-                    '/status response did not match expected shape',
-                    statusPayload,
-                );
-            }
-        })
-        .catch((err) => {
-            console.warn('Failed to fetch /status from backend:', err);
-        });
+    try {
+        const statusPayload = await fetchStatus(host, port);
+        if (isStatusUpdatePayload(statusPayload)) {
+            statusBar?.setStatus(statusPayload);
+            webviewProvider?.updateStatus(statusPayload);
+        } else {
+            console.warn(
+                '/status response did not match expected shape',
+                statusPayload,
+            );
+        }
+    } catch (error) {
+        console.error('Failed to fetch status from backend:', error);
+        statusBar?.setConnected(false);
+    }
 }
 
 /**
