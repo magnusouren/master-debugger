@@ -18,8 +18,6 @@ from pathlib import Path
 from backend.api.serialization import json_safe
 from backend.types.feedback import FeedbackItem
 
-
-
 class LogLevel(Enum):
     """Log level hierarchy (ascending verbosity)."""
     ERROR = 4
@@ -36,7 +34,7 @@ class LogEntry:
     event_type: str
     data: Dict[str, Any]
     category: str  # "experiment" or "system"
-    mode: Optional[str] = None  # e.g., "reactive", "proactive", or "unknown"
+    mode: Optional[str] = None
 
 @dataclass
 class LogFeedbackItem:
@@ -56,7 +54,7 @@ class LoggerService:
         experiment_level: str = "INFO",
         system_level: str = "INFO",
         max_entries: int = 100000,
-        experiment_mode: str = "unknown",
+        experiment_mode: str = None,
     ):
         """
         Initialize the logger service.
@@ -79,10 +77,8 @@ class LoggerService:
 
     def set_experiment_mode(self, mode: str) -> None:
         """
-        Set the operation mode for logging.
+        Set the operation mode, used for correct logging.
         
-        Args:
-            mode: Operation mode (e.g., "reactive", "proactive").
         """
         self.experiment_mode = mode
     
@@ -95,10 +91,6 @@ class LoggerService:
         """
         Log an experiment event.
         
-        Args:
-            event_type: Type of event (e.g., "feedback_generated", "context_updated").
-            data: Event data as dictionary.
-            level: Log level (DEBUG, INFO, WARNING, ERROR).
         """
         if not self._should_log(level, category="experiment"):
             return
