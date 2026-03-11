@@ -72,6 +72,15 @@ export class FeedbackRenderer {
         const item = this.activeFeedback.get(feedbackId);
         if (!item) return;
 
+        const editor = vscode.window.activeTextEditor;
+        if (editor && item.code_range) {
+            const range = this.convertRange(item.code_range, editor.document);
+            editor.revealRange(
+                range,
+                vscode.TextEditorRevealType.InCenterIfOutsideViewport,
+            );
+        }
+
         this.showAsDiagnostic(item);
     }
 
