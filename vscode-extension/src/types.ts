@@ -167,7 +167,7 @@ export interface WebSocketMessage {
 export interface FeedbackDeliveryPayload {
     items: FeedbackItem[];
     request_id?: string;
-    triggered_by: OperationMode;
+    triggered_by: string; // e.g. "context_update", "manual_trigger", etc.
     user_state_score?: number;
 }
 

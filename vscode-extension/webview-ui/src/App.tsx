@@ -31,7 +31,7 @@ type ExtensionMessage = ConnectionStatusMessage | StatusUpdateMessage | Feedback
 
 export function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
+  const isConnected = status ? (status.status !== "disconnected") : false;
   const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
 
   // Handle messages from the extension
@@ -40,7 +40,6 @@ export function App() {
 
     switch (message.type) {
       case "connectionStatus":
-        setIsConnected(message.payload.connected);
         break;
       case "statusUpdate":
         setStatus(message.payload);
