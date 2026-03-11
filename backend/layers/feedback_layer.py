@@ -473,8 +473,8 @@ class FeedbackLayer:
         # NOTE - big files may be really expensive to send, a better extraction strategy may be needed in practice (e.g. a focused window around the cursor, or just the visible range)
 
         return (
-            "You are an expert programming assistant. You will receive VS Code code context.\n"
-            "Your task: generate concise, actionable feedback items focused on the most likely issue near the cursor.\n\n"
+            "You are an expert programming assistant. You will receive VS Code code context and generate actionable feedback on logical bugs you find.\n"
+            "Your task: generate concise, actionable feedback items near the cursor position.\n\n"
 
             "Return ONLY valid JSON (no markdown, no extra keys) with exactly this schema:\n"
             "{\n"
@@ -499,17 +499,17 @@ class FeedbackLayer:
             "Constraints:\n"
             f"- max items: {self._config.max_feedback_items}\n"
             f"- max message length per item: {self._config.max_message_length}\n"
-            "- Focus on the most likely issue near the cursor.\n"
+            "- provide feedback on logical bugs.\n"
             "- If diagnostics exist, prioritize them.\n"
             "- Do NOT invent errors not supported by code/diagnostics.\n"
             "- Prefer specific edits (what/where/how) over generic advice.\n\n"
 
             "IMPORTANT - Line Number Usage:\n"
             "- Each code line is prefixed like:     L000123| <code>\n"
-            "- The cursor line is marked with >>> prefix: >>> L000042| <code>\n"
             "- VS Code positions are 0-based. Therefore, convert the prefix number L to code_range line by: line = L - 1.\n"
             "- Set code_range.start.line and code_range.end.line using that conversion.\n"
             "- If you are unsure about exact column positions, set start.character = 0 and end.character = 0.\n"
+            "- The cursor line is marked with >>> L000042| <code>\n"
             "- Example: '>>> L000042| def foo():' => code_range.start.line = 41 (this is where the cursor is).\n\n"
 
             "Context:\n"
