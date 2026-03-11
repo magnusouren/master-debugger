@@ -474,7 +474,7 @@ class FeedbackLayer:
 
         return (
             "You are an expert programming assistant. You will receive VS Code code context and generate actionable feedback on logical bugs you find.\n"
-            "Your task: generate concise, actionable feedback items near the cursor position .\n\n"
+            "Your task: generate concise, actionable feedback items near the cursor position.\n\n"
 
             "Return ONLY valid JSON (no markdown, no extra keys) with exactly this schema:\n"
             "{\n"
@@ -499,10 +499,10 @@ class FeedbackLayer:
             "Constraints:\n"
             f"- max items: {self._config.max_feedback_items}\n"
             f"- max message length per item: {self._config.max_message_length}\n"
-            f"- provide feedback on logical bugs.\n"
-            f"- If diagnostics exist, prioritize them.\n"
-            f"- Do NOT invent errors not supported by code/diagnostics.\n"
-            f"- Prefer specific edits (what/where/how) over generic advice.\n\n"
+            "- provide feedback on logical bugs.\n"
+            "- If diagnostics exist, prioritize them.\n"
+            "- Do NOT invent errors not supported by code/diagnostics.\n"
+            "- Prefer specific edits (what/where/how) over generic advice.\n\n"
 
             "IMPORTANT - Line Number Usage:\n"
             "- Each code line is prefixed like:     L000123| <code>\n"
