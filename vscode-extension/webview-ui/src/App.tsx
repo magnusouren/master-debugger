@@ -30,8 +30,8 @@ interface ClearFeedbackMessage {
 type ExtensionMessage = ConnectionStatusMessage | StatusUpdateMessage | FeedbackUpdateMessage | ClearFeedbackMessage;
 
 export function App() {
-  const [isConnected, setIsConnected] = useState(false);
   const [status, setStatus] = useState<SystemStatus | null>(null);
+  const isConnected = status ? (status.status !== "disconnected") : false;
   const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
 
   // Handle messages from the extension
@@ -40,7 +40,6 @@ export function App() {
 
     switch (message.type) {
       case "connectionStatus":
-        setIsConnected(message.payload.connected);
         break;
       case "statusUpdate":
         setStatus(message.payload);

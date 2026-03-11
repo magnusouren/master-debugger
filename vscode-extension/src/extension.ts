@@ -37,7 +37,9 @@ const port = config.get<number>('apiPort') || 8080;
 /**
  * Extension activation.
  */
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(
+    context: vscode.ExtensionContext,
+): Promise<void> {
     console.log('Eye Tracking Debugger extension is now active');
 
     // Initialize components
@@ -51,19 +53,32 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Auto-connect if configured
     if (config.get<boolean>('autoConnectBackend')) {
-        connectToBackend();
+        await connectToBackend();
     }
 
     if (config.get<boolean>('autoConnectEyeTracker')) {
-        connectToEyeTracker();
+        try {
+            await fetchStatus(host, port);
+            const status = await fetchStatus(host, port);
+
+            if (isStatusUpdatePayload(status) && !status.eye_tracker_model) {
+                await connectToEyeTracker();
+            }
+        } catch (error) {
+            vscode.window.showWarningMessage(
+                'Could not connect to backend to check eye tracker status for auto-connect: ' +
+                    error,
+            );
+        }
     }
+
+    await refreshStatus();
 }
 
 /**
  * Extension deactivation.
  */
-export function deactivate(): void {
-    // TODO: Implement cleanup
+export async function deactivate(): Promise<void> {
     wsClient?.disconnect();
     feedbackRenderer?.dispose();
     statusBar?.dispose();
@@ -73,7 +88,6 @@ export function deactivate(): void {
  * Initialize all extension components.
  */
 function initializeComponents(context: vscode.ExtensionContext): void {
-    // TODO: Implement component initialization
     const config = vscode.workspace.getConfiguration('eyeTrackingDebugger');
     const host = config.get<string>('backendHost') || 'localhost';
     const port = config.get<number>('websocketPort') || 8765;
@@ -128,23 +142,23 @@ function initializeComponents(context: vscode.ExtensionContext): void {
     setupMessageHandlers();
 }
 
-function refreshStatus(): void {
+async function refreshStatus(): Promise<void> {
     // Fetch system status from REST API and update status bar
-    fetchStatus(host, port)
-        .then((statusPayload) => {
-            if (isStatusUpdatePayload(statusPayload)) {
-                statusBar?.setStatus(statusPayload);
-                webviewProvider?.updateStatus(statusPayload);
-            } else {
-                console.warn(
-                    '/status response did not match expected shape',
-                    statusPayload,
-                );
-            }
-        })
-        .catch((err) => {
-            console.warn('Failed to fetch /status from backend:', err);
-        });
+    try {
+        const statusPayload = await fetchStatus(host, port);
+        if (isStatusUpdatePayload(statusPayload)) {
+            statusBar?.setStatus(statusPayload);
+            webviewProvider?.updateStatus(statusPayload);
+        } else {
+            console.warn(
+                '/status response did not match expected shape',
+                statusPayload,
+            );
+        }
+    } catch (error) {
+        console.error('Failed to fetch status from backend:', error);
+        statusBar?.setConnected(false);
+    }
 }
 
 /**

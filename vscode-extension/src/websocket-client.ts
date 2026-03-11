@@ -1,14 +1,9 @@
 /**
  * WebSocket client for communication with the backend.
  */
-import * as vscode from "vscode";
-import WebSocket from "ws";
-import {
-    WebSocketMessage,
-    MessageType,
-    CodeContext,
-    FeedbackInteraction,
-} from "./types";
+import * as vscode from 'vscode';
+import WebSocket from 'ws';
+import { WebSocketMessage, MessageType, CodeContext } from './types';
 
 export type MessageHandler = (message: WebSocketMessage) => void;
 
@@ -26,7 +21,7 @@ export class WebSocketClient {
 
     constructor(
         private host: string,
-        private port: number
+        private port: number,
     ) {}
 
     /**
@@ -46,12 +41,12 @@ export class WebSocketClient {
      */
     async connect(): Promise<boolean> {
         if (this.isConnecting) {
-            console.log("Connection already in progress");
+            console.log('Connection already in progress');
             return false;
         }
 
         if (this.isConnected()) {
-            console.log("Already connected");
+            console.log('Already connected');
             return true;
         }
 
@@ -67,14 +62,14 @@ export class WebSocketClient {
 
                 const connectionTimeout = setTimeout(() => {
                     if (this.isConnecting) {
-                        console.log("Connection timeout");
+                        console.log('Connection timeout');
                         this.ws?.close();
                         this.isConnecting = false;
                         resolve(false);
                     }
                 }, 10000); // 10 second timeout
 
-                this.ws.on("open", () => {
+                this.ws.on('open', () => {
                     clearTimeout(connectionTimeout);
                     this.handleOpen();
                     this.isConnecting = false;
@@ -82,7 +77,7 @@ export class WebSocketClient {
                     resolve(true);
                 });
 
-                this.ws.on("close", (code, reason) => {
+                this.ws.on('close', (code, reason) => {
                     clearTimeout(connectionTimeout);
                     this.handleClose(code, reason.toString());
                     if (this.isConnecting) {
@@ -91,7 +86,7 @@ export class WebSocketClient {
                     }
                 });
 
-                this.ws.on("error", (error) => {
+                this.ws.on('error', (error) => {
                     clearTimeout(connectionTimeout);
                     this.handleError(error);
                     if (this.isConnecting) {
@@ -100,12 +95,11 @@ export class WebSocketClient {
                     }
                 });
 
-                this.ws.on("message", (data) => {
+                this.ws.on('message', (data) => {
                     this.handleMessage(data);
                 });
-
             } catch (error) {
-                console.error("Failed to create WebSocket:", error);
+                console.error('Failed to create WebSocket:', error);
                 this.isConnecting = false;
                 resolve(false);
             }
@@ -117,7 +111,7 @@ export class WebSocketClient {
      */
     disconnect(): void {
         this.shouldReconnect = false;
-        
+
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
@@ -129,12 +123,12 @@ export class WebSocketClient {
         }
 
         if (this.ws) {
-            this.ws.close(1000, "Client disconnect");
+            this.ws.close(1000, 'Client disconnect');
             this.ws = null;
         }
 
         this.reconnectAttempts = 0;
-        console.log("Disconnected from WebSocket server");
+        console.log('Disconnected from WebSocket server');
     }
 
     /**
@@ -149,7 +143,7 @@ export class WebSocketClient {
      */
     send(message: WebSocketMessage): boolean {
         if (!this.isConnected()) {
-            console.warn("Cannot send message: not connected");
+            console.warn('Cannot send message: not connected');
             return false;
         }
 
@@ -158,7 +152,7 @@ export class WebSocketClient {
             this.ws!.send(data);
             return true;
         } catch (error) {
-            console.error("Failed to send message:", error);
+            console.error('Failed to send message:', error);
             return false;
         }
     }
@@ -173,7 +167,6 @@ export class WebSocketClient {
         return this.send(message);
     }
 
-    
     /**
      * Register a handler for a specific message type.
      */
@@ -201,7 +194,7 @@ export class WebSocketClient {
      */
     updateSettings(host: string, port: number): void {
         const wasConnected = this.isConnected();
-        
+
         if (host !== this.host || port !== this.port) {
             this.host = host;
             this.port = port;
@@ -217,11 +210,15 @@ export class WebSocketClient {
     // --- Private Methods ---
 
     private handleOpen(): void {
-        console.log("WebSocket connection established");
+        console.log('WebSocket connection established');
         for (const h of this.connectionChangeHandlers) {
-            try { h(true); } catch (e) { console.error('connectionChange handler error', e); }
+            try {
+                h(true);
+            } catch (e) {
+                console.error('connectionChange handler error', e);
+            }
         }
-        
+
         // Start ping interval to keep connection alive
         this.pingInterval = setInterval(() => {
             if (this.isConnected()) {
@@ -232,7 +229,7 @@ export class WebSocketClient {
 
     private handleClose(code: number, reason: string): void {
         console.log(`WebSocket closed: code=${code}, reason=${reason}`);
-        
+
         if (this.pingInterval) {
             clearInterval(this.pingInterval);
             this.pingInterval = null;
@@ -242,7 +239,11 @@ export class WebSocketClient {
 
         // Notify handlers that connection is lost
         for (const h of this.connectionChangeHandlers) {
-            try { h(false); } catch (e) { console.error('connectionChange handler error', e); }
+            try {
+                h(false);
+            } catch (e) {
+                console.error('connectionChange handler error', e);
+            }
         }
 
         if (this.shouldReconnect) {
@@ -251,16 +252,16 @@ export class WebSocketClient {
     }
 
     private handleError(error: Error): void {
-        console.error("WebSocket error:", error.message);
+        console.error('WebSocket error:', error.message);
         vscode.window.showWarningMessage(
-            `Eye Tracking connection error: ${error.message}`
+            `Eye Tracking connection error: ${error.message}`,
         );
     }
 
     private handleMessage(data: WebSocket.Data): void {
         const dataStr = data.toString();
         const message = this.parseMessage(dataStr);
-        
+
         if (message) {
             // Handle pong silently
             if (message.type === MessageType.PONG) {
@@ -274,23 +275,23 @@ export class WebSocketClient {
     private parseMessage(data: string): WebSocketMessage | null {
         try {
             const parsed = JSON.parse(data) as WebSocketMessage;
-            
+
             // Validate required fields
-            if (!parsed.type || typeof parsed.timestamp !== "number") {
-                console.warn("Invalid message format:", data);
+            if (!parsed.type || typeof parsed.timestamp !== 'number') {
+                console.warn('Invalid message format:', data);
                 return null;
             }
-            
+
             return parsed;
         } catch (error) {
-            console.error("Failed to parse message:", error);
+            console.error('Failed to parse message:', error);
             return null;
         }
     }
 
     private dispatchMessage(message: WebSocketMessage): void {
         const handlers = this.messageHandlers.get(message.type);
-        
+
         if (handlers && handlers.length > 0) {
             for (const handler of handlers) {
                 try {
@@ -306,10 +307,10 @@ export class WebSocketClient {
 
     private scheduleReconnect(): void {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.log("Max reconnect attempts reached");
+            console.log('Max reconnect attempts reached');
             this.shouldReconnect = false;
             vscode.window.showErrorMessage(
-                "Failed to reconnect to Eye Tracking backend after multiple attempts"
+                'Failed to reconnect to Eye Tracking backend after multiple attempts',
             );
             return;
         }
@@ -317,7 +318,7 @@ export class WebSocketClient {
         // Show warning on first reconnect attempt
         if (this.reconnectAttempts === 0) {
             vscode.window.showWarningMessage(
-                "Lost connection to Eye Tracking backend. Attempting to reconnect..."
+                'Lost connection to Eye Tracking backend. Attempting to reconnect...',
             );
         }
 
@@ -325,16 +326,16 @@ export class WebSocketClient {
         this.reconnectAttempts++;
 
         console.log(
-            `Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`
+            `Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`,
         );
 
         this.reconnectTimer = setTimeout(async () => {
             console.log(`Reconnect attempt ${this.reconnectAttempts}`);
             const connected = await this.connect();
-            
+
             if (connected) {
                 vscode.window.showInformationMessage(
-                    "Reconnected to Eye Tracking backend"
+                    'Reconnected to Eye Tracking backend',
                 );
             }
         }, delay);
@@ -342,7 +343,7 @@ export class WebSocketClient {
 
     private createMessage(
         type: MessageType,
-        payload: Record<string, unknown>
+        payload: Record<string, unknown>,
     ): WebSocketMessage {
         return {
             type,
