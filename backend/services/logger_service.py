@@ -16,10 +16,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from backend.api.serialization import json_safe
-from backend.types.config import OperationMode
 from backend.types.feedback import FeedbackItem
-
-
 
 class LogLevel(Enum):
     """Log level hierarchy (ascending verbosity)."""
@@ -37,7 +34,7 @@ class LogEntry:
     event_type: str
     data: Dict[str, Any]
     category: str  # "experiment" or "system"
-    mode: Optional[OperationMode] = None
+    mode: Optional[str] = None
 
 @dataclass
 class LogFeedbackItem:
@@ -57,7 +54,7 @@ class LoggerService:
         experiment_level: str = "INFO",
         system_level: str = "INFO",
         max_entries: int = 100000,
-        experiment_mode: OperationMode = None,
+        experiment_mode: str = None,
     ):
         """
         Initialize the logger service.
@@ -78,7 +75,7 @@ class LoggerService:
         self.max_entries = max_entries
         self.experiment_mode = experiment_mode
 
-    def set_experiment_mode(self, mode: OperationMode) -> None:
+    def set_experiment_mode(self, mode: str) -> None:
         """
         Set the operation mode, used for correct logging.
         
