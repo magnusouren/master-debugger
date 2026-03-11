@@ -63,6 +63,12 @@ export type InteractionType =
   | "dismissed" // User dismissed the shown feedback
   | "done"; // User marked feedback as done
 
+export enum OperationMode {
+  REACTIVE = "reactive",
+  PROACTIVE = "proactive",
+  CONTROL = "control",
+}
+
 export interface SystemStatus {
   status:
     | "initializing"
@@ -74,7 +80,7 @@ export interface SystemStatus {
     | "disconnected";
   timestamp: number;
   eye_tracker_model?: string | null;
-  operation_mode: "reactive" | "proactive";
+  operation_mode: OperationMode;
   eye_samples_processed: number;
   code_window_samples_processed: number;
   feedback_generated: number;

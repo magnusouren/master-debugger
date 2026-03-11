@@ -217,8 +217,6 @@ class RuntimeController:
         """
         Set the system operation mode.
         
-        Args:
-            mode: REACTIVE or PROACTIVE mode.
         """
         old_mode = self._operation_mode
 
@@ -558,6 +556,9 @@ class RuntimeController:
         if self._status != SystemStatus.RUNNING:
             return False
 
+        if self._operation_mode == OperationMode.CONTROL:
+            return False
+
         if self._current_code_context is None:
             return False
 
@@ -577,6 +578,9 @@ class RuntimeController:
             True if feedback should be delivered.
         """
         if self._status != SystemStatus.RUNNING:
+            return False
+
+        if self._operation_mode == OperationMode.CONTROL:
             return False
 
         # No pending feedback or already delivered
@@ -655,6 +659,10 @@ class RuntimeController:
         if force:
             if self._status != SystemStatus.RUNNING:
                 return False
+
+            if self._operation_mode == OperationMode.CONTROL:
+                return False
+
             if self._pending_feedback is None:
                 return False
 
@@ -1015,10 +1023,11 @@ class RuntimeController:
         Args:
             features: Computed window features.
         """
-        if self._operation_mode == OperationMode.REACTIVE:
+        if self._operation_mode == OperationMode.REACTIVE or self._operation_mode == OperationMode.CONTROL:
             # Baseline: observed features -> reactive
             self._reactive_tool.add_features(features)
             return
+        
 
         # Proactive: observed features to forecasting
         self._forecasting.add_features(features)
@@ -1031,10 +1040,9 @@ class RuntimeController:
         Args:
             predicted: Predicted features.
         """
-        # TODO - log some stats
 
         # Nothing to do in reactive mode
-        if self._operation_mode == OperationMode.REACTIVE:
+        if self._operation_mode == OperationMode.REACTIVE or self._operation_mode == OperationMode.CONTROL:
             return
         
         # In proactive mode, pass predicted features to Reactive Tool
@@ -1075,6 +1083,10 @@ class RuntimeController:
             },
             level="INFO",
         )
+
+        # Control mode does not deliver feedback, but we still want to log the user state estimates for analysis
+        if self._operation_mode == OperationMode.CONTROL:
+            return
 
         # Attempt to deliver feedback if conditions are met
         self._try_deliver_feedback(force=False)

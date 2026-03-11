@@ -3,7 +3,7 @@ import { FeedbackList } from "./components/FeedbackList";
 import { StatusPanel } from "./components/StatusPanel";
 import { Controls } from "./components/Controls";
 import { vscode } from "./utilities/vscode";
-import type { FeedbackItem, SystemStatus, InteractionType } from "./types";
+import { type FeedbackItem, type SystemStatus, type InteractionType, OperationMode } from "./types";
 import { ExperimentIDs } from "./components/ExperimentIDs";
 
 // Message types from extension to webview
@@ -31,7 +31,7 @@ type ExtensionMessage = ConnectionStatusMessage | StatusUpdateMessage | Feedback
 
 export function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
-  const isConnected = status ? (status.status !== "disconnected") : false;
+  const [isConnected, setIsConnected] = useState(false);
   const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
 
   // Handle messages from the extension
@@ -40,6 +40,7 @@ export function App() {
 
     switch (message.type) {
       case "connectionStatus":
+        setIsConnected(message.payload.connected);
         break;
       case "statusUpdate":
         setStatus(message.payload);
@@ -80,16 +81,25 @@ export function App() {
 
   const handleToggleMode = () => {
     if (!status) return;
-    if (status.operation_mode === "reactive") {
+    if (status.operation_mode === OperationMode.REACTIVE) {
       vscode.postMessage({
         type: "toggleMode",
-        payload: { new_mode: "proactive" }
+        payload: { new_mode: OperationMode.PROACTIVE }
       });
       return;
     }
+
+    if (status.operation_mode === OperationMode.PROACTIVE) {
+      vscode.postMessage({
+        type: "toggleMode",
+        payload: { new_mode: OperationMode.CONTROL }
+      });
+      return;
+    }
+
     vscode.postMessage({
       type: "toggleMode",
-      payload: { new_mode: "reactive" }
+      payload: { new_mode: OperationMode.REACTIVE }
     });
   };
 
@@ -143,6 +153,7 @@ export function App() {
         <div className="section">
           <ExperimentIDs
             experimentIsRunning={status?.experiment_active ?? false}
+            operationMode={status?.operation_mode ?? OperationMode.CONTROL}
             startExperiment={async (experimentId: string, participantId: string) => {
               vscode.postMessage({
                 type: "startExperiment",
@@ -176,33 +187,34 @@ export function App() {
       </div>
 
 
+      {status?.operation_mode !== OperationMode.CONTROL && (
+        <div className="section">
+          <div className="section-title">Feedback</div>
+          <div className="cooldown-buttons">
 
-      <div className="section">
-        <div className="section-title">Feedback</div>
-        <div className="cooldown-buttons">
 
-
-          {status?.feedback_cooldown_left_s && status?.feedback_cooldown_left_s > 80000 ? (
-            <button className="btn small secondary" onClick={() => handleSetCooldown(15)} disabled={!isConnected}>
-              Enable Feedback
-            </button>
-          ) : (
-            <>
-              <button className="btn small secondary" onClick={() => handleSetCooldown(300)} disabled={!isConnected}>
-                Disable for 5 min
+            {status?.feedback_cooldown_left_s && status?.feedback_cooldown_left_s > 80000 ? (
+              <button className="btn small secondary" onClick={() => handleSetCooldown(15)} disabled={!isConnected}>
+                Enable Feedback
               </button>
-              <button className="btn small secondary" onClick={() => handleSetCooldown(86400)} disabled={!isConnected}>
-                Disable Feedback
-              </button>
-            </>
-          )}
+            ) : (
+              <>
+                <button className="btn small secondary" onClick={() => handleSetCooldown(300)} disabled={!isConnected}>
+                  Disable for 5 min
+                </button>
+                <button className="btn small secondary" onClick={() => handleSetCooldown(86400)} disabled={!isConnected}>
+                  Disable Feedback
+                </button>
+              </>
+            )}
+          </div>
+
+          <FeedbackList
+            items={feedbackItems}
+            onInteraction={handleFeedbackInteraction}
+          />
         </div>
-
-        <FeedbackList
-          items={feedbackItems}
-          onInteraction={handleFeedbackInteraction}
-        />
-      </div>
+      )}
 
 
     </div>

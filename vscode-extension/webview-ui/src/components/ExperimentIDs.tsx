@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { OperationMode } from "../types";
 
 interface ExperimentIDsProps {
   experimentIsRunning: boolean;
+  operationMode: OperationMode;
   startExperiment: (experimentId: string, participantId: string) => Promise<void>;
   endExperiment: () => void;
 }
 
 export function ExperimentIDs({
   experimentIsRunning,
+  operationMode,
   startExperiment,
   endExperiment
 
@@ -29,6 +32,12 @@ export function ExperimentIDs({
       setErrorMessage("Failed to start experiment. Please check connection and try again.");
     }
   }
+
+  useEffect(() => {
+    if (!experimentIsRunning) {
+      setExperimentId(operationMode);
+    }
+  }, [experimentIsRunning, operationMode]);
 
 
   return (

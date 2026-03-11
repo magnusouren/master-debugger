@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from backend.api.serialization import json_safe
+from backend.types.config import OperationMode
 from backend.types.feedback import FeedbackItem
 
 
@@ -36,7 +37,7 @@ class LogEntry:
     event_type: str
     data: Dict[str, Any]
     category: str  # "experiment" or "system"
-    mode: Optional[str] = None  # e.g., "reactive", "proactive", or "unknown"
+    mode: Optional[OperationMode] = None
 
 @dataclass
 class LogFeedbackItem:
@@ -56,7 +57,7 @@ class LoggerService:
         experiment_level: str = "INFO",
         system_level: str = "INFO",
         max_entries: int = 100000,
-        experiment_mode: str = "unknown",
+        experiment_mode: OperationMode = None,
     ):
         """
         Initialize the logger service.
@@ -77,12 +78,10 @@ class LoggerService:
         self.max_entries = max_entries
         self.experiment_mode = experiment_mode
 
-    def set_experiment_mode(self, mode: str) -> None:
+    def set_experiment_mode(self, mode: OperationMode) -> None:
         """
-        Set the operation mode for logging.
+        Set the operation mode, used for correct logging.
         
-        Args:
-            mode: Operation mode (e.g., "reactive", "proactive").
         """
         self.experiment_mode = mode
     
@@ -95,10 +94,6 @@ class LoggerService:
         """
         Log an experiment event.
         
-        Args:
-            event_type: Type of event (e.g., "feedback_generated", "context_updated").
-            data: Event data as dictionary.
-            level: Log level (DEBUG, INFO, WARNING, ERROR).
         """
         if not self._should_log(level, category="experiment"):
             return

@@ -2,7 +2,7 @@
  * Status bar manager - shows connection and system status.
  */
 import * as vscode from 'vscode';
-import { SystemStatusMessage, SystemStatus } from './types';
+import { SystemStatusMessage, SystemStatus, OperationMode } from './types';
 
 export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
@@ -48,7 +48,7 @@ export class StatusBarManager {
     /**
      * Set the operation mode.
      */
-    setMode(mode: 'reactive' | 'proactive'): void {
+    setMode(mode: OperationMode): void {
         if (!this.currentStatus) return;
 
         this.currentStatus.operation_mode = mode;
@@ -131,9 +131,8 @@ export class StatusBarManager {
 
         const statusIcon = this.getStatusIcon(this.currentStatus.status);
         const modeText =
-            this.currentStatus.operation_mode === 'proactive'
-                ? 'Proactive'
-                : 'Reactive';
+            this.currentStatus.operation_mode.charAt(0).toUpperCase() +
+            this.currentStatus.operation_mode.slice(1).toLowerCase();
 
         const eyeTrackerText = this.currentStatus.eye_tracker_model
             ? `Eye Tracker: ${this.currentStatus.eye_tracker_model}`
