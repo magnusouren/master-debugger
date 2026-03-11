@@ -396,6 +396,14 @@ class RuntimeController:
     async def handle_context_update(self, context: CodeContext) -> None:
         if not self._experiment_is_active:
             return
+        
+        if self._operation_mode == OperationMode.CONTROL:
+            self._logger.system(
+                "context_update_ignored_in_control_mode",
+                {},
+                level="DEBUG",
+            )
+            return
 
         self._stats["code_window_samples_received"] += 1
 
