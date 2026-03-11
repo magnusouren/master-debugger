@@ -4,7 +4,12 @@
  * This provider manages the webview that displays the React-based UI.
  */
 import * as vscode from 'vscode';
-import { FeedbackItem, SystemStatusMessage, InteractionType } from './types';
+import {
+    FeedbackItem,
+    SystemStatusMessage,
+    InteractionType,
+    OperationMode,
+} from './types';
 
 // Set to true during development to load from Vite dev server
 const DEV_MODE = false;
@@ -19,7 +24,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
     // Callbacks for handling webview messages
     private _onConnect?: () => void;
     private _onDisconnect?: () => void;
-    private _onToggleMode?: (new_mode: 'reactive' | 'proactive') => void;
+    private _onToggleMode?: (new_mode: OperationMode) => Promise<void>;
     private _onClearFeedback?: () => void;
     private _onTriggerFeedback?: () => void;
     private _onConnectEyeTracker?: () => void;
@@ -45,7 +50,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
     public setCallbacks(callbacks: {
         onConnect?: () => void;
         onDisconnect?: () => void;
-        onToggleMode?: (new_mode: 'reactive' | 'proactive') => void;
+        onToggleMode?: (new_mode: OperationMode) => Promise<void>;
         onClearFeedback?: () => void;
         onTriggerFeedback?: () => void;
         onConnectEyeTracker?: () => void;
@@ -167,7 +172,7 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
                 break;
             case 'toggleMode':
                 const modePayload = message.payload as {
-                    new_mode: 'reactive' | 'proactive';
+                    new_mode: OperationMode;
                 };
                 this._onToggleMode?.(modePayload.new_mode);
                 break;
