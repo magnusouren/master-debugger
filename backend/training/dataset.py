@@ -3,7 +3,7 @@ Dataset preparation for XGBoost forecasting.
 
 Creates training samples with:
 - X: History window of contributor values (typically 120 windows = 60 seconds)
-- y: Future cognitive load score (e.g., score at t+k)
+- y: Future component values used by ReactiveTool scoring
 
 Reuses ReactiveTool._estimate_rule_based() for scoring.
 Splits data by participant for proper evaluation.
@@ -19,7 +19,11 @@ import json
 
 from backend.types import WindowFeatures, ReactiveToolConfig, TrainingConfig
 from backend.layers.reactive_tool import ReactiveTool
-from backend.models.forecast_feature_schema import FEATURE_COLUMNS, compute_contributor_features
+from backend.models.forecast_feature_schema import (
+    FEATURE_COLUMNS,
+    TARGET_COLUMNS,
+    compute_contributor_features,
+)
 from backend.services.logger_service import LoggerService
 
 # Defaults aligned with TrainingConfig: 60s history and ~30s horizon at 2 Hz.
@@ -92,7 +96,7 @@ def create_sequences(
     df: pd.DataFrame,
     history_size: int = HISTORY_WINDOW_SIZE,
     horizon: int = PREDICTION_HORIZON
-) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+    ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
     Create input-output sequences for training.
 
@@ -103,7 +107,7 @@ def create_sequences(
 
     Returns:
         X: Input features (N, history_size * n_features)
-        y: Target cognitive load scores (N,)
+        y: Target component vectors (N, 5)
         participant_ids: List of participant IDs for each sample
     """
     X_list = []
@@ -126,9 +130,32 @@ def create_sequences(
             # Target window(s)
             target_rows = group.iloc[i + history_size:i + history_size + horizon]
 
-            # Convert to WindowFeatures and compute target score
-            target_windows = [row_to_window_features(row) for _, row in target_rows.iterrows()]
-            target_score = compute_cognitive_load_score(target_windows)
+            # Build target components from target horizon window(s)
+            # using the same raw metrics expected by ReactiveTool.
+            ipa_series = pd.to_numeric(target_rows.get("pupil_ipa"), errors="coerce").dropna()
+            fixation_series = pd.to_numeric(
+                target_rows.get("fixation_mean_duration_ms"), errors="coerce"
+            ).dropna()
+            velocity_series = pd.to_numeric(
+                target_rows.get("saccade_mean_velocity"), errors="coerce"
+            ).dropna()
+            ipi_series = pd.to_numeric(target_rows.get("ipi_value"), errors="coerce").dropna()
+
+            if (
+                len(ipa_series) == 0
+                or len(fixation_series) == 0
+                or len(velocity_series) == 0
+                or len(ipi_series) == 0
+            ):
+                continue
+
+            target_vector = [
+                float(ipa_series.mean()),
+                float(fixation_series.mean()),
+                float(velocity_series.mean()),
+                float(velocity_series.std(ddof=0)) if len(velocity_series) >= 2 else 0.0,
+                float(ipi_series.mean()),
+            ]
 
             # Flatten history features
             # Exactly 5 calculated contributor values are used as model inputs.
@@ -139,7 +166,7 @@ def create_sequences(
                     features.append(float(contribs[col]))
 
             X_list.append(features)
-            y_list.append(target_score)
+            y_list.append(target_vector)
             participant_ids.append(pid)
 
     return np.array(X_list), np.array(y_list), participant_ids

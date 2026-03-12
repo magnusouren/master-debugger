@@ -12,6 +12,15 @@ FEATURE_COLUMNS = [
     "contrib_ipi",
 ]
 
+# Forecast targets needed by ReactiveTool scoring.
+TARGET_COLUMNS = [
+    "pupil_ipa",
+    "fixation_mean_duration_ms",
+    "saccade_mean_velocity",
+    "saccade_velocity_std",
+    "ipi_value",
+]
+
 
 def _ramp(value: float, lo: float, hi: float) -> float:
     """Clamp and linearly scale a value into [0, 1]."""
@@ -57,3 +66,19 @@ def compute_contributor_features(window_features: dict) -> dict:
         "contrib_perceived_difficulty": contrib_perceived,
         "contrib_ipi": contrib_ipi,
     }
+
+
+def compute_score_from_target_components(target_features: dict) -> float:
+    """
+    Compute strict 5x0.2 score from target component values.
+
+    This mirrors ReactiveTool rule-based scoring without baseline normalization.
+    """
+    contribs = compute_contributor_features(target_features)
+    return float(
+        0.2 * contribs["contrib_ipa"]
+        + 0.2 * contribs["contrib_fixation_duration"]
+        + 0.2 * contribs["contrib_anticipation"]
+        + 0.2 * contribs["contrib_perceived_difficulty"]
+        + 0.2 * contribs["contrib_ipi"]
+    )

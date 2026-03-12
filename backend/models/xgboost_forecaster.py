@@ -7,7 +7,11 @@ import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import numpy as np
-from backend.models.forecast_feature_schema import FEATURE_COLUMNS, compute_contributor_features
+from backend.models.forecast_feature_schema import (
+    FEATURE_COLUMNS,
+    TARGET_COLUMNS,
+    compute_contributor_features,
+)
 
 try:
     import xgboost as xgb
@@ -109,15 +113,15 @@ class XGBoostForecaster:
 
         return features
 
-    def predict(self, history: List[Dict[str, Any]]) -> Optional[float]:
+    def predict(self, history: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
         """
-        Predict future cognitive load score.
+        Predict future target component values.
 
         Args:
             history: List of WindowFeatures dicts (most recent last)
 
         Returns:
-            Predicted cognitive load score (0-1), or None if prediction fails
+            Predicted target component values, or None if prediction fails
         """
         if not self.is_loaded():
             print("Model not loaded")
@@ -145,12 +149,20 @@ class XGBoostForecaster:
         X = np.array([features])
         prediction = self._model.predict(X)[0]
 
-        # Clip to valid range
-        return float(max(0.0, min(1.0, prediction)))
+        # Multi-target model: return expected target component mapping.
+        if isinstance(prediction, np.ndarray) and prediction.ndim == 1 and len(prediction) == len(TARGET_COLUMNS):
+            return {
+                key: float(prediction[idx])
+                for idx, key in enumerate(TARGET_COLUMNS)
+            }
+
+        # Backward-compatible fallback for older single-target models.
+        scalar = float(prediction)
+        return {"predicted_cognitive_load": max(0.0, min(1.0, scalar))}
 
     def predict_with_confidence(
         self, history: List[Dict[str, Any]]
-    ) -> tuple[Optional[float], float]:
+    ) -> tuple[Optional[Dict[str, float]], float]:
         """
         Predict with confidence estimate.
 

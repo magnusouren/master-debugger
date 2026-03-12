@@ -263,6 +263,10 @@ class ReactiveTool:
         """Check if a valid baseline is loaded."""
         return self._baseline is not None and self._baseline.is_valid
 
+    def is_recording_baseline(self) -> bool:
+        """Check if baseline recording is currently active."""
+        return self._is_recording_baseline
+
     def set_model_type(self, model_type: ModelType) -> None:
         """
         Set the type of model to use for estimation.
