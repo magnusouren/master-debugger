@@ -171,8 +171,9 @@ class XGBoostForecaster:
         missing_count = 0
         for window in recent:
             window_dict = window.features if hasattr(window, 'features') else window
+            contribs = compute_contributor_features(window_dict)
             for col in FEATURE_COLUMNS:
-                val = window_dict.get(col)
+                val = contribs.get(col)
                 if val is None or (isinstance(val, float) and np.isnan(val)):
                     missing_count += 1
 

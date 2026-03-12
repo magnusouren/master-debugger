@@ -13,6 +13,7 @@ to the Signal Processing output to ensure compatibility with downstream logic.
 """
 from typing import Optional, List, Callable
 from collections import deque
+import time
 
 from backend.services.logger_service import LoggerService
 from backend.types import (
@@ -330,4 +331,14 @@ class ForecastingTool:
         Returns:
             True if prediction should be updated.
         """
-        return True  # TODO: Implement timing logic based on config
+        update_rate = float(self._config.update_rate_hz)
+        if update_rate <= 0:
+            return True
+
+        min_interval = 1.0 / update_rate
+        now = time.time()
+        if now - self._last_prediction_time < min_interval:
+            return False
+
+        self._last_prediction_time = now
+        return True

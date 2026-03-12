@@ -63,7 +63,7 @@ def train_model(
         X_train,
         y_train,
         eval_set=[(X_val, y_val)],
-        verbose=True,
+        verbose=False,
     )
 
     print(f"\nBest iteration: {model.best_iteration}")
@@ -216,6 +216,12 @@ def main():
         default=None,
         help="Path to config.yaml file (uses defaults if not provided)"
     )
+    parser.add_argument(
+        "--split-dir",
+        type=str,
+        default=None,
+        help="Directory to load/save participant split files (train/val/test).",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -232,7 +238,8 @@ def main():
         config = TrainingConfig()
 
     # Prepare dataset
-    dataset = prepare_dataset(config=config)
+    split_dir = Path(args.split_dir) if args.split_dir else None
+    dataset = prepare_dataset(config=config, split_dir=split_dir)
 
     # Train model
     model = train_model(
