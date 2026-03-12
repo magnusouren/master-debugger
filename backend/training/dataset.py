@@ -2,7 +2,7 @@
 Dataset preparation for XGBoost forecasting.
 
 Creates training samples with:
-- X: History window of metrics (e.g., last 5 windows)
+- X: History window of contributor values (typically 120 windows = 60 seconds)
 - y: Future cognitive load score (e.g., score at t+k)
 
 Reuses ReactiveTool._estimate_rule_based() for scoring.
@@ -15,16 +15,19 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import Tuple, List, Dict, Optional
+import json
 
 from backend.types import WindowFeatures, ReactiveToolConfig, TrainingConfig
 from backend.layers.reactive_tool import ReactiveTool
 from backend.models.forecast_feature_schema import FEATURE_COLUMNS, compute_contributor_features
+from backend.services.logger_service import LoggerService
 
-# Number of historical windows to use as input
-HISTORY_WINDOW_SIZE = 5
+# Defaults aligned with TrainingConfig: 60s history and ~30s horizon at 2 Hz.
+HISTORY_WINDOW_SIZE = 120
+PREDICTION_HORIZON = 60
 
-# Number of windows to look ahead for target
-PREDICTION_HORIZON = 2
+# Suppress per-sample ReactiveTool system logs during offline dataset generation.
+TRAINING_LOGGER = LoggerService(experiment_level="ERROR", system_level="ERROR")
 
 
 def load_processed_data(data_path: Optional[Path] = None) -> pd.DataFrame:
@@ -79,7 +82,7 @@ def compute_cognitive_load_score(windows: List[WindowFeatures]) -> float:
     """
     # Use default config - enabled_metrics comes from WindowFeatures, not config
     config = ReactiveToolConfig()
-    tool = ReactiveTool(config=config)
+    tool = ReactiveTool(config=config, logger=TRAINING_LOGGER)
 
     # Use the internal method directly
     return tool._estimate_rule_based(windows)
@@ -147,6 +150,7 @@ def split_by_participant(
     y: np.ndarray,
     participant_ids: List[str],
     config: Optional[TrainingConfig] = None,
+    split_dir: Optional[Path] = None,
 ) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
     """
     Split data by participant (not by sample).
@@ -154,21 +158,57 @@ def split_by_participant(
     if config is None:
         config = TrainingConfig()
 
-    unique_participants = list(set(participant_ids))
+    unique_participants = sorted(set(participant_ids))
     n_participants = len(unique_participants)
 
     print(f"Total participants: {n_participants}")
 
-    # Shuffle and split participants
-    np.random.seed(config.random_state)
-    np.random.shuffle(unique_participants)
+    train_participants: set[str]
+    val_participants: set[str]
+    test_participants: set[str]
 
-    n_train = int(n_participants * config.train_ratio)
-    n_val = int(n_participants * config.val_ratio)
+    if split_dir is not None:
+        split_dir.mkdir(parents=True, exist_ok=True)
+        train_file = split_dir / "train_participants.json"
+        val_file = split_dir / "val_participants.json"
+        test_file = split_dir / "test_participants.json"
 
-    train_participants = set(unique_participants[:n_train])
-    val_participants = set(unique_participants[n_train:n_train + n_val])
-    test_participants = set(unique_participants[n_train + n_val:])
+        split_files_exist = train_file.exists() and val_file.exists() and test_file.exists()
+
+        if split_files_exist:
+            train_participants = set(json.loads(train_file.read_text()))
+            val_participants = set(json.loads(val_file.read_text()))
+            test_participants = set(json.loads(test_file.read_text()))
+            print(f"Loaded participant split from: {split_dir}")
+        else:
+            # Shuffle and split participants once, then persist to disk.
+            shuffled = unique_participants.copy()
+            np.random.seed(config.random_state)
+            np.random.shuffle(shuffled)
+
+            n_train = int(n_participants * config.train_ratio)
+            n_val = int(n_participants * config.val_ratio)
+
+            train_participants = set(shuffled[:n_train])
+            val_participants = set(shuffled[n_train:n_train + n_val])
+            test_participants = set(shuffled[n_train + n_val:])
+
+            train_file.write_text(json.dumps(sorted(train_participants), indent=2))
+            val_file.write_text(json.dumps(sorted(val_participants), indent=2))
+            test_file.write_text(json.dumps(sorted(test_participants), indent=2))
+            print(f"Saved participant split to: {split_dir}")
+    else:
+        # In-memory split only (legacy behavior).
+        shuffled = unique_participants.copy()
+        np.random.seed(config.random_state)
+        np.random.shuffle(shuffled)
+
+        n_train = int(n_participants * config.train_ratio)
+        n_val = int(n_participants * config.val_ratio)
+
+        train_participants = set(shuffled[:n_train])
+        val_participants = set(shuffled[n_train:n_train + n_val])
+        test_participants = set(shuffled[n_train + n_val:])
 
     print(f"Train participants: {len(train_participants)}")
     print(f"Val participants: {len(val_participants)}")
@@ -198,6 +238,7 @@ def get_feature_names(history_size: int = HISTORY_WINDOW_SIZE) -> List[str]:
 def prepare_dataset(
     config: Optional[TrainingConfig] = None,
     data_path: Optional[Path] = None,
+    split_dir: Optional[Path] = None,
 ) -> Dict[str, any]:
     """
     Complete dataset preparation pipeline.
@@ -205,9 +246,14 @@ def prepare_dataset(
     Args:
         config: TrainingConfig with hyperparameters (uses defaults if None)
         data_path: Optional path to processed data (overrides config.data_path)
+        split_dir: Optional folder for persistent participant split files.
     """
     if config is None:
         config = TrainingConfig()
+
+    if split_dir is None:
+        base_dir = Path(__file__).parent.parent
+        split_dir = base_dir / "data" / "processed" / "splits"
 
     # Use provided data_path or fall back to config
     effective_data_path = data_path
@@ -226,7 +272,7 @@ def prepare_dataset(
     print(f"Created {len(X)} samples")
 
     print("\nSplitting by participant...")
-    splits = split_by_participant(X, y, participant_ids, config=config)
+    splits = split_by_participant(X, y, participant_ids, config=config, split_dir=split_dir)
 
     print(f"\nFinal dataset sizes:")
     print(f"  Train: {len(splits['train'][0])} samples")

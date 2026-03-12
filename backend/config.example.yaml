@@ -44,8 +44,8 @@ training:
   test_ratio: 0.15
   # XGBoost hyperparameters
   n_estimators: 500
-  max_depth: 8              # Increased for larger feature space
-  learning_rate: 0.03       # Reduced for larger model
+  max_depth: 8              # Current tuned value (5-contributor input)
+  learning_rate: 0.03       # Current tuned value
   early_stopping_rounds: 30
   random_state: 42
 

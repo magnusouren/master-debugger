@@ -17,6 +17,7 @@ from typing import List, Dict, Any, Optional
 
 from backend.types import GazeSample, WindowFeatures, SignalProcessingConfig
 from backend.layers.signal_processing import SignalProcessingLayer
+from backend.services.logger_service import LoggerService
 
 
 # Screen resolution for EMIP dataset (for normalizing gaze coordinates)
@@ -26,6 +27,10 @@ EMIP_SCREEN_HEIGHT = 1200
 # Processing settings
 WINDOW_LENGTH_SECONDS = 1.0
 OUTPUT_FREQUENCY_HZ = 2.0  # 2 windows per second with 50% overlap
+
+# Keep preprocessing console output readable by suppressing frequent
+# per-window warning logs from SignalProcessingLayer.
+PREPROCESS_LOGGER = LoggerService(experiment_level="ERROR", system_level="ERROR")
 
 
 def parse_emip_file(filepath: Path) -> pd.DataFrame:
@@ -170,7 +175,7 @@ def process_participant(filepath: Path) -> List[Dict[str, Any]]:
             require_both_eyes_valid=False,
         )
 
-        processor = SignalProcessingLayer(config=config)
+        processor = SignalProcessingLayer(config=config, logger=PREPROCESS_LOGGER)
 
         # Collect windows via callback
         windows_from_trial: List[WindowFeatures] = []
