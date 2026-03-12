@@ -21,6 +21,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 from backend.types import TrainingConfig, SystemConfig
 from backend.training.dataset import prepare_dataset
+from backend.models.forecast_feature_schema import TARGET_COLUMNS, compute_score_from_target_components
 
 
 def train_model(
@@ -93,19 +94,33 @@ def evaluate_model(
 
     y_pred = model.predict(X_test)
 
+    # Convert component vectors -> strict 5x0.2 score for primary metrics.
+    y_test_score = np.array([
+        compute_score_from_target_components({
+            key: float(y_test[i, idx]) for idx, key in enumerate(TARGET_COLUMNS)
+        })
+        for i in range(len(y_test))
+    ])
+    y_pred_score = np.array([
+        compute_score_from_target_components({
+            key: float(y_pred[i, idx]) for idx, key in enumerate(TARGET_COLUMNS)
+        })
+        for i in range(len(y_pred))
+    ])
+
     # Regression metrics
-    mse = mean_squared_error(y_test, y_pred)
+    mse = mean_squared_error(y_test_score, y_pred_score)
     rmse = np.sqrt(mse)
-    mae = mean_absolute_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
+    mae = mean_absolute_error(y_test_score, y_pred_score)
+    r2 = r2_score(y_test_score, y_pred_score)
 
     print(f"RMSE: {rmse:.4f}")
     print(f"MAE: {mae:.4f}")
     print(f"R²: {r2:.4f}")
 
     # Binary classification metrics (above/below threshold)
-    y_test_binary = (y_test >= threshold).astype(int)
-    y_pred_binary = (y_pred >= threshold).astype(int)
+    y_test_binary = (y_test_score >= threshold).astype(int)
+    y_pred_binary = (y_pred_score >= threshold).astype(int)
 
     accuracy = (y_test_binary == y_pred_binary).mean()
     true_positives = ((y_test_binary == 1) & (y_pred_binary == 1)).sum()
@@ -139,7 +154,10 @@ def get_feature_importance(
     top_n: int = 20
 ) -> dict:
     """Get top feature importances."""
-    importances = model.feature_importances_
+    importances = np.asarray(model.feature_importances_)
+    if importances.ndim == 2:
+        # Multi-target model returns one importance vector per target.
+        importances = importances.mean(axis=0)
     indices = np.argsort(importances)[::-1][:top_n]
 
     print(f"\n--- Top {top_n} Feature Importances ---")
@@ -178,6 +196,7 @@ def save_model(
     metadata = {
         'version': version,
         'model_type': 'xgboost_regressor',
+        'target_columns': TARGET_COLUMNS,
         'history_window_size': config.history_window_size,
         'prediction_horizon': config.prediction_horizon,
         'n_features': len(feature_names),

@@ -22,6 +22,7 @@ from backend.types import (
     ForecastingConfig,
 )
 from backend.models.xgboost_forecaster import XGBoostForecaster
+from backend.models.forecast_feature_schema import TARGET_COLUMNS
 
 
 class ForecastingTool:
@@ -69,6 +70,9 @@ class ForecastingTool:
     
     def enable(self) -> None:
         """Enable the forecasting tool (for proactive mode)."""
+        # Ensure a model is available when proactive mode starts.
+        if not self._forecaster or not self._forecaster.is_loaded():
+            self.load_model(self._config.model_path)
         self._is_enabled = True
     
     def disable(self) -> None:
@@ -190,12 +194,25 @@ class ForecastingTool:
             Predicted features or None if prediction not possible.
         """
 
+        started_at = time.perf_counter()
         window_feature = self._prepare_input_sequence()
 
         if not window_feature:
             return None
         
         prediction = self._run_model_inference(window_feature)
+
+        if prediction is not None:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+            self._logger.system(
+                "forecasting_tool_prediction_latency",
+                {
+                    "latency_ms": round(elapsed_ms, 3),
+                    "history_windows": len(window_feature),
+                    "horizon_seconds": horizon_seconds,
+                },
+                level="DEBUG",
+            )
 
         return prediction
     
@@ -285,26 +302,46 @@ class ForecastingTool:
             return None
 
         # Get prediction from XGBoost model
-        prediction_score, confidence = self._forecaster.predict_with_confidence(input_sequence)
+        infer_started_at = time.perf_counter()
+        predicted_components, confidence = self._forecaster.predict_with_confidence(input_sequence)
+        infer_elapsed_ms = (time.perf_counter() - infer_started_at) * 1000.0
 
-        if prediction_score is None:
+        if predicted_components is None:
+            return None
+
+        missing_targets = [k for k in TARGET_COLUMNS if k not in predicted_components]
+        if missing_targets:
+            self._logger.system(
+                "forecasting_tool_prediction_missing_targets",
+                {"missing_targets": missing_targets},
+                level="WARNING",
+            )
             return None
 
         # Get the latest window for timing info
         latest_window = input_sequence[-1]
         window_duration = latest_window.window_end - latest_window.window_start
 
-        # Create PredictedFeatures with the cognitive load score
-        # The score represents predicted cognitive load at horizon
+        # Create PredictedFeatures with predicted raw component values.
+        # ReactiveTool computes final score (incl. baseline normalization).
         predicted_features = PredictedFeatures(
             prediction_timestamp=latest_window.window_end,
             target_window_start=latest_window.window_end + self._config.prediction_horizon_seconds,
             target_window_end=latest_window.window_end + self._config.prediction_horizon_seconds + window_duration,
             horizon_seconds=self._config.prediction_horizon_seconds,
-            features={'predicted_cognitive_load': prediction_score},
+            features=predicted_components,
             enabled_metrics=latest_window.enabled_metrics.copy(),
             confidence=confidence,
             uncertainty={}
+        )
+
+        self._logger.system(
+            "forecasting_tool_inference_timing",
+            {
+                "inference_ms": round(infer_elapsed_ms, 3),
+                "confidence": round(confidence, 3),
+            },
+            level="DEBUG",
         )
 
         return predicted_features

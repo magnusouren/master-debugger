@@ -1037,8 +1037,12 @@ class RuntimeController:
             return
         
 
-        # Proactive: observed features to forecasting
+        # Proactive: observed features -> forecasting
         self._forecasting.add_features(features)
+        # During baseline recording in proactive mode, feed observed windows
+        # to reactive so baseline statistics are computed from real signal data.
+        if self._reactive_tool.is_recording_baseline():
+            self._reactive_tool.add_features(features)
 
     
     def _on_predicted_features(self, predicted: PredictedFeatures) -> None:
@@ -1052,8 +1056,13 @@ class RuntimeController:
         # Nothing to do in reactive mode
         if self._operation_mode == OperationMode.REACTIVE or self._operation_mode == OperationMode.CONTROL:
             return
-        
-        # In proactive mode, pass predicted features to Reactive Tool
+
+        # Don't mix forecasted windows into baseline computation.
+        if self._reactive_tool.is_recording_baseline():
+            return
+
+        # Unified path:
+        # Signal -> Forecasting(predicted component values) -> Reactive(score + baseline)
         self._reactive_tool.add_features(predicted.to_window_features())
     
     def _on_user_state_estimate(self, estimate: UserStateEstimate) -> None:
