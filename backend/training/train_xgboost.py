@@ -77,7 +77,7 @@ def evaluate_model(
     model: xgb.XGBRegressor,
     X_test: np.ndarray,
     y_test: np.ndarray,
-    threshold: float = 0.5
+    threshold: float = 0.6
 ) -> dict:
     """
     Evaluate model on test set.
