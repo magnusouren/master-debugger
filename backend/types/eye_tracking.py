@@ -89,7 +89,7 @@ class PredictedFeatures:
             window_start=self.target_window_start,
             window_end=self.target_window_end,
             features=self.features.copy(),
-            sample_count=0,  # Not applicable for predictions
-            valid_sample_ratio=0.0,  # Not applicable for predictions
+            sample_count=1,  # Synthetic prediction sample for downstream confidence logic
+            valid_sample_ratio=max(0.0, min(1.0, float(self.confidence))),
             enabled_metrics=self.enabled_metrics.copy(),
         )

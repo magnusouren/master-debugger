@@ -13,6 +13,7 @@ to the Signal Processing output to ensure compatibility with downstream logic.
 """
 from typing import Optional, List, Callable
 from collections import deque
+import time
 
 from backend.services.logger_service import LoggerService
 from backend.types import (
@@ -20,6 +21,8 @@ from backend.types import (
     PredictedFeatures,
     ForecastingConfig,
 )
+from backend.models.xgboost_forecaster import XGBoostForecaster
+from backend.models.forecast_feature_schema import TARGET_COLUMNS
 
 
 class ForecastingTool:
@@ -41,7 +44,7 @@ class ForecastingTool:
         """
         self._config = config or ForecastingConfig()
         self._feature_history: deque[WindowFeatures] = deque()
-        self._model: Optional[object] = None  # TODO: Define model type
+        self._forecaster: Optional[XGBoostForecaster] = None
         self._output_callbacks: List[Callable[[PredictedFeatures], None]] = []
         self._is_enabled: bool = False
         self._last_prediction_time: float = 0.0
@@ -51,6 +54,10 @@ class ForecastingTool:
             from backend.services.logger_service import get_logger
             logger = get_logger()
         self._logger = logger
+
+        # Auto-load model if path specified in config
+        if self._config.model_path:
+            self.load_model(self._config.model_path)
     
     def configure(self, config: ForecastingConfig) -> None:
         """
@@ -63,6 +70,9 @@ class ForecastingTool:
     
     def enable(self) -> None:
         """Enable the forecasting tool (for proactive mode)."""
+        # Ensure a model is available when proactive mode starts.
+        if not self._forecaster or not self._forecaster.is_loaded():
+            self.load_model(self._config.model_path)
         self._is_enabled = True
     
     def disable(self) -> None:
@@ -78,32 +88,48 @@ class ForecastingTool:
         """
         return self._is_enabled
     
-    def load_model(self, model_path: str) -> bool:
+    def load_model(self, model_path: Optional[str] = None) -> bool:
         """
         Load a trained forecasting model.
-        
+
         Args:
-            model_path: Path to the model file.
-            
+            model_path: Path to the model file. If None, loads latest model.
+
         Returns:
             True if model loaded successfully.
         """
-        self._logger.system(
-            "forecasting_tool_missing_implementation",
-            {"method": "load_model", "model_path": model_path},
-            level="WARNING"
-        )
-        
-        pass  # TODO: Implement model loading
+        from pathlib import Path
+
+        try:
+            self._forecaster = XGBoostForecaster()
+            path = Path(model_path) if model_path else None
+            success = self._forecaster.load_model(path)
+
+            if success:
+                self._logger.system(
+                    "forecasting_tool_model_loaded",
+                    {"model_path": str(model_path), "info": self._forecaster.get_model_info()},
+                )
+            else:
+                self._logger.system(
+                    "forecasting_tool_model_load_failed",
+                    {"model_path": str(model_path)},
+                    level="WARNING"
+                )
+
+            return success
+        except Exception as e:
+            self._logger.system(
+                "forecasting_tool_model_load_error",
+                {"model_path": str(model_path), "error": str(e)},
+                level="ERROR"
+            )
+            return False
     
     def unload_model(self) -> None:
         """Unload the current model and free resources."""
-        self._logger.system(
-            "forecasting_tool_missing_implementation",
-            {"method": "unload_model"},
-            level="WARNING"
-        )
-        pass  # TODO: Implement model unloading
+        self._forecaster = None
+        self._logger.system("forecasting_tool_model_unloaded", {})
     
     def add_features(self, features: WindowFeatures) -> None:
         # 1. Add new features to history buffer
@@ -168,6 +194,7 @@ class ForecastingTool:
             Predicted features or None if prediction not possible.
         """
 
+        started_at = time.perf_counter()
         window_feature = self._prepare_input_sequence()
 
         if not window_feature:
@@ -175,21 +202,37 @@ class ForecastingTool:
         
         prediction = self._run_model_inference(window_feature)
 
+        if prediction is not None:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+            self._logger.system(
+                "forecasting_tool_prediction_latency",
+                {
+                    "latency_ms": round(elapsed_ms, 3),
+                    "history_windows": len(window_feature),
+                    "horizon_seconds": horizon_seconds,
+                },
+                level="DEBUG",
+            )
+
         return prediction
     
     def get_prediction_confidence(self) -> float:
         """
         Get the confidence of the latest prediction.
-        
+
         Returns:
             Confidence score between 0.0 and 1.0.
         """
-        self._logger.system(
-            "forecasting_tool_missing_implementation",
-            {"method": "get_prediction_confidence"},
-            level="WARNING"
-        )
-        return 0.0  # TODO: Implement confidence retrieval
+        # Get confidence from the most recent prediction
+        if not self._forecaster or not self._forecaster.is_loaded():
+            return 0.0
+
+        input_sequence = self._prepare_input_sequence()
+        if not input_sequence:
+            return 0.0
+
+        _, confidence = self._forecaster.predict_with_confidence(input_sequence)
+        return confidence
     
     def register_output_callback(
         self, callback: Callable[[PredictedFeatures], None]
@@ -225,47 +268,83 @@ class ForecastingTool:
         """
         Prepare the input sequence for the prediction model.
 
-        TODO: THIS IS A STUB IMPLEMENTATION
-        
         Returns:
             Prepared feature sequence or None if insufficient data.
         """
-        
+        # Check if we have a model loaded to know required history size
+        required_history = 5  # Default
+        if self._forecaster and self._forecaster.is_loaded():
+            required_history = self._forecaster.history_size
+
+        if len(self._feature_history) < required_history:
+            return None
+
         return list(self._feature_history)
     
     def _run_model_inference(
         self, input_sequence: List[WindowFeatures]
-    ) -> PredictedFeatures:
+    ) -> Optional[PredictedFeatures]:
         """
         Run the forecasting model on input sequence.
 
-        TODO: THIS IS A STUB IMPLEMENTATION
-        
         Args:
             input_sequence: Prepared feature sequence.
-            
+
         Returns:
-            Model prediction output.
+            Model prediction output, or None if prediction fails.
         """
-
-        stubbed_results = []
-
-        for feature in input_sequence:
-            stubbed_prediction = PredictedFeatures(
-                prediction_timestamp=feature.window_end,
-                target_window_start=feature.window_end + self._config.prediction_horizon_seconds,
-                target_window_end=feature.window_end + self._config.prediction_horizon_seconds + (feature.window_end - feature.window_start),
-                horizon_seconds=self._config.prediction_horizon_seconds,
-                features=feature.features,
-                enabled_metrics=feature.enabled_metrics.copy(),
-                confidence=0.5,
-                uncertainty={}
+        if not self._forecaster or not self._forecaster.is_loaded():
+            self._logger.system(
+                "forecasting_tool_no_model",
+                {"message": "No model loaded for inference"},
+                level="WARNING"
             )
-            stubbed_prediction.uncertainty = self._estimate_uncertainty(stubbed_prediction)
-            stubbed_results.append(stubbed_prediction)
+            return None
 
-        # Return the middle prediction as a stub
-        return stubbed_results[len(stubbed_results) // 2]
+        # Get prediction from XGBoost model
+        infer_started_at = time.perf_counter()
+        predicted_components, confidence = self._forecaster.predict_with_confidence(input_sequence)
+        infer_elapsed_ms = (time.perf_counter() - infer_started_at) * 1000.0
+
+        if predicted_components is None:
+            return None
+
+        missing_targets = [k for k in TARGET_COLUMNS if k not in predicted_components]
+        if missing_targets:
+            self._logger.system(
+                "forecasting_tool_prediction_missing_targets",
+                {"missing_targets": missing_targets},
+                level="WARNING",
+            )
+            return None
+
+        # Get the latest window for timing info
+        latest_window = input_sequence[-1]
+        window_duration = latest_window.window_end - latest_window.window_start
+
+        # Create PredictedFeatures with predicted raw component values.
+        # ReactiveTool computes final score (incl. baseline normalization).
+        predicted_features = PredictedFeatures(
+            prediction_timestamp=latest_window.window_end,
+            target_window_start=latest_window.window_end + self._config.prediction_horizon_seconds,
+            target_window_end=latest_window.window_end + self._config.prediction_horizon_seconds + window_duration,
+            horizon_seconds=self._config.prediction_horizon_seconds,
+            features=predicted_components,
+            enabled_metrics=latest_window.enabled_metrics.copy(),
+            confidence=confidence,
+            uncertainty={}
+        )
+
+        self._logger.system(
+            "forecasting_tool_inference_timing",
+            {
+                "inference_ms": round(infer_elapsed_ms, 3),
+                "confidence": round(confidence, 3),
+            },
+            level="DEBUG",
+        )
+
+        return predicted_features
     
     def _estimate_uncertainty(
         self, prediction: PredictedFeatures
@@ -289,4 +368,14 @@ class ForecastingTool:
         Returns:
             True if prediction should be updated.
         """
-        return True  # TODO: Implement timing logic based on config
+        update_rate = float(self._config.update_rate_hz)
+        if update_rate <= 0:
+            return True
+
+        min_interval = 1.0 / update_rate
+        now = time.time()
+        if now - self._last_prediction_time < min_interval:
+            return False
+
+        self._last_prediction_time = now
+        return True

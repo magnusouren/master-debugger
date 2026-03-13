@@ -32,9 +32,12 @@ structlog>=23.0.0
 # Type checking (dev)
 # mypy>=1.7.0
 
-# ML libraries (for future model implementations)
-# scikit-learn>=1.3.0
-# torch>=2.0.0
+# ML libraries (for forecasting)
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+pyarrow>=14.0.0  # For parquet file support
+PyWavelets>=1.5.0  # For IPA calculation (import as pywt)
+# torch>=2.0.0  # For future sequence models
 
 # LLM integration (for feedback generation)
 openai>=1.0.0
