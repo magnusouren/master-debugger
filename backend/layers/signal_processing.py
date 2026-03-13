@@ -293,6 +293,8 @@ class SignalProcessingLayer:
         cleaned_samples = self._handle_missing_values(samples)
 
         features: dict = {}
+        # Data-quality metrics are always available for monitoring/confidence.
+        data_quality_metrics = self._extract_data_quality_metrics(samples)
 
         # 2. Dispatch enabled metrics # TODO: Optimize later
         for metric in self._config.enabled_metrics:
@@ -322,17 +324,14 @@ class SignalProcessingLayer:
                     features.update(
                         self._extract_ipi_metrics(cleaned_samples)
                     )
+                elif metric == "data_quality":
+                    features.update(data_quality_metrics)
                 else:
                     self._logger.system(
                         "unknown_metric_requested",
                         {"metric": metric},
                         level="WARNING",
                     )
-
-                # Always compute data quality metrics for monitoring, even if not explicitly enabled
-                features.update(
-                    self._extract_data_quality_metrics(samples)
-                )
 
             except Exception as e:
                 self._logger.system(
@@ -343,6 +342,10 @@ class SignalProcessingLayer:
                     },
                     level="WARNING",
                 )
+
+        # Keep data-quality metrics present even when not explicitly enabled.
+        if "data_quality" not in self._config.enabled_metrics:
+            features.update(data_quality_metrics)
 
         return features
     
