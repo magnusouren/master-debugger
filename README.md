@@ -5,28 +5,47 @@ A system for providing eye-tracking based debugging assistance in VS Code.
 ## Project Structure
 
 ```
-master-debuger/
+master-debugger/
 ├── backend/                            # Python backend
 │   ├── api/                            # WebSocket and REST API servers
 │   │   ├── __init__.py 
 │   │   ├── websocket_server.py         # Real-time communication
 │   │   ├── rest_api.py                 # Configuration and status endpoints
 │   │   └── server.py                   # Combined server entry point
+│   ├── core/
+│   │   └── runtime_controller.py       # Central orchestrator
 │   ├── layers/                         # Processing layers
 │   │   ├── __init__.py 
 │   │   ├── signal_processing.py        # Raw gaze data → features
 │   │   ├── forecasting_tool.py         # Feature prediction (proactive)
 │   │   ├── reactive_tool.py            # User state estimation
-│   │   ├── feedback_layer.py           # Feedback generation
-│   │   └── runtime_controller.py       # Central orchestrator
+│   │   └── feedback_layer.py           # Feedback generation
 │   ├── services/                       # Service implementations
 │   │   ├── eye_tracker/                # Eye tracker interfaces
 │   │   │   ├── tobii_pro_adapter.py    # Tobii Pro SDK adapter
-│   │   │   └── simulated_tracker.py    # Simulated eye tracker for testing
-│   │   ├── llm_clients/                # LLM service clients
+│   │   │   └── simulated_adapter.py    # Simulated eye tracker for testing
+│   │   ├── llm_client/                 # LLM service clients
 │   │   │   ├── openai_client.py        # OpenAI API client
-│   │   │   └── development.py          # Anthropic API client
-│   │   └── logger.py                   # Logging service
+│   │   │   └── development_client.py   # Development-mode client
+│   │   └── logger_service.py           # Logging service
+│   ├── models/
+│   │   ├── forecast_feature_schema.py  # Shared forecasting feature schema
+│   │   ├── xgboost_forecaster.py       # Runtime model wrapper
+│   │   └── trained/
+│   │       ├── latest.json             # Active model artifact
+│   │       └── latest_metadata.json    # Active model metadata
+│   ├── training/
+│   │   ├── preprocess.py               # Build processed training features
+│   │   ├── dataset.py                  # Sequence prep + participant split
+│   │   └── train_xgboost.py            # Train/evaluate/save forecaster
+│   ├── data/
+│   │   └── processed/
+│   │       ├── emip_features.parquet   # Processed dataset
+│   │       └── splits/                 # train/val/test participant files
+│   ├── logs/
+│   │   ├── experiments/
+│   │   ├── feedback/
+│   │   └── system/
 │   ├── types/                          # Type definitions
 │   │   ├── __init__.py     
 │   │   ├── eye_tracking.py             # Eye tracking data types
@@ -34,7 +53,8 @@ master-debuger/
 │   │   ├── code_context.py             # VS Code context types
 │   │   ├── feedback.py                 # Feedback types
 │   │   ├── config.py                   # Configuration types
-│   │   └── messages.py                 # WebSocket message types
+│   │   ├── messages.py                 # WebSocket message types
+│   │   └── domain_events.py            # Domain event contracts
 │   ├── __init__.py     
 │   ├── main.py                         # Main entry point
 │   ├── requirements.txt                # Python dependencies
@@ -73,22 +93,27 @@ The forecasting model in this project was trained using the EMIP eye-tracking da
 ### Backend
 
 ```bash
-# skip if you have a virtual environment already
-
-
-
 # Activate the virtual environment
 source .venv/bin/activate
 
-# Install dependencies
-cd backend
-pip install -r requirements.txt
+# Install dependencies (from repo root)
+pip install -r backend/requirements.txt
 
 # Run the backend (from root)
-python -m backend.main
+python -m backend.main --config backend/config.yaml
 
 ```
 The backend will start a WebSocket server on port 8765 and a REST API server on port 8080 by default. Adjust ports in `config.yaml` as needed.
+
+### Training (XGBoost forecaster)
+
+```bash
+
+# Train model (uses participant-level train/val/test split)
+python -m backend.training.train_xgboost --config backend/config.yaml
+```
+
+The active proactive model is loaded from `backend/models/trained/latest.json` with metadata in `backend/models/trained/latest_metadata.json`.
 
 ### VS Code Extension
 
@@ -125,13 +150,13 @@ To test the extension:
 
 1. **Eye Tracker → Signal Processing**: Raw gaze data (120 Hz) is processed into window-based features (2-10 Hz)
 
-2. **Signal Processing → Reactive Tool**: Features are analyzed to estimate user state (stress, cognitive load, etc.)
+2. **Reactive mode**: Signal Processing → Reactive Tool (direct scoring)
 
-3. **Reactive Tool → Controller**: User state scores trigger feedback decisions
+3. **Proactive mode**: Signal Processing → Forecasting Tool (predict +30s) → Reactive Tool (baseline-aware scoring)
 
-4. **Controller → Feedback Layer**: When thresholds are exceeded, feedback is generated using code context
+4. **Reactive Tool → Controller**: User state scores trigger feedback decisions
 
-5. **Feedback Layer → VS Code**: Structured feedback is sent via WebSocket and rendered in the editor
+5. **Controller → Feedback Layer → VS Code**: Structured feedback is generated and rendered in the editor
 
 ### Operation Modes
 
