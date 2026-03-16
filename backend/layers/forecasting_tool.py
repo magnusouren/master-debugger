@@ -58,6 +58,12 @@ class ForecastingTool:
         # Auto-load model if path specified in config
         if self._config.model_path:
             self.load_model(self._config.model_path)
+        else:
+            self._logger.system(
+                "forecasting_tool_no_model_configured",
+                {},
+                level="WARNING"
+            )
     
     def configure(self, config: ForecastingConfig) -> None:
         """
