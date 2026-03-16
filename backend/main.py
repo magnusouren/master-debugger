@@ -15,7 +15,19 @@ from pathlib import Path
 
 # Add parent directory to path for direct script execution
 if __name__ == "__main__":
-    sys.path.insert(0, str(Path(__file__).parent.parent))
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    backend_dir = str(Path(__file__).resolve().parent)
+
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
+    # When running `python main.py` from inside `backend/`, Python can resolve
+    # stdlib `types` as local `backend/types` (name shadowing). Remove backend
+    # script dir entries to avoid that import collision.
+    while backend_dir in sys.path:
+        sys.path.remove(backend_dir)
+    if Path.cwd().resolve() == Path(backend_dir) and "" in sys.path:
+        sys.path.remove("")
 
 
 def parse_args() -> argparse.Namespace:

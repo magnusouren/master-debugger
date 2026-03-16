@@ -64,6 +64,8 @@ class XGBoostForecaster:
             print(f"Model not found: {model_path}")
             return False
 
+        model_path = self._resolve_json_pointer(model_path)
+
         # Load model
         self._model = xgb.XGBRegressor()
         self._model.load_model(str(model_path))
@@ -74,15 +76,40 @@ class XGBoostForecaster:
         )
         if model_path.stem == "latest":
             metadata_path = model_path.with_name("latest_metadata.json")
+        metadata_path = self._resolve_json_pointer(metadata_path)
 
         if metadata_path.exists():
-            with open(metadata_path, 'r') as f:
-                self._metadata = json.load(f)
-            self._history_size = self._metadata.get('history_window_size', 5)
-            self._feature_names = self._metadata.get('feature_names', [])
+            try:
+                with open(metadata_path, 'r') as f:
+                    self._metadata = json.load(f)
+                self._history_size = self._metadata.get('history_window_size', 5)
+                self._feature_names = self._metadata.get('feature_names', [])
+            except Exception as e:
+                print(f"Warning: Could not parse metadata file {metadata_path}: {e}")
 
         print(f"Loaded model: {model_path}")
         return True
+
+    def _resolve_json_pointer(self, path: Path) -> Path:
+        """
+        Resolve git symlink placeholder files on systems without symlink support.
+
+        If a .json file contains plain text instead of JSON, treat that text as
+        a relative target filename and return the resolved path when it exists.
+        """
+        try:
+            if not path.exists() or path.suffix != ".json":
+                return path
+
+            text = path.read_text(encoding="utf-8", errors="ignore").strip()
+            if text and not text.startswith("{"):
+                candidate = (path.parent / text).resolve()
+                if candidate.exists() and candidate.suffix == ".json":
+                    return candidate
+        except Exception:
+            # Best-effort only; caller continues with original path.
+            pass
+        return path
 
     def is_loaded(self) -> bool:
         """Check if a model is loaded."""
