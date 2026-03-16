@@ -64,6 +64,10 @@ master-debuger/
 - Node.js 18+
 - VS Code 1.85+
 
+## Training Data
+
+The forecasting model in this project was trained using the EMIP eye-tracking dataset available on OSF: https://osf.io/53kts/overview.
+
 ## Setup
 
 ### Backend
