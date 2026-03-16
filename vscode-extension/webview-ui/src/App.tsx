@@ -152,7 +152,6 @@ export function App() {
         <div className="section">
           <ExperimentIDs
             experimentIsRunning={status?.experiment_active ?? false}
-            operationMode={status?.operation_mode ?? OperationMode.CONTROL}
             startExperiment={async (experimentId: string, participantId: string) => {
               vscode.postMessage({
                 type: "startExperiment",
