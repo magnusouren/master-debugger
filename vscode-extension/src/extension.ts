@@ -15,6 +15,7 @@ import {
     FeedbackDeliveryPayload,
     SystemStatus,
     FeedbackInteraction,
+    OperationMode,
 } from './types';
 import { isStatusUpdatePayload } from './utils/typeguard';
 import { fetchStatus } from './api';
@@ -340,9 +341,7 @@ async function disconnectFromBackend(): Promise<void> {
     );
 }
 
-async function toggleMode(
-    new_mode: 'reactive' | 'proactive' | undefined,
-): Promise<void> {
+async function toggleMode(new_mode: OperationMode): Promise<void> {
     if (!new_mode) {
         // Input for selecting mode if not provided
         const selectedMode = await vscode.window.showQuickPick(
@@ -354,7 +353,7 @@ async function toggleMode(
         if (!selectedMode) {
             return; // User cancelled
         }
-        new_mode = selectedMode as 'reactive' | 'proactive';
+        new_mode = selectedMode as OperationMode;
     }
 
     try {

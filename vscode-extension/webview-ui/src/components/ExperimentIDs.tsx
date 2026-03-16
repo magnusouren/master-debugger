@@ -13,7 +13,7 @@ export function ExperimentIDs({
 
 }: ExperimentIDsProps) {
   const [toggled, setToggled] = useState(false);
-  const [experimentId, setExperimentId] = useState("");
+  const [experimentId, setExperimentId] = useState("1");
   const [participantId, setParticipantId] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 

@@ -167,8 +167,14 @@ export interface WebSocketMessage {
 export interface FeedbackDeliveryPayload {
     items: FeedbackItem[];
     request_id?: string;
-    triggered_by: 'reactive' | 'proactive' | 'manual';
+    triggered_by: string; // e.g. "context_update", "manual_trigger", etc.
     user_state_score?: number;
+}
+
+export enum OperationMode {
+    REACTIVE = 'reactive',
+    PROACTIVE = 'proactive',
+    CONTROL = 'control',
 }
 
 /**
@@ -178,7 +184,7 @@ export interface SystemStatusMessage {
     status: SystemStatus;
     timestamp: number;
     eye_tracker_model?: string | null;
-    operation_mode: 'reactive' | 'proactive';
+    operation_mode: OperationMode;
     eye_samples_processed: number;
     code_window_samples_processed: number;
     feedback_generated: number;

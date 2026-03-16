@@ -98,6 +98,7 @@ class OperationMode(Enum):
     """System operation modes."""
     REACTIVE = "reactive"  # Respond to current state
     PROACTIVE = "proactive"  # Predict and preempt
+    CONTROL = "control"  # For control experiments, no feedback
 
 
 @dataclass
