@@ -9,6 +9,7 @@ import argparse
 import json
 from pathlib import Path
 from datetime import datetime
+import shutil
 import numpy as np
 
 try:
@@ -210,18 +211,19 @@ def save_model(
         json.dump(metadata, f, indent=2, default=str)
     print(f"Metadata saved to: {metadata_path}")
 
-    # Create symlink to latest model
+    # Write latest model/metadata as real files (not symlinks) for
+    # cross-platform compatibility, especially on Windows.
     latest_model = output_dir / "latest.json"
     latest_metadata = output_dir / "latest_metadata.json"
 
-    # Remove existing symlinks (use is_symlink() to catch broken symlinks too)
+    # Remove existing files/symlinks first
     if latest_model.is_symlink() or latest_model.exists():
         latest_model.unlink()
     if latest_metadata.is_symlink() or latest_metadata.exists():
         latest_metadata.unlink()
 
-    latest_model.symlink_to(model_path.name)
-    latest_metadata.symlink_to(metadata_path.name)
+    shutil.copy2(model_path, latest_model)
+    shutil.copy2(metadata_path, latest_metadata)
 
     return model_path
 

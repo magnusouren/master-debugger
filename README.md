@@ -26,28 +26,37 @@ brew install libomp
 - Node.js 18+
 - VS Code 1.85+
 
+## Training Data
+
+The forecasting model in this project was trained using the EMIP eye-tracking dataset available on OSF: https://osf.io/53kts/overview.
+
 ## Setup
 
 ### Backend
 
 ```bash
-# skip if you have a virtual environment already
-
-
-
 # Activate the virtual environment
 source .venv/bin/activate
 
-# Install dependencies
-cd backend
-pip install -r requirements.txt
+# Install dependencies (from repo root)
+pip install -r backend/requirements.txt
 
 # Run the backend (from root)
-python -m backend.main
+python -m backend.main --config backend/config.yaml
 
 ```
 
 The backend will start a WebSocket server on port 8765 and a REST API server on port 8080 by default. Adjust ports in `config.yaml` as needed.
+
+### Training (XGBoost forecaster)
+
+```bash
+
+# Train model (uses participant-level train/val/test split)
+python -m backend.training.train_xgboost --config backend/config.yaml
+```
+
+The active proactive model is loaded from `backend/models/trained/latest.json` with metadata in `backend/models/trained/latest_metadata.json`.
 
 ### VS Code Extension
 
@@ -85,13 +94,13 @@ To test the extension:
 
 1. **Eye Tracker → Signal Processing**: Raw gaze data (120 Hz) is processed into window-based features (2-10 Hz)
 
-2. **Signal Processing → Reactive Tool**: Features are analyzed to estimate user state (stress, cognitive load, etc.)
+2. **Reactive mode**: Signal Processing → Reactive Tool (direct scoring)
 
-3. **Reactive Tool → Controller**: User state scores trigger feedback decisions
+3. **Proactive mode**: Signal Processing → Forecasting Tool (predict +30s) → Reactive Tool (baseline-aware scoring)
 
-4. **Controller → Feedback Layer**: When thresholds are exceeded, feedback is generated using code context
+4. **Reactive Tool → Controller**: User state scores trigger feedback decisions
 
-5. **Feedback Layer → VS Code**: Structured feedback is sent via WebSocket and rendered in the editor
+5. **Controller → Feedback Layer → VS Code**: Structured feedback is generated and rendered in the editor
 
 ### Operation Modes
 
