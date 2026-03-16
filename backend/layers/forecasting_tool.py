@@ -185,7 +185,6 @@ class ForecastingTool:
     ) -> Optional[PredictedFeatures]:
         """
         Generate a prediction for a specific time horizon.
-        TODO: STUB IMPLEMENTATION
         
         Args:
             horizon_seconds: How far into the future to predict.

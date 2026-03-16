@@ -4,63 +4,25 @@ A system for providing eye-tracking based debugging assistance in VS Code.
 
 ## Project Structure
 
-```
-master-debuger/
-├── backend/                            # Python backend
-│   ├── api/                            # WebSocket and REST API servers
-│   │   ├── __init__.py 
-│   │   ├── websocket_server.py         # Real-time communication
-│   │   ├── rest_api.py                 # Configuration and status endpoints
-│   │   └── server.py                   # Combined server entry point
-│   ├── layers/                         # Processing layers
-│   │   ├── __init__.py 
-│   │   ├── signal_processing.py        # Raw gaze data → features
-│   │   ├── forecasting_tool.py         # Feature prediction (proactive)
-│   │   ├── reactive_tool.py            # User state estimation
-│   │   ├── feedback_layer.py           # Feedback generation
-│   │   └── runtime_controller.py       # Central orchestrator
-│   ├── services/                       # Service implementations
-│   │   ├── eye_tracker/                # Eye tracker interfaces
-│   │   │   ├── tobii_pro_adapter.py    # Tobii Pro SDK adapter
-│   │   │   └── simulated_tracker.py    # Simulated eye tracker for testing
-│   │   ├── llm_clients/                # LLM service clients
-│   │   │   ├── openai_client.py        # OpenAI API client
-│   │   │   └── development.py          # Anthropic API client
-│   │   └── logger.py                   # Logging service
-│   ├── types/                          # Type definitions
-│   │   ├── __init__.py     
-│   │   ├── eye_tracking.py             # Eye tracking data types
-│   │   ├── user_state.py               # User state types
-│   │   ├── code_context.py             # VS Code context types
-│   │   ├── feedback.py                 # Feedback types
-│   │   ├── config.py                   # Configuration types
-│   │   └── messages.py                 # WebSocket message types
-│   ├── __init__.py     
-│   ├── main.py                         # Main entry point
-│   ├── requirements.txt                # Python dependencies
-│   └── config.example.yaml             # Example configuration
-├── vscode-extension/                   # VS Code extension frontend
-│   ├── src/        
-│   │   ├── extension.ts                # Extension entry point
-│   │   ├── types.ts                    # TypeScript type definitions
-│   │   ├── websocket-client.ts         # WebSocket client
-│   │   ├── context-collector.ts        # Editor context collection
-│   │   ├── feedback-renderer.ts        # Feedback display
-│   │   └── status-bar.ts               # Status bar management
-│   ├── package.json    
-│   ├── tsconfig.json   
-│   └── README.md   
-├── .venv/                              # Python virtual environment
-└── README.md                           # This file
-```
+TODO
 
 ## Requirements
 
 ### Backend
+
 - Python 3.11 (required for tobii-research SDK)
 - Tobii Eye Tracker
 
+# Installations
+
+libomp (for xgboost on macOS):
+
+```bash
+brew install libomp
+```
+
 ### VS Code Extension
+
 - Node.js 18+
 - VS Code 1.85+
 
@@ -84,6 +46,7 @@ pip install -r requirements.txt
 python -m backend.main
 
 ```
+
 The backend will start a WebSocket server on port 8765 and a REST API server on port 8080 by default. Adjust ports in `config.yaml` as needed.
 
 ### VS Code Extension
@@ -102,6 +65,7 @@ npm run watch
 ```
 
 To test the extension:
+
 1. Open the `vscode-extension` folder in VS Code
 2. Press `F5` to launch the Extension Development Host
 3. Use the command palette to run Eye Tracking commands

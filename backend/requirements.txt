@@ -42,3 +42,6 @@ PyWavelets>=1.5.0  # For IPA calculation (import as pywt)
 # LLM integration (for feedback generation)
 openai>=1.0.0
 # anthropic>=0.7.0  # Future support
+
+
+xgboost>=2.0.0

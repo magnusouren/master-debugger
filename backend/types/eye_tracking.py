@@ -41,7 +41,6 @@ class WindowFeatures:
     window_start: float  # Unix timestamp
     window_end: float    # Unix timestamp
     
-    # TODO: Define specific metrics to extract (configurable)
     # Placeholder feature dictionary - to be expanded
     features: Dict[str, float] = field(default_factory=dict)
 
@@ -51,15 +50,6 @@ class WindowFeatures:
     # Metadata
     sample_count: int = 0
     valid_sample_ratio: float = 0.0
-    
-    # Example feature placeholders (to be defined):
-    # - fixation_count: int
-    # - fixation_duration_mean: float
-    # - saccade_count: int
-    # - saccade_amplitude_mean: float
-    # - pupil_diameter_mean: float
-    # - blink_rate: float
-    # - gaze_dispersion: float
 
 
 @dataclass

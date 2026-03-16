@@ -226,6 +226,23 @@ class RuntimeController:
         # Keep the stored configuration in sync with the current operation mode
         if self._config is not None and getattr(self._config, "controller", None) is not None:
             self._config.controller.operation_mode = mode
+
+        # Enable or disable layers based on mode
+        if mode == OperationMode.PROACTIVE:
+            self._forecasting.reset()  # Clear any old state when switching to proactive
+            self._forecasting.enable()
+            self._logger.system(
+                "forecasting_enabled_for_proactive_mode",
+                {},
+                level="DEBUG",
+            )
+        else:
+            self._forecasting.disable()
+            self._logger.system(
+                "forecasting_disabled_for_non_proactive_mode",
+                {},
+                level="DEBUG",
+            )
         
         self._logger.system(
             "operation_mode_changed",
