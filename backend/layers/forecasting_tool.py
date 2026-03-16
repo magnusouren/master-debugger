@@ -58,6 +58,12 @@ class ForecastingTool:
         # Auto-load model if path specified in config
         if self._config.model_path:
             self.load_model(self._config.model_path)
+        else:
+            self._logger.system(
+                "forecasting_tool_no_model_configured",
+                {},
+                level="WARNING"
+            )
     
     def configure(self, config: ForecastingConfig) -> None:
         """
@@ -185,7 +191,6 @@ class ForecastingTool:
     ) -> Optional[PredictedFeatures]:
         """
         Generate a prediction for a specific time horizon.
-        TODO: STUB IMPLEMENTATION
         
         Args:
             horizon_seconds: How far into the future to predict.
