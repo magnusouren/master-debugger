@@ -352,7 +352,14 @@ class ReactiveTool:
                 "feature_window_size": len(windows),
                 "avg_valid_sample_ratio": self._avg_valid_ratio(windows),
                 "using_baseline": self.has_baseline(),
+                "window_ids": [w.window_id for w in windows if getattr(w, "window_id", None)],
+                "source_window_id": windows[-1].window_id,
+                "forecast_id": getattr(windows[-1], "forecast_id", None),
+                "source_type": "predicted_features" if windows[-1].is_predicted else "observed_features",
             },
+            source_window_id=windows[-1].window_id,
+            forecast_id=getattr(windows[-1], "forecast_id", None),
+            source_type="predicted_features" if windows[-1].is_predicted else "observed_features",
         )
 
         self._current_estimate = estimate

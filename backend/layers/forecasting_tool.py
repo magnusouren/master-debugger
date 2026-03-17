@@ -48,6 +48,10 @@ class ForecastingTool:
         self._output_callbacks: List[Callable[[PredictedFeatures], None]] = []
         self._is_enabled: bool = False
         self._last_prediction_time: float = 0.0
+        self._forecast_counter: int = 0
+        self._pred_window_counter: int = 0
+        self._last_warmup_status: Optional[str] = None
+        self._id_prefix: str = f"fc{int(time.time())}"
 
         # Use provided logger or create fallback
         if logger is None:
@@ -200,12 +204,13 @@ class ForecastingTool:
         """
 
         started_at = time.perf_counter()
+        forecast_id = self._next_forecast_id()
         window_feature = self._prepare_input_sequence()
 
         if not window_feature:
             return None
         
-        prediction = self._run_model_inference(window_feature)
+        prediction = self._run_model_inference(window_feature, forecast_id, horizon_seconds)
 
         if prediction is not None:
             elapsed_ms = (time.perf_counter() - started_at) * 1000.0
@@ -266,6 +271,65 @@ class ForecastingTool:
         """Reset internal state and history buffer."""
         self._feature_history.clear()
         self._last_prediction_time = 0.0
+        self._last_warmup_status = None
+        self._forecast_counter = 0
+        self._pred_window_counter = 0
+
+    def _next_forecast_id(self) -> str:
+        self._forecast_counter += 1
+        return f"{self._id_prefix}-f{self._forecast_counter:06d}"
+
+    def _next_pred_window_id(self, forecast_id: str) -> str:
+        self._pred_window_counter += 1
+        return f"{forecast_id}-w{self._pred_window_counter:04d}"
+
+    def _compute_required_history(self) -> int:
+        if self._forecaster and self._forecaster.is_loaded():
+            return max(1, int(getattr(self._forecaster, "history_size", 5)))
+        return 5
+
+    def _current_window_duration(self) -> float:
+        if not self._feature_history:
+            return 0.0
+        latest = self._feature_history[-1]
+        return max(0.0, latest.window_end - latest.window_start)
+
+    def _log_warmup_status(self, can_predict: bool, required_windows: int) -> None:
+        if not self._is_enabled:
+            return
+
+        status = "ready" if can_predict else "warming_up"
+        buffer_windows = len(self._feature_history)
+        buffer_fill_ratio = 0.0 if required_windows <= 0 else min(1.0, buffer_windows / required_windows)
+
+        available_history_seconds = 0.0
+        if self._feature_history:
+            available_history_seconds = max(
+                0.0,
+                self._feature_history[-1].window_end - self._feature_history[0].window_start,
+            )
+
+        window_duration = self._current_window_duration()
+        required_history_seconds = required_windows * window_duration if window_duration > 0 else self._config.history_window_seconds
+
+        if status == self._last_warmup_status and status == "ready":
+            return
+
+        self._logger.experiment(
+            "forecast_warmup_status_logged",
+            {
+                "status": status,
+                "buffer_fill_ratio": round(buffer_fill_ratio, 3),
+                "buffer_windows": buffer_windows,
+                "required_windows": required_windows,
+                "available_history_seconds": round(available_history_seconds, 3),
+                "required_history_seconds": round(required_history_seconds, 3),
+                "can_predict": can_predict,
+            },
+            level="INFO",
+        )
+
+        self._last_warmup_status = status
     
     # --- Internal methods ---
     
@@ -276,18 +340,20 @@ class ForecastingTool:
         Returns:
             Prepared feature sequence or None if insufficient data.
         """
-        # Check if we have a model loaded to know required history size
-        required_history = 5  # Default
-        if self._forecaster and self._forecaster.is_loaded():
-            required_history = self._forecaster.history_size
+        required_history = self._compute_required_history()
+        can_predict = len(self._feature_history) >= required_history
+        self._log_warmup_status(can_predict=can_predict, required_windows=required_history)
 
-        if len(self._feature_history) < required_history:
+        if not can_predict:
             return None
 
         return list(self._feature_history)
     
     def _run_model_inference(
-        self, input_sequence: List[WindowFeatures]
+        self,
+        input_sequence: List[WindowFeatures],
+        forecast_id: str,
+        horizon_seconds: float,
     ) -> Optional[PredictedFeatures]:
         """
         Run the forecasting model on input sequence.
@@ -331,13 +397,15 @@ class ForecastingTool:
         # ReactiveTool computes final score (incl. baseline normalization).
         predicted_features = PredictedFeatures(
             prediction_timestamp=latest_window.window_end,
-            target_window_start=latest_window.window_end + self._config.prediction_horizon_seconds,
-            target_window_end=latest_window.window_end + self._config.prediction_horizon_seconds + window_duration,
-            horizon_seconds=self._config.prediction_horizon_seconds,
+            target_window_start=latest_window.window_end + horizon_seconds,
+            target_window_end=latest_window.window_end + horizon_seconds + window_duration,
+            horizon_seconds=horizon_seconds,
+            forecast_id=forecast_id,
+            window_id=self._next_pred_window_id(forecast_id),
             features=predicted_components,
             enabled_metrics=latest_window.enabled_metrics.copy(),
             confidence=confidence,
-            uncertainty={}
+            uncertainty={},
         )
 
         self._logger.system(

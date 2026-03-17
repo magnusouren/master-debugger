@@ -33,7 +33,7 @@ class LogEntry:
     level: str
     event_type: str
     data: Dict[str, Any]
-    category: str  # "experiment" or "system"
+    category: str  # "experiment", "system", or "features"
     mode: Optional[str] = None
 
 @dataclass
@@ -55,6 +55,7 @@ class LoggerService:
         system_level: str = "INFO",
         max_entries: int = 100000,
         experiment_mode: str = None,
+        features_level: str = "INFO",
     ):
         """
         Initialize the logger service.
@@ -67,10 +68,12 @@ class LoggerService:
         """
         self.experiment_logs: List[LogEntry] = []
         self.system_logs: List[LogEntry] = []
+        self.feature_logs: List[LogEntry] = []
         self.feedback_logs: List[LogFeedbackItem] = []
         
         self.experiment_level = LogLevel[experiment_level.upper()]
         self.system_level = LogLevel[system_level.upper()]
+        self.features_level = LogLevel[features_level.upper()]
         
         self.max_entries = max_entries
         self.experiment_mode = experiment_mode
@@ -109,6 +112,32 @@ class LoggerService:
         # Rotate if exceeding max entries
         if len(self.experiment_logs) > self.max_entries:
             self.experiment_logs = self.experiment_logs[-self.max_entries:]
+
+    def features(
+        self,
+        event_type: str,
+        data: Optional[Dict[str, Any]] = None,
+        level: str = "INFO",
+    ) -> None:
+        """
+        Log a feature stream event (high-volume window data).
+        """
+        if not self._should_log(level, category="features"):
+            return
+
+        entry = LogEntry(
+            timestamp=datetime.now(timezone.utc).timestamp(),
+            level=level.upper(),
+            event_type=event_type,
+            data=data or {},
+            category="features",
+            mode=self.experiment_mode,
+        )
+
+        self.feature_logs.append(entry)
+
+        if len(self.feature_logs) > self.max_entries:
+            self.feature_logs = self.feature_logs[-self.max_entries:]
     
     def system(
         self,
@@ -171,7 +200,7 @@ class LoggerService:
         Set log level threshold for a category.
         
         Args:
-            category: "experiment" or "system".
+            category: "experiment", "system", or "features".
             level: "DEBUG", "INFO", "WARNING", or "ERROR".
         """
         level_obj = LogLevel[level.upper()]
@@ -180,6 +209,8 @@ class LoggerService:
             self.experiment_level = level_obj
         elif category.lower() == "system":
             self.system_level = level_obj
+        elif category.lower() == "features":
+            self.features_level = level_obj
         else:
             raise ValueError(f"Unknown category: {category}")
     
@@ -388,6 +419,73 @@ class LoggerService:
                 )
             )
             return False
+
+    def export_feature_logs(self, filepath: str) -> bool:
+        """
+        Export feature stream logs to CSV file.
+
+        Args:
+            filepath: Path to export file.
+
+        Returns:
+            True if successful.
+        """
+        try:
+            filepath = filepath if filepath.endswith(".csv") else f"{filepath}.csv"
+            filepath = Path(filepath)
+
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+
+            logs_data = [
+                {
+                    "timestamp": entry.timestamp,
+                    "level": entry.level,
+                    "mode": entry.mode,
+                    "event_type": entry.event_type,
+                    "data": entry.data,
+                }
+                for entry in self.feature_logs
+            ]
+
+            with open(filepath, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["timestamp", "level", "mode", "event_type", "data"])
+
+                for entry in logs_data:
+                    dt = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
+                    timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+                    writer.writerow([
+                        timestamp_str,
+                        entry["level"],
+                        entry["mode"].upper() if entry["mode"] else "UNKNOWN",
+                        entry["event_type"],
+                        json.dumps(json_safe(entry["data"])),
+                    ])
+
+            self._print_log(
+                LogEntry(
+                    timestamp=datetime.now(timezone.utc).timestamp(),
+                    level="INFO",
+                    event_type="export_feature_logs",
+                    mode=self.experiment_mode,
+                    data={"filepath": filepath, "count": len(logs_data)},
+                    category="system",
+                )
+            )
+            return True
+        except Exception as e:
+            self._print_log(
+                LogEntry(
+                    timestamp=datetime.now(timezone.utc).timestamp(),
+                    level="ERROR",
+                    mode=self.experiment_mode,
+                    event_type="export_feature_logs_error",
+                    data={"error": str(e)},
+                    category="system",
+                )
+            )
+            return False
     
     # --- Internal Methods ---
     
@@ -411,6 +509,8 @@ class LoggerService:
         # Choose appropriate threshold based on category.
         if category.lower() == "system":
             threshold = self.system_level
+        elif category.lower() == "features":
+            threshold = self.features_level
         else:
             # Default to experiment threshold for "experiment" and any other categories.
             threshold = self.experiment_level
@@ -459,6 +559,7 @@ def get_logger() -> LoggerService:
 def initialize_logger(
     experiment_level: str = "INFO",
     system_level: str = "INFO",
+    features_level: str = "INFO",
 ) -> LoggerService:
     """
     Initialize the global logger service.
@@ -474,5 +575,6 @@ def initialize_logger(
     _logger = LoggerService(
         experiment_level=experiment_level,
         system_level=system_level,
+        features_level=features_level,
     )
     return _logger
