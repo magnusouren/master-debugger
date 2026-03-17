@@ -1081,7 +1081,7 @@ class RuntimeController:
                 "window_end": features.window_end,
                 "feature_window_size": feature_window_size,
                 "features": features.features,
-                "avg_valid_sample_ratio": features.valid_sample_ratio,
+                "valid_sample_ratio": features.valid_sample_ratio,
                 "using_baseline": self._reactive_tool.has_baseline(),
                 "mode": self._operation_mode.value,
                 "is_predicted": False,
