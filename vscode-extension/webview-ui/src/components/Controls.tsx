@@ -67,7 +67,7 @@ export function Controls({
           </button>
 
           <div className="mode-buttons">
-            {[OperationMode.REACTIVE, OperationMode.PROACTIVE, OperationMode.CONTROL, OperationMode.QUESTIONNAIRE].map((mode) => {
+            {[OperationMode.CONTROL, OperationMode.PROACTIVE, OperationMode.REACTIVE, OperationMode.QUESTIONNAIRE].map((mode) => {
               const isActive = currentMode === mode;
               const label = mode.charAt(0).toUpperCase() + mode.slice(1);
               return (
