@@ -309,9 +309,6 @@ class ForecastingTool:
                 self._feature_history[-1].window_end - self._feature_history[0].window_start,
             )
 
-        window_duration = self._current_window_duration()
-        required_history_seconds = required_windows * window_duration if window_duration > 0 else self._config.history_window_seconds
-
         if status == self._last_warmup_status and status == "ready":
             return
 
@@ -323,7 +320,6 @@ class ForecastingTool:
                 "buffer_windows": buffer_windows,
                 "required_windows": required_windows,
                 "available_history_seconds": round(available_history_seconds, 3),
-                "required_history_seconds": round(required_history_seconds, 3),
                 "can_predict": can_predict,
             },
             level="INFO",

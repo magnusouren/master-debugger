@@ -1218,8 +1218,6 @@ class RuntimeController:
             participant_id: Unique participant identifier.
         """
 
-        self._logger.start_experiment()
-
         # Start streaming from eye tracker if not already started
         if self._eye_tracker_adapter and self._eye_tracker_adapter.is_connected():
             await self._eye_tracker_adapter.start_streaming()
