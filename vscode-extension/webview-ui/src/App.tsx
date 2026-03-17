@@ -199,6 +199,12 @@ export function App() {
         </div>
       )}
 
+      {status?.operation_mode === OperationMode.QUESTIONNAIRE && (
+        <div className="section">
+          <div className="section-title">Questionnaire Mode Active - No Feedback Will Be Shown ⚠️</div>
+        </div>
+      )}
+
 
     </div>
   );
