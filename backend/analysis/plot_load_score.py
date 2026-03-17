@@ -1,176 +1,122 @@
 """
-Generate a load score line chart from a feature log CSV.
+Plot the logged user-state scores from an experiment CSV in logs/experiments.
 
 Usage:
-    python -m backend.analysis.plot_load_score path/to/logs/features_<session>.csv [--output out.png] [--show]
+    python -m backend.analysis.plot_load_score path/to/logs/experiments/<session>.csv [--output out.png] [--show]
 """
 from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
-from matplotlib.dates import DateFormatter
 import pandas as pd
 
-from backend.layers.reactive_tool import ReactiveTool, ReactiveToolConfig
-from backend.services.logger_service import LoggerService
-from backend.types import PredictedFeatures, WindowFeatures
+# Mode-specific colors for the line segments
+MODE_COLORS: Dict[str, str] = {
+    "control": "#1f77b4",
+    "reactive": "#d62728",
+    "proactive": "#ff7f0e",
+    "questionnaire": "#9467bd",
+    "unknown": "#7f7f7f",
+}
 
 
-@dataclass
-class SeriesPoint:
-    timestamp: datetime
-    score: float
-
-@dataclass
-class FeatureEvent:
-    timestamp: float
-    window: WindowFeatures
+def _parse_timestamp(ts_str: str) -> datetime:
+    return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
 
 
-DEFAULT_ENABLED_METRICS = [
-    "pupil_diameter",
-    "fixation_duration",
-    "saccade_amplitude",
-    "ipi",
-    "data_quality",
-]
+def _load_points(csv_path: Path) -> List[Tuple[float, float, str]]:
+    """Load (time_sec, score, mode) tuples from an experiment log CSV."""
+    df = pd.read_csv(csv_path)
+    if df.empty:
+        return []
 
-
-def _extract_valid_ratio(payload: dict, features: dict) -> float:
-    return float(
-        payload.get("avg_valid_sample_ratio")
-        or features.get("dq_valid_ratio_any")
-        or features.get("pupil_valid_ratio")
-        or 0.0
-    )
-
-
-def _parse_row(row: pd.Series) -> Optional[FeatureEvent]:
-    """Parse a CSV row into a WindowFeatures event for reactive scoring."""
-    data_field = row.get("data")
-    try:
-        payload = json.loads(data_field) if isinstance(data_field, str) else {}
-    except json.JSONDecodeError:
-        return None
-
-    event_type = row.get("event_type")
-
-    if event_type == "observed_feature_window_logged":
-        features = payload.get("features", {}) or {}
-        window_start = payload.get("window_start")
-        window_end = payload.get("window_end") or window_start
-        if window_start is None or window_end is None:
-            return None
-        wf = WindowFeatures(
-            window_start=float(window_start),
-            window_end=float(window_end),
-            window_id=payload.get("window_id"),
-            is_predicted=False,
-            forecast_id=None,
-            features=features,
-            enabled_metrics=list(DEFAULT_ENABLED_METRICS),
-            sample_count=int(features.get("pupil_window_sample_count", 0) or 0),
-            valid_sample_ratio=_extract_valid_ratio(payload, features),
-        )
-        ts = float(window_end)
-        return FeatureEvent(timestamp=ts, window=wf)
-
-    if event_type == "predicted_feature_window_logged":
-        features = payload.get("predicted_features") or payload.get("features") or {}
-        target_start = payload.get("target_window_start")
-        target_end = payload.get("target_window_end") or target_start
-        target_time = payload.get("target_time") or target_end or target_start
-        if target_start is None or target_end is None or target_time is None:
-            return None
-        pf = PredictedFeatures(
-            prediction_timestamp=float(payload.get("prediction_timestamp") or target_time),
-            target_window_start=float(target_start),
-            target_window_end=float(target_end),
-            horizon_seconds=float(payload.get("prediction_horizon_seconds") or 0.0),
-            forecast_id=payload.get("forecast_id"),
-            window_id=payload.get("window_id"),
-            features=features,
-            enabled_metrics=list(DEFAULT_ENABLED_METRICS),
-            confidence=float(payload.get("confidence", 0.0) or 0.0),
-        )
-        wf = pf.to_window_features()
-        wf.valid_sample_ratio = _extract_valid_ratio(payload, features)
-        ts = float(target_time)
-        return FeatureEvent(timestamp=ts, window=wf)
-
-    return None
-
-
-def _load_series(path: Path) -> Tuple[List[SeriesPoint], List[SeriesPoint]]:
-    df = pd.read_csv(path)
-
-    events: List[FeatureEvent] = []
-    for _, row in df.iterrows():
-        evt = _parse_row(row)
-        if evt:
-            events.append(evt)
-
-    events.sort(key=lambda e: e.timestamp)
-
-    logger = LoggerService(
-        experiment_level="ERROR",
-        system_level="ERROR",
-        features_level="ERROR",
-    )
-    rt = ReactiveTool(config=ReactiveToolConfig(), logger=logger)
-    rt.start()
-
-    observed: List[SeriesPoint] = []
-    predicted: List[SeriesPoint] = []
-
-    for evt in events:
-        rt.add_features(evt.window)
-        estimate = rt.estimate()
-        if not estimate:
+    # Establish a base timestamp for fallback time calculation
+    base_ts: datetime | None = None
+    for ts in df["timestamp"].dropna().tolist():
+        try:
+            base_ts = _parse_timestamp(str(ts))
+            break
+        except Exception:
             continue
-        point = SeriesPoint(
-            timestamp=datetime.fromtimestamp(evt.timestamp),
-            score=float(estimate.score.score),
-        )
-        if evt.window.is_predicted:
-            predicted.append(point)
-        else:
-            observed.append(point)
 
-    return observed, predicted
+    points: List[Tuple[float, float, str]] = []
+
+    for _, row in df.iterrows():
+        if row.get("event_type") != "user_state_estimate_logged":
+            continue
+
+        raw_data = row.get("data")
+        try:
+            payload = json.loads(raw_data) if isinstance(raw_data, str) else {}
+        except json.JSONDecodeError:
+            continue
+
+        score = payload.get("score")
+        if score is None:
+            continue
+
+        time_sec = payload.get("seconds_since_start")
+        if time_sec is None and base_ts is not None:
+            ts_str = row.get("timestamp")
+            try:
+                ts = _parse_timestamp(str(ts_str))
+                time_sec = (ts - base_ts).total_seconds()
+            except Exception:
+                continue
+
+        if time_sec is None:
+            continue
+
+        mode = str(row.get("mode") or "unknown").lower()
+        points.append((float(time_sec), float(score), mode))
+
+    points.sort(key=lambda p: p[0])
+    return points
 
 
-def _plot_series(
-    observed: Iterable[SeriesPoint],
-    predicted: Iterable[SeriesPoint],
-    output_path: Optional[Path],
-    show: bool,
-) -> None:
-    obs_times = [p.timestamp for p in observed]
-    obs_scores = [p.score for p in observed]
-    pred_times = [p.timestamp for p in predicted]
-    pred_scores = [p.score for p in predicted]
+def _plot(points: List[Tuple[float, float, str]], output_path: Path | None, show: bool) -> None:
+    if not points:
+        raise ValueError("No user_state_estimate_logged rows found in the CSV.")
+
+    # Break into contiguous segments per mode so colors switch when the mode switches.
+    segments: List[Tuple[str, List[float], List[float]]] = []
+    current_mode: str | None = None
+    times: List[float] = []
+    scores: List[float] = []
+
+    for t, s, mode in points:
+        if current_mode is None:
+            current_mode = mode
+        if mode != current_mode:
+            segments.append((current_mode, times, scores))
+            current_mode = mode
+            times, scores = [], []
+        times.append(t)
+        scores.append(s)
+
+    if times and scores and current_mode is not None:
+        segments.append((current_mode, times, scores))
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    if obs_times:
-        ax.plot(obs_times, obs_scores, label="Observed score", color="#1f77b4")
-    if pred_times:
-        ax.plot(pred_times, pred_scores, label="Predicted score", color="#d62728")
+    used_labels = set()
 
-    ax.set_xlabel("Time")
+    for mode, seg_times, seg_scores in segments:
+        color = MODE_COLORS.get(mode, MODE_COLORS["unknown"])
+        label = mode if mode not in used_labels else "_nolegend_"
+        ax.plot(seg_times, seg_scores, color=color, label=label)
+        used_labels.add(mode)
+
+    ax.set_xlabel("Seconds since start")
     ax.set_ylabel("Load score")
     ax.set_title("User load score over time")
-    ax.legend()
+    if used_labels:
+        ax.legend(title="Mode")
     ax.grid(True, linestyle="--", alpha=0.4)
-
-    ax.xaxis.set_major_formatter(DateFormatter("%H:%M:%S"))
-    fig.autofmt_xdate()
 
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -182,17 +128,19 @@ def _plot_series(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot load score over time from feature logs.")
+    parser = argparse.ArgumentParser(
+        description="Plot load scores (user_state_estimate_logged) from experiment logs.",
+    )
     parser.add_argument(
         "csv_path",
         type=str,
-        help="Path to logs/features/<session>.csv",
+        help="Path to logs/experiments/<session>.csv",
     )
     parser.add_argument(
         "--output",
         type=str,
         default=None,
-        help="Output image path (PNG). Defaults to <csv_path>_score.png",
+        help="Output image path (PNG). Defaults to <csv_path>.score.png",
     )
     parser.add_argument(
         "--show",
@@ -205,13 +153,11 @@ def main() -> None:
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
-    observed, predicted = _load_series(csv_path)
-    if not observed and not predicted:
-        raise ValueError("No observed or predicted feature rows found in the CSV.")
+    points = _load_points(csv_path)
 
     output_path = Path(args.output) if args.output else csv_path.with_suffix(".score.png")
+    _plot(points, output_path=output_path, show=args.show)
 
-    _plot_series(observed, predicted, output_path=output_path, show=args.show)
     if output_path:
         print(f"Saved plot to {output_path}")
 

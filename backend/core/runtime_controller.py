@@ -1090,6 +1090,7 @@ class RuntimeController:
         )
 
         if self._operation_mode in (
+            OperationMode.PROACTIVE,
             OperationMode.REACTIVE,
             OperationMode.CONTROL,
             OperationMode.QUESTIONNAIRE,
@@ -1203,6 +1204,9 @@ class RuntimeController:
             log_payload,
             level="INFO",
         )
+
+        if self._operation_mode == OperationMode.PROACTIVE and source_type == "observed_features":
+            return
 
         # Control mode does not deliver feedback, but we still want to log the user state estimates for analysis
         if self._operation_mode in (OperationMode.CONTROL, OperationMode.QUESTIONNAIRE):
