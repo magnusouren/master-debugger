@@ -8,7 +8,6 @@ Provides structured logging with two main categories:
 Supports configurable log levels and thresholds per category.
 """
 import csv
-import math
 from typing import Dict, Any, List, Optional
 from enum import Enum
 from dataclasses import dataclass
