@@ -40,6 +40,9 @@ class WindowFeatures:
     """
     window_start: float  # Unix timestamp
     window_end: float    # Unix timestamp
+    window_id: Optional[str] = None
+    is_predicted: bool = False
+    forecast_id: Optional[str] = None
     
     # Placeholder feature dictionary - to be expanded
     features: Dict[str, float] = field(default_factory=dict)
@@ -62,6 +65,8 @@ class PredictedFeatures:
     target_window_start: float   # Predicted window start time
     target_window_end: float     # Predicted window end time
     horizon_seconds: float       # How far into the future
+    forecast_id: Optional[str] = None
+    window_id: Optional[str] = None
     
     # Predicted features (same format as WindowFeatures)
     features: Dict[str, float] = field(default_factory=dict)
@@ -78,6 +83,9 @@ class PredictedFeatures:
         return WindowFeatures(
             window_start=self.target_window_start,
             window_end=self.target_window_end,
+            window_id=self.window_id,
+            is_predicted=True,
+            forecast_id=self.forecast_id,
             features=self.features.copy(),
             sample_count=1,  # Synthetic prediction sample for downstream confidence logic
             valid_sample_ratio=max(0.0, min(1.0, float(self.confidence))),

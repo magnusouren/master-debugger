@@ -117,6 +117,13 @@ class RuntimeController:
         else:
             self._session_id: Optional[str] = None
         
+
+        # ID and timing tracking
+        self._window_counter: int = 0
+        self._estimate_counter: int = 0
+        self._experiment_start_time: Optional[float] = None
+        self._id_prefix: str = self._session_id or "session"
+        
         # main loop
         self._main_loop_task: Optional[asyncio.Task] = None
 
@@ -565,6 +572,19 @@ class RuntimeController:
                     {"error": str(e), "event_type": event.event_type.value},
                     level="ERROR",
                 )
+
+    def _next_window_id(self) -> str:
+        self._window_counter += 1
+        return f"{self._id_prefix}-w{self._window_counter:06d}"
+
+    def _next_estimate_id(self) -> str:
+        self._estimate_counter += 1
+        return f"{self._id_prefix}-e{self._estimate_counter:06d}"
+
+    def _experiment_time_sec(self, timestamp: float) -> Optional[float]:
+        if self._experiment_start_time is None:
+            return None
+        return max(0.0, timestamp - self._experiment_start_time)
     
     # --- Feedback Control ---
     
@@ -1048,6 +1068,27 @@ class RuntimeController:
         Args:
             features: Computed window features.
         """
+        features.window_id = features.window_id or self._next_window_id()
+        features.is_predicted = False
+        features.forecast_id = None
+
+        feature_window_size = features.window_end - features.window_start
+        self._logger.features(
+            "observed_feature_window_logged",
+            {
+                "window_id": features.window_id,
+                "window_start": features.window_start,
+                "window_end": features.window_end,
+                "feature_window_size": feature_window_size,
+                "features": features.features,
+                "valid_sample_ratio": features.valid_sample_ratio,
+                "using_baseline": self._reactive_tool.has_baseline(),
+                "mode": self._operation_mode.value,
+                "is_predicted": False,
+            },
+            level="INFO",
+        )
+
         if self._operation_mode == OperationMode.REACTIVE or self._operation_mode == OperationMode.CONTROL:
             # Baseline: observed features -> reactive
             self._reactive_tool.add_features(features)
@@ -1078,6 +1119,27 @@ class RuntimeController:
         if self._reactive_tool.is_recording_baseline():
             return
 
+        if not predicted.window_id:
+            predicted.window_id = self._next_window_id()
+
+        if not predicted.forecast_id:
+            predicted.forecast_id = "forecast-unknown"
+
+        self._logger.features(
+            "predicted_feature_window_logged",
+            {
+                "window_id": predicted.window_id,
+                "forecast_id": predicted.forecast_id,
+                "target_window_start": predicted.target_window_start,
+                "target_window_end": predicted.target_window_end,
+                "target_time": predicted.target_window_start,
+                "predicted_features": predicted.features,
+                "prediction_horizon_seconds": predicted.horizon_seconds,
+                "is_predicted": True,
+            },
+            level="INFO",
+        )
+
         # Unified path:
         # Signal -> Forecasting(predicted component values) -> Reactive(score + baseline)
         self._reactive_tool.add_features(predicted.to_window_features())
@@ -1094,27 +1156,43 @@ class RuntimeController:
         """
         self._current_user_state = estimate
 
+        estimate.estimate_id = estimate.estimate_id or self._next_estimate_id()
+
+        source_window_id = estimate.source_window_id or estimate.metadata.get("source_window_id")
+        if not source_window_id:
+            window_ids = estimate.metadata.get("window_ids") if estimate.metadata else []
+            if window_ids:
+                source_window_id = window_ids[-1]
+
+        forecast_id = estimate.forecast_id
+        if forecast_id is None and estimate.metadata:
+            forecast_id = estimate.metadata.get("forecast_id")
+        source_type = estimate.source_type or (estimate.metadata.get("source_type") if estimate.metadata else None) or "observed_features"
+        experiment_time_sec = self._experiment_time_sec(estimate.timestamp)
+
+        log_payload = {
+            "estimate_id": estimate.estimate_id,
+            "score": estimate.score.score,
+            "confidence": estimate.score.confidence,
+            "contributing_features": estimate.contributing_features,
+            "model_type": estimate.model_type,
+            "model_version": estimate.model_version,
+            "metadata": estimate.metadata,
+            "source_type": source_type,
+            "source_window_id": source_window_id,
+            "forecast_id": forecast_id,
+            "experiment_time_sec": experiment_time_sec,
+        }
+
         self._logger.system(
             "user_state_estimate_updated",
-            {
-                "score": estimate.score.score,
-                "confidence": estimate.score.confidence,
-                "contributing_features": estimate.contributing_features,
-                "model_type": estimate.model_type,
-                "metadata": estimate.metadata,
-            },
+            log_payload,
             level="DEBUG",
         )
 
         self._logger.experiment(
             "user_state_estimate_logged",
-            {
-                "score": estimate.score.score,
-                "confidence": estimate.score.confidence,
-                "contributing_features": estimate.contributing_features,
-                "model_type": estimate.model_type,
-                "metadata": estimate.metadata,
-            },
+            log_payload,
             level="INFO",
         )
 
@@ -1140,6 +1218,8 @@ class RuntimeController:
             participant_id: Unique participant identifier.
         """
 
+        self._logger.set_start_time()
+
         # Start streaming from eye tracker if not already started
         if self._eye_tracker_adapter and self._eye_tracker_adapter.is_connected():
             await self._eye_tracker_adapter.start_streaming()
@@ -1158,6 +1238,10 @@ class RuntimeController:
         self._participant_id = participant_id
         self._experiment_is_active = True
         self._session_id = f"{participant_id}_{experiment_id}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        self._id_prefix = self._session_id or self._id_prefix
+        self._window_counter = 0
+        self._estimate_counter = 0
+        self._experiment_start_time = datetime.now(timezone.utc).timestamp()
 
         # start processing layers if not already running
         self._signal_processing.start()
@@ -1244,6 +1328,7 @@ class RuntimeController:
         self.export_experiment_data()
         self.export_system_logs()
         self.export_feedback_logs()
+        self.export_feature_logs()
         self._status = SystemStatus.STOPPED
 
         # Stop processing layers and reset state
@@ -1274,6 +1359,7 @@ class RuntimeController:
         self._experiment_id = None
         self._participant_id = None
         self._session_id = None
+        self._experiment_start_time = None
 
         return self.get_system_status()
     
@@ -1333,6 +1419,25 @@ class RuntimeController:
 
         filepath = f"logs/feedback/feedback_{self._session_id}.csv"
         success = self._logger.export_feedback_logs(filepath)
+        return success
+
+    def export_feature_logs(self) -> bool:
+        """
+        Export feature stream logs to file.
+
+        Returns:
+            True if export successful.
+        """
+        if self._experiment_id is None or self._participant_id is None:
+            self._logger.system(
+                "export_feature_logs_no_experiment",
+                {},
+                level="WARNING",
+            )
+            return False
+
+        filepath = f"logs/features/features_{self._session_id}.csv"
+        success = self._logger.export_feature_logs(filepath)
         return success
 
 

@@ -115,3 +115,9 @@ class UserStateEstimate:
     
     # Additional metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    # Provenance
+    source_window_id: Optional[str] = None
+    forecast_id: Optional[str] = None
+    source_type: Optional[str] = None  # observed_features | predicted_features
+    estimate_id: Optional[str] = None
