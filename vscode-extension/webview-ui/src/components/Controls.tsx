@@ -1,11 +1,13 @@
 import { useState } from "react";
+import { OperationMode } from "../types";
 
 interface ControlsProps {
   isConnected: boolean;
   eyeTrackerConnected: boolean;
+  currentMode: OperationMode | null;
   onConnect: () => void;
   onDisconnect: () => void;
-  onToggleMode: () => void;
+  onSetMode: (mode: OperationMode) => void;
   onClearFeedback: () => void;
   onTriggerFeedback: () => void;
   onConnectEyeTracker: () => void;
@@ -15,9 +17,10 @@ interface ControlsProps {
 export function Controls({
   isConnected,
   eyeTrackerConnected,
+  currentMode,
   onConnect,
   onDisconnect,
-  onToggleMode,
+  onSetMode,
   onClearFeedback,
   onTriggerFeedback,
   onConnectEyeTracker,
@@ -58,13 +61,29 @@ export function Controls({
             </button>
           )}
 
-          <button className="btn secondary" onClick={onToggleMode} disabled={!isConnected}>
-            Toggle Mode
-          </button>
 
           <button className="btn secondary" onClick={onTriggerFeedback} disabled={!isConnected}>
             Trigger Feedback
           </button>
+
+          <div className="mode-buttons">
+            {[OperationMode.REACTIVE, OperationMode.PROACTIVE, OperationMode.CONTROL, OperationMode.QUESTIONNAIRE].map((mode) => {
+              const isActive = currentMode === mode;
+              const label = mode.charAt(0).toUpperCase() + mode.slice(1);
+              return (
+                <button
+                  key={mode}
+                  className={`btn ${isActive ? "" : "secondary"}`}
+                  onClick={() => onSetMode(mode)}
+                  disabled={!isConnected || isActive}
+                  aria-pressed={isActive}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
 
           <button className="btn secondary" onClick={onClearFeedback}>
             Clear Feedback

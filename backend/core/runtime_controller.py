@@ -421,10 +421,10 @@ class RuntimeController:
         if not self._experiment_is_active:
             return
         
-        if self._operation_mode == OperationMode.CONTROL:
+        if self._operation_mode in (OperationMode.CONTROL, OperationMode.QUESTIONNAIRE):
             self._logger.system(
-                "context_update_ignored_in_control_mode",
-                {},
+                "context_update_ignored_in_non_feedback_mode",
+                {"mode": self._operation_mode.value},
                 level="DEBUG",
             )
             return
@@ -601,7 +601,7 @@ class RuntimeController:
         if self._status != SystemStatus.RUNNING:
             return False
 
-        if self._operation_mode == OperationMode.CONTROL:
+        if self._operation_mode in (OperationMode.CONTROL, OperationMode.QUESTIONNAIRE):
             return False
 
         if self._current_code_context is None:
@@ -625,7 +625,7 @@ class RuntimeController:
         if self._status != SystemStatus.RUNNING:
             return False
 
-        if self._operation_mode == OperationMode.CONTROL:
+        if self._operation_mode in (OperationMode.CONTROL, OperationMode.QUESTIONNAIRE):
             return False
 
         # No pending feedback or already delivered
@@ -705,7 +705,7 @@ class RuntimeController:
             if self._status != SystemStatus.RUNNING:
                 return False
 
-            if self._operation_mode == OperationMode.CONTROL:
+            if self._operation_mode in (OperationMode.CONTROL, OperationMode.QUESTIONNAIRE):
                 return False
 
             if self._pending_feedback is None:
@@ -1089,7 +1089,11 @@ class RuntimeController:
             level="INFO",
         )
 
-        if self._operation_mode == OperationMode.REACTIVE or self._operation_mode == OperationMode.CONTROL:
+        if self._operation_mode in (
+            OperationMode.REACTIVE,
+            OperationMode.CONTROL,
+            OperationMode.QUESTIONNAIRE,
+        ):
             # Baseline: observed features -> reactive
             self._reactive_tool.add_features(features)
             return
@@ -1112,7 +1116,11 @@ class RuntimeController:
         """
 
         # Nothing to do in reactive mode
-        if self._operation_mode == OperationMode.REACTIVE or self._operation_mode == OperationMode.CONTROL:
+        if self._operation_mode in (
+            OperationMode.REACTIVE,
+            OperationMode.CONTROL,
+            OperationMode.QUESTIONNAIRE,
+        ):
             return
 
         # Don't mix forecasted windows into baseline computation.
@@ -1197,7 +1205,7 @@ class RuntimeController:
         )
 
         # Control mode does not deliver feedback, but we still want to log the user state estimates for analysis
-        if self._operation_mode == OperationMode.CONTROL:
+        if self._operation_mode in (OperationMode.CONTROL, OperationMode.QUESTIONNAIRE):
             return
 
         # Attempt to deliver feedback if conditions are met

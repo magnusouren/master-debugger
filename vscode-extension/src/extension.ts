@@ -345,7 +345,7 @@ async function toggleMode(new_mode: OperationMode): Promise<void> {
     if (!new_mode) {
         // Input for selecting mode if not provided
         const selectedMode = await vscode.window.showQuickPick(
-            ['reactive', 'proactive'],
+            ['reactive', 'proactive', 'control', 'questionnaire'],
             {
                 placeHolder: 'Select operation mode',
             },

@@ -175,6 +175,7 @@ export enum OperationMode {
     REACTIVE = 'reactive',
     PROACTIVE = 'proactive',
     CONTROL = 'control',
+    QUESTIONNAIRE = 'questionnaire',
 }
 
 /**

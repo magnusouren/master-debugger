@@ -99,6 +99,7 @@ class OperationMode(Enum):
     REACTIVE = "reactive"  # Respond to current state
     PROACTIVE = "proactive"  # Predict and preempt
     CONTROL = "control"  # For control experiments, no feedback
+    QUESTIONNAIRE = "questionnaire"  # Collect questionnaire responses only
 
 
 @dataclass

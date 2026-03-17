@@ -78,27 +78,11 @@ export function App() {
     vscode.postMessage({ type: "disconnect" });
   };
 
-  const handleToggleMode = () => {
-    if (!status) return;
-    if (status.operation_mode === OperationMode.REACTIVE) {
-      vscode.postMessage({
-        type: "toggleMode",
-        payload: { new_mode: OperationMode.PROACTIVE }
-      });
-      return;
-    }
-
-    if (status.operation_mode === OperationMode.PROACTIVE) {
-      vscode.postMessage({
-        type: "toggleMode",
-        payload: { new_mode: OperationMode.CONTROL }
-      });
-      return;
-    }
-
+  const handleSetMode = (newMode: OperationMode) => {
+    if (!status || status.operation_mode === newMode) return;
     vscode.postMessage({
       type: "toggleMode",
-      payload: { new_mode: OperationMode.REACTIVE }
+      payload: { new_mode: newMode }
     });
   };
 
@@ -169,7 +153,8 @@ export function App() {
             isConnected={isConnected}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
-            onToggleMode={handleToggleMode}
+            currentMode={status?.operation_mode ?? null}
+            onSetMode={handleSetMode}
             onClearFeedback={handleClearFeedback}
             onTriggerFeedback={handleTriggerFeedback}
             onConnectEyeTracker={handleConnectEyeTracker}
@@ -185,7 +170,7 @@ export function App() {
       </div>
 
 
-      {status?.operation_mode !== OperationMode.CONTROL && (
+      {status?.operation_mode !== OperationMode.CONTROL && status?.operation_mode !== OperationMode.QUESTIONNAIRE && (
         <div className="section">
           <div className="section-title">Feedback</div>
           <div className="cooldown-buttons">
