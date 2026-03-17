@@ -17,7 +17,9 @@ import matplotlib.pyplot as plt
 from matplotlib.dates import DateFormatter
 import pandas as pd
 
-from backend.models.forecast_feature_schema import compute_score_from_target_components
+from backend.layers.reactive_tool import ReactiveTool, ReactiveToolConfig
+from backend.services.logger_service import LoggerService
+from backend.types import PredictedFeatures, WindowFeatures
 
 
 @dataclass
@@ -25,55 +27,122 @@ class SeriesPoint:
     timestamp: datetime
     score: float
 
+@dataclass
+class FeatureEvent:
+    timestamp: float
+    window: WindowFeatures
 
-def _parse_row(row: pd.Series) -> Tuple[Optional[SeriesPoint], Optional[SeriesPoint]]:
-    """Parse a single CSV row into observed/predicted points."""
+
+DEFAULT_ENABLED_METRICS = [
+    "pupil_diameter",
+    "fixation_duration",
+    "saccade_amplitude",
+    "ipi",
+    "data_quality",
+]
+
+
+def _extract_valid_ratio(payload: dict, features: dict) -> float:
+    return float(
+        payload.get("avg_valid_sample_ratio")
+        or features.get("dq_valid_ratio_any")
+        or features.get("pupil_valid_ratio")
+        or 0.0
+    )
+
+
+def _parse_row(row: pd.Series) -> Optional[FeatureEvent]:
+    """Parse a CSV row into a WindowFeatures event for reactive scoring."""
     data_field = row.get("data")
     try:
         payload = json.loads(data_field) if isinstance(data_field, str) else {}
     except json.JSONDecodeError:
-        return None, None
+        return None
 
     event_type = row.get("event_type")
 
     if event_type == "observed_feature_window_logged":
         features = payload.get("features", {}) or {}
-        ts = payload.get("window_start") or payload.get("window_end")
-        if ts is None:
-            return None, None
-        score = compute_score_from_target_components(features)
-        return SeriesPoint(datetime.fromtimestamp(float(ts)), float(score)), None
+        window_start = payload.get("window_start")
+        window_end = payload.get("window_end") or window_start
+        if window_start is None or window_end is None:
+            return None
+        wf = WindowFeatures(
+            window_start=float(window_start),
+            window_end=float(window_end),
+            window_id=payload.get("window_id"),
+            is_predicted=False,
+            forecast_id=None,
+            features=features,
+            enabled_metrics=list(DEFAULT_ENABLED_METRICS),
+            sample_count=int(features.get("pupil_window_sample_count", 0) or 0),
+            valid_sample_ratio=_extract_valid_ratio(payload, features),
+        )
+        ts = float(window_end)
+        return FeatureEvent(timestamp=ts, window=wf)
 
     if event_type == "predicted_feature_window_logged":
         features = payload.get("predicted_features") or payload.get("features") or {}
-        ts = (
-            payload.get("target_time")
-            or payload.get("target_window_start")
-            or payload.get("target_window_end")
+        target_start = payload.get("target_window_start")
+        target_end = payload.get("target_window_end") or target_start
+        target_time = payload.get("target_time") or target_end or target_start
+        if target_start is None or target_end is None or target_time is None:
+            return None
+        pf = PredictedFeatures(
+            prediction_timestamp=float(payload.get("prediction_timestamp") or target_time),
+            target_window_start=float(target_start),
+            target_window_end=float(target_end),
+            horizon_seconds=float(payload.get("prediction_horizon_seconds") or 0.0),
+            forecast_id=payload.get("forecast_id"),
+            window_id=payload.get("window_id"),
+            features=features,
+            enabled_metrics=list(DEFAULT_ENABLED_METRICS),
+            confidence=float(payload.get("confidence", 0.0) or 0.0),
         )
-        if ts is None:
-            return None, None
-        score = compute_score_from_target_components(features)
-        return None, SeriesPoint(datetime.fromtimestamp(float(ts)), float(score))
+        wf = pf.to_window_features()
+        wf.valid_sample_ratio = _extract_valid_ratio(payload, features)
+        ts = float(target_time)
+        return FeatureEvent(timestamp=ts, window=wf)
 
-    return None, None
+    return None
 
 
 def _load_series(path: Path) -> Tuple[List[SeriesPoint], List[SeriesPoint]]:
     df = pd.read_csv(path)
 
+    events: List[FeatureEvent] = []
+    for _, row in df.iterrows():
+        evt = _parse_row(row)
+        if evt:
+            events.append(evt)
+
+    events.sort(key=lambda e: e.timestamp)
+
+    logger = LoggerService(
+        experiment_level="ERROR",
+        system_level="ERROR",
+        features_level="ERROR",
+    )
+    rt = ReactiveTool(config=ReactiveToolConfig(), logger=logger)
+    rt.start()
+
     observed: List[SeriesPoint] = []
     predicted: List[SeriesPoint] = []
 
-    for _, row in df.iterrows():
-        obs_point, pred_point = _parse_row(row)
-        if obs_point:
-            observed.append(obs_point)
-        if pred_point:
-            predicted.append(pred_point)
+    for evt in events:
+        rt.add_features(evt.window)
+        estimate = rt.estimate()
+        if not estimate:
+            continue
+        point = SeriesPoint(
+            timestamp=datetime.fromtimestamp(evt.timestamp),
+            score=float(estimate.score.score),
+        )
+        if evt.window.is_predicted:
+            predicted.append(point)
+        else:
+            observed.append(point)
 
-    observed.sort(key=lambda p: p.timestamp)
-    predicted.sort(key=lambda p: p.timestamp)
     return observed, predicted
 
 
