@@ -585,8 +585,8 @@ class FeedbackLayer:
             }
 
             for it in raw_items:
-                title = str(it.get("title", "Feedback"))[:80]
-                msg = str(it.get("message", ""))[: self._config.max_message_length]
+                title = str(it.get("title", "Feedback"))
+                msg = str(it.get("message", ""))
 
                 # Parse type and priority
                 feedback_type = type_map.get(
