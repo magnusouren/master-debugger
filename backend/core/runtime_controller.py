@@ -1099,8 +1099,12 @@ class RuntimeController:
             return
         
 
-        # Proactive: observed features -> forecasting
-        self._forecasting.add_features(features)
+        if self._operation_mode == OperationMode.PROACTIVE:
+            self._reactive_tool.add_features(features) # For logging
+            self._forecasting.add_features(features)
+
+
+
         # During baseline recording in proactive mode, feed observed windows
         # to reactive so baseline statistics are computed from real signal data.
         if self._reactive_tool.is_recording_baseline():
@@ -1179,8 +1183,10 @@ class RuntimeController:
         experiment_time_sec = self._experiment_time_sec(estimate.timestamp)
 
         log_payload = {
+            "timestamp": estimate.timestamp,
             "estimate_id": estimate.estimate_id,
             "score": estimate.score.score,
+            "is_predicted": estimate.source_type == "predicted_features" or (estimate.metadata.get("source_type") == "predicted_features" if estimate.metadata else False),
             "confidence": estimate.score.confidence,
             "contributing_features": estimate.contributing_features,
             "model_type": estimate.model_type,
