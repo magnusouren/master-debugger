@@ -83,16 +83,37 @@ def _color_for_mode(mode: str) -> Optional[str]:
 def plot_estimates(df: pd.DataFrame, title: str) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(10, 5))
 
-    actual = df[~df["is_predicted"]]
-    for mode, group in actual.groupby("mode"):
-        group_sorted = group.sort_values("timestamp")
+    # Plot observed segments without bridging gaps between separated occurrences of the same mode.
+    actual = df[~df["is_predicted"]].sort_values("timestamp")
+    segments: list[tuple[str, pd.DataFrame]] = []
+    current_mode: Optional[str] = None
+    current_rows: list[dict] = []
+
+    for _, row in actual.iterrows():
+        row_mode = row["mode"]
+        if current_mode is None or row_mode == current_mode:
+            current_rows.append(row)
+            current_mode = row_mode
+        else:
+            if current_rows:
+                segments.append((current_mode, pd.DataFrame(current_rows)))
+            current_rows = [row]
+            current_mode = row_mode
+    if current_rows:
+        segments.append((current_mode, pd.DataFrame(current_rows)))
+
+    used_labels: set[str] = set()
+    for mode, segment in segments:
+        seg_sorted = segment.sort_values("timestamp")
+        label = None if mode in used_labels else f"{mode.title()} observed"
         ax.plot(
-            group_sorted["timestamp"],
-            group_sorted["score"],
-            label=f"{mode.title()} observed",
+            seg_sorted["timestamp"],
+            seg_sorted["score"],
+            label=label,
             color=_color_for_mode(mode),
             linewidth=1.8,
         )
+        used_labels.add(mode)
 
     predicted = df[df["is_predicted"]].sort_values("timestamp")
     if not predicted.empty:
