@@ -19,6 +19,15 @@ import pandas as pd
 # Default location of experiment logs relative to the repo root
 DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs" / "experiments"
 
+# Deterministic color cache for modes (covers known modes and any extras like QUESTIONNAIRE)
+_PALETTE_BASE = {
+    "CONTROL": "#1f77b4",
+    "REACTIVE": "#ff7f0e",
+    "PROACTIVE": "#2ca02c",
+    "QUESTIONNAIRE": "#9467bd",
+}
+_MODE_COLOR_CACHE: dict[str, str] = {}
+
 
 def _parse_estimates(csv_path: Path) -> pd.DataFrame:
     """Load a single experiment CSV into a tidy DataFrame of estimates."""
@@ -72,12 +81,19 @@ def _parse_estimates(csv_path: Path) -> pd.DataFrame:
 
 
 def _color_for_mode(mode: str) -> Optional[str]:
-    palette = {
-        "CONTROL": "#1f77b4",
-        "REACTIVE": "#ff7f0e",
-        "PROACTIVE": "#2ca02c",
-    }
-    return palette.get(mode.upper())
+    key = mode.upper()
+    if key in _MODE_COLOR_CACHE:
+        return _MODE_COLOR_CACHE[key]
+
+    if key in _PALETTE_BASE:
+        _MODE_COLOR_CACHE[key] = _PALETTE_BASE[key]
+        return _MODE_COLOR_CACHE[key]
+
+    # Assign deterministic fallback colors from tab10, cycling by hash to stay stable across runs
+    tab10 = plt.get_cmap("tab10").colors
+    color = tab10[hash(key) % len(tab10)]
+    _MODE_COLOR_CACHE[key] = color
+    return color
 
 
 def plot_estimates(df: pd.DataFrame, title: str) -> plt.Figure:
