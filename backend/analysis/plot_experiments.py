@@ -28,7 +28,7 @@ def _parse_estimates(csv_path: Path) -> pd.DataFrame:
 
     estimates: list[dict] = []
     for _, row in df.iterrows():
-        if str(row.get("event_type", "")) != "user_state_estimate_logged":
+        if str(row.get("event_type", "")) not in ("user_state_estimate_logged", "observer_user_state_estimate_logged"):
             continue
 
         try:
@@ -48,8 +48,7 @@ def _parse_estimates(csv_path: Path) -> pd.DataFrame:
             ts = pd.to_datetime(ts_val or row["timestamp"])
         mode = str(row.get("mode", "")).upper() or "UNKNOWN"
         source_type = payload.get("source_type") or payload.get("metadata", {}).get("source_type")
-        forecast_id = payload.get("forecast_id") or payload.get("metadata", {}).get("forecast_id")
-        is_predicted = source_type == "predicted_features" or forecast_id not in (None, "", "null")
+        is_predicted = source_type == "predicted_features"
 
         estimates.append(
             {
@@ -59,6 +58,11 @@ def _parse_estimates(csv_path: Path) -> pd.DataFrame:
                 "is_predicted": bool(is_predicted),
             }
         )
+
+    for estimate in estimates:
+        if estimate["mode"] in {"PROACTIVE"}:
+            if not estimate["is_predicted"]:
+                print(estimate)
 
     tidy = pd.DataFrame(estimates)
     if tidy.empty:
