@@ -1090,7 +1090,6 @@ class RuntimeController:
         )
 
         if self._operation_mode in (
-            OperationMode.PROACTIVE,
             OperationMode.REACTIVE,
             OperationMode.CONTROL,
             OperationMode.QUESTIONNAIRE,
@@ -1099,9 +1098,12 @@ class RuntimeController:
             self._reactive_tool.add_features(features)
             return
         
-
-        # Proactive: observed features -> forecasting
-        self._forecasting.add_features(features)
+        if self._operation_mode == OperationMode.PROACTIVE:
+            # For logging
+            self._reactive_tool.add_features(features)
+            # Proactive: observed features -> forecasting
+            self._forecasting.add_features(features)
+        
         # During baseline recording in proactive mode, feed observed windows
         # to reactive so baseline statistics are computed from real signal data.
         if self._reactive_tool.is_recording_baseline():
@@ -1183,14 +1185,14 @@ class RuntimeController:
             "estimate_id": estimate.estimate_id,
             "score": estimate.score.score,
             "confidence": estimate.score.confidence,
-            "contributing_features": estimate.contributing_features,
-            "model_type": estimate.model_type,
-            "model_version": estimate.model_version,
-            "metadata": estimate.metadata,
             "source_type": source_type,
             "source_window_id": source_window_id,
             "forecast_id": forecast_id,
             "experiment_time_sec": experiment_time_sec,
+            "contributing_features": estimate.contributing_features,
+            "metadata": estimate.metadata,
+            "window_start": estimate.metadata.get("window_start") if estimate.metadata else None,
+            "window_end": estimate.metadata.get("window_end") if estimate.metadata else None,
         }
 
         self._logger.system(
@@ -1199,13 +1201,14 @@ class RuntimeController:
             level="DEBUG",
         )
 
-        self._logger.experiment(
-            "user_state_estimate_logged",
-            log_payload,
-            level="INFO",
-        )
+
 
         if self._operation_mode == OperationMode.PROACTIVE and source_type == "observed_features":
+            self._logger.experiment(
+                "user_state_estimate_logged",
+                {**log_payload, "target_time_sec": estimate.metadata.get("target_time_sec") if estimate.metadata else None},
+                level="INFO",
+            )
             return
 
         # Control mode does not deliver feedback, but we still want to log the user state estimates for analysis
