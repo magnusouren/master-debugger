@@ -1307,9 +1307,10 @@ class RuntimeController:
         self._reactive_tool.start()
         self._reactive_observer.start()
 
-        # Schedule automatic baseline recording
+        # Schedule automatic baseline recording unless explicitly disabled
         # Wait 5 seconds, then record baseline calibration for the amount of seconds specified in config
-        asyncio.create_task(self._run_baseline_calibration(self._config.controller.calibration_duration_seconds))
+        if self._config.controller.calibration_duration_seconds > 0:
+            asyncio.create_task(self._run_baseline_calibration(self._config.controller.calibration_duration_seconds))
 
         self._logger.system(
             "experiment_started",
