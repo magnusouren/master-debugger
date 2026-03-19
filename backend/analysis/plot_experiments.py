@@ -160,6 +160,7 @@ def plot_estimates(df: pd.DataFrame, title: str) -> plt.Figure:
     ax.set_title(title)
     ax.set_xlabel("Timestamp")
     ax.set_ylabel("Score")
+    ax.set_ylim(0.0, 1.0)
     ax.grid(True, linestyle=":", linewidth=0.8)
     ax.legend()
     fig.autofmt_xdate()
