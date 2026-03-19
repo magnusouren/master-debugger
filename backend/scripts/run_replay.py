@@ -3,80 +3,98 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from backend.types.config import SystemConfig, OperationMode
 from backend.core.runtime_controller import RuntimeController
-from backend.analysis.plot_experiments import _select_files, _parse_estimates, plot_estimates
+from backend.analysis.plot_experiments import _parse_estimates, plot_estimates
+from backend.services.eye_tracker.replay_adapter import ReplayEyeTrackerAdapter
+from backend.services.logger_service import get_logger
 
 CONFIG_PATH = "backend/config.yaml"
-REPLAY_FILE = "logs/replay/202_rawdata.tsv"
-EXPERIMENT_ID = "replay_run"
-PARTICIPANT_ID = "replay_user"
+REPLAY_DIR = Path("logs/replay")
+OUTPUT_DIR = Path("logs/figures")
 
-async def main():
-    # Load and tweak config
-    cfg = SystemConfig.from_file(CONFIG_PATH)
+
+def build_config(replay_file: Path, config_path: str) -> SystemConfig:
+    cfg = SystemConfig.from_file(config_path)
     cfg.eye_tracker.mode = "REPLAY"
-    cfg.eye_tracker.filepath = REPLAY_FILE
+    cfg.eye_tracker.filepath = str(replay_file)
     cfg.controller.operation_mode = OperationMode.PROACTIVE
-    cfg.controller.calibration_duration_seconds = 0  # skip baseline scheduling entirely
-    # Keep sampling rate aligned with replay file (250 Hz)
+    cfg.controller.calibration_duration_seconds = 0  # skip baseline
     cfg.signal_processing.input_sampling_rate_hz = 250.0
-
-    # Replay adapter overrides for speed
-    cfg.eye_tracker.mode = "REPLAY"
-    # Fast-forward: emit samples as fast as possible. Use synthetic/system timestamps to avoid large gaps from the file.
-    cfg.eye_tracker.replay_fast_forward = True  # custom field consumed below
-    cfg.eye_tracker.replay_use_system_timestamps = True
-    # For fast replay, loosen quality threshold heavily (emit all windows)
     cfg.signal_processing.min_valid_sample_ratio = 0.0
-    # Allow predictions every window during fast replay
-    cfg.forecasting.update_rate_hz = 0.0  # no throttling
+    cfg.forecasting.update_rate_hz = 0.0
     cfg.forecasting.min_confidence_threshold = 0.0
+    # Custom flags consumed directly by adapter instance tweaks below
+    cfg.eye_tracker.replay_fast_forward = True
+    cfg.eye_tracker.replay_use_system_timestamps = True
+    return cfg
 
-    # Inject adapter kwargs for fast replay
+
+async def run_single(replay_file: Path, config_path: str, output_dir: Path) -> Path | None:
+    experiment_id = replay_file.stem
+    participant_id = replay_file.stem
+
+    # Ensure logger buffers are cleared so each run starts clean
+    get_logger().reset()
+
+    cfg = build_config(replay_file, config_path)
     rc = RuntimeController(cfg)
-    # After initialize, grab the adapter and force fast-forward settings
-    from backend.services.eye_tracker.replay_adapter import ReplayEyeTrackerAdapter
     await rc.initialize()
 
-    if isinstance(rc._eye_tracker_adapter, ReplayEyeTrackerAdapter):
-        rc._eye_tracker_adapter._fast_forward = True
-        rc._eye_tracker_adapter._use_system_timestamps = True
-        # Optional: also tighten batch/flush for fewer callbacks
-        rc._eye_tracker_adapter._batch_size = 50
-        rc._eye_tracker_adapter._flush_interval_ms = 2
+    try:
+        if isinstance(rc._eye_tracker_adapter, ReplayEyeTrackerAdapter):
+            rc._eye_tracker_adapter._fast_forward = True
+            rc._eye_tracker_adapter._use_system_timestamps = True
+            rc._eye_tracker_adapter._batch_size = 100
+            rc._eye_tracker_adapter._flush_interval_ms = 1
 
-    if not await rc.connect_eye_tracker():
-        raise SystemExit("Eye tracker connect failed")
+        if not await rc.connect_eye_tracker():
+            print(f"[WARN] Could not connect replay for {replay_file}")
+            return None
 
-    # Start experiment (this also starts streaming on the replay adapter)
-    await rc.start_experiment(EXPERIMENT_ID, PARTICIPANT_ID)
+        await rc.start_experiment(experiment_id, participant_id)
 
-    # Wait until the replay adapter runs out of samples (or processing finishes)
-    adapter = rc._eye_tracker_adapter  # owned by controller; safe to await its streaming task
-    if adapter and getattr(adapter, "_streaming_task", None):
-        await adapter._streaming_task
+        adapter = rc._eye_tracker_adapter
+        if adapter and getattr(adapter, "_streaming_task", None):
+            await adapter._streaming_task
 
-    # Give processing time to flush windows and estimates after fast-forward
-    await asyncio.sleep(2.0)
+        await asyncio.sleep(2.0)
 
-    # End experiment and shut down
-    await rc.end_experiment()
-    await rc.shutdown()
+        await rc.end_experiment()
+    finally:
+        await rc.shutdown()
 
-    # Plot latest experiment log
-    log_dir = Path("logs/experiments")
-    latest_csv = _select_files(log_dir, "experiment_*.csv", session_id=None, files=None, include_all=False)[0]
-    df = _parse_estimates(latest_csv)
+    # Locate newest experiment CSV for this run
+    exp_dir = Path("logs/experiments")
+    pattern = f"*{participant_id}_{experiment_id}*.csv"
+    matches = sorted(exp_dir.glob(pattern), key=lambda p: p.stat().st_mtime)
+    if not matches:
+        print(f"[WARN] No experiment log for {replay_file}")
+        return None
+
+    csv_path = matches[-1]
+    df = _parse_estimates(csv_path)
     if df.empty:
-        print("No estimates found in log; nothing to plot.")
+        print(f"[WARN] No estimates in log for {replay_file}")
+        return csv_path
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig = plot_estimates(df, title=f"{experiment_id}")
+    outfile = output_dir / f"plot_{experiment_id}.png"
+    fig.savefig(outfile, dpi=150)
+    plt.close(fig)
+    print(f"Saved plot to {outfile}")
+    return csv_path
+
+
+async def main(config_path: str = CONFIG_PATH, replay_dir: Path = REPLAY_DIR, output_dir: Path = OUTPUT_DIR):
+    files = sorted(p for p in replay_dir.glob("*.tsv") if p.is_file())
+    if not files:
+        print(f"No TSV files found in {replay_dir}")
         return
 
-    fig = plot_estimates(df, title=f"{EXPERIMENT_ID} ({PARTICIPANT_ID})")
+    for f in files:
+        print(f"\n=== Replaying {f.name} ===")
+        await run_single(f, config_path, output_dir)
 
-    output_dir = Path("logs/figures")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    outfile = output_dir / f"plot_{EXPERIMENT_ID}_{PARTICIPANT_ID}.png"
-    fig.savefig(outfile, dpi=150)
-    print(f"Saved plot to {outfile}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(CONFIG_PATH, REPLAY_DIR, OUTPUT_DIR))

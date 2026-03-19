@@ -97,6 +97,15 @@ class LoggerService:
             start_time = datetime.now(timezone.utc).timestamp()
         self.start_time = float(start_time)
 
+    def reset(self) -> None:
+        """Clear all in-memory logs so a new experiment starts fresh."""
+        self.experiment_logs.clear()
+        self.system_logs.clear()
+        self.feature_logs.clear()
+        self.feedback_logs.clear()
+        self.start_time = None
+        self.experiment_mode = None
+
     def _seconds_since_start(self, ts: float) -> Optional[float]:
         """Compute seconds since start_time, if set."""
         if self.start_time is None:
