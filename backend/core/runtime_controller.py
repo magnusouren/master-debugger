@@ -1113,6 +1113,10 @@ class RuntimeController:
         ):
             # Baseline: observed features -> reactive
             self._reactive_tool.add_features(features)
+
+            if self._reactive_tool.is_recording_baseline():
+                self._reactive_observer.add_features(features)
+
             return
         
 
@@ -1145,12 +1149,6 @@ class RuntimeController:
                     obs_log_payload,
                     level="INFO",
                 )
-
-        # During baseline recording in proactive mode, feed observed windows
-        # to reactive so baseline statistics are computed from real signal data.
-        if self._reactive_tool.is_recording_baseline():
-            self._reactive_tool.add_features(features)
-
     
     def _on_predicted_features(self, predicted: PredictedFeatures) -> None:
         """

@@ -247,7 +247,8 @@ class FeedbackLayerConfig:
 class EyeTrackerConfig:
     """Configuration for Eye Tracker adapter."""
     # Mode selection
-    mode: str = "SIMULATED"  # "SIMULATED" or "TOBII"
+    mode: str = "SIMULATED"  # "SIMULATED", "TOBII", or "REPLAY"
+    filepath: Optional[str] = None  # Required if mode is REPLAY, path to recorded data file
     device_id: Optional[str] = None  # Specific device ID or None for auto-select
     
     # Batching settings

@@ -68,11 +68,6 @@ def _parse_estimates(csv_path: Path) -> pd.DataFrame:
             }
         )
 
-    for estimate in estimates:
-        if estimate["mode"] in {"PROACTIVE"}:
-            if not estimate["is_predicted"]:
-                print(estimate)
-
     tidy = pd.DataFrame(estimates)
     if tidy.empty:
         return tidy
@@ -94,6 +89,24 @@ def _color_for_mode(mode: str) -> Optional[str]:
     color = tab10[hash(key) % len(tab10)]
     _MODE_COLOR_CACHE[key] = color
     return color
+
+def _smooth_series(
+    series: pd.Series,
+    method: str = "ema",
+    window: int = 5,
+    alpha: float = 0.3,
+) -> pd.Series:
+    """Smooth a score series for plotting."""
+    if series.empty:
+        return series
+
+    if method == "rolling":
+        return series.rolling(window=window, min_periods=1, center=True).mean()
+
+    if method == "ema":
+        return series.ewm(alpha=alpha, adjust=False).mean()
+
+    return series
 
 
 def plot_estimates(df: pd.DataFrame, title: str) -> plt.Figure:
@@ -122,9 +135,11 @@ def plot_estimates(df: pd.DataFrame, title: str) -> plt.Figure:
     for mode, segment in segments:
         seg_sorted = segment.sort_values("timestamp")
         label = None if mode in used_labels else f"{mode.title()} observed"
+        smoothed_score = _smooth_series(seg_sorted["score"], method="ema", alpha=0.25)
+
         ax.plot(
             seg_sorted["timestamp"],
-            seg_sorted["score"],
+            smoothed_score,
             label=label,
             color=_color_for_mode(mode),
             linewidth=1.8,
