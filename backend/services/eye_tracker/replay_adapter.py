@@ -29,6 +29,8 @@ class ReplayEyeTrackerAdapter(EyeTrackerAdapter):
         flush_interval_ms: int = 16,
         target_hz: float = 250.0,
         timestamp_unit: str = "microseconds",  # only used for parsing file timestamps into raw_data
+        fast_forward: bool = False,  # when True: no pacing sleeps, just emit as fast as possible
+        use_system_timestamps: bool = True,  # when False: keep file timestamps on emitted samples
         loop: Optional[asyncio.AbstractEventLoop] = None,
     ):
         self._file_path = Path(file_path)
@@ -37,6 +39,8 @@ class ReplayEyeTrackerAdapter(EyeTrackerAdapter):
         self._target_hz = target_hz
         self._target_dt = 1.0 / target_hz if target_hz > 0 else 0.0
         self._timestamp_unit = timestamp_unit
+        self._fast_forward = fast_forward
+        self._use_system_timestamps = use_system_timestamps
         self._loop = loop or asyncio.get_event_loop()
 
         self._state = AdapterState.DISCONNECTED
@@ -96,6 +100,8 @@ class ReplayEyeTrackerAdapter(EyeTrackerAdapter):
             "address": str(self._file_path),
             "sample_count": len(self._samples),
             "target_hz": self._target_hz,
+            "fast_forward": self._fast_forward,
+            "use_system_timestamps": self._use_system_timestamps,
             "timestamp_source": "system_time",
             "timestamp_unit_in_file": self._timestamp_unit,
         }
@@ -141,22 +147,30 @@ class ReplayEyeTrackerAdapter(EyeTrackerAdapter):
         last_flush_time = time.time()
 
         try:
-            if self._target_dt <= 0:
+            if not self._fast_forward and self._target_dt <= 0:
                 raise ValueError("target_hz must be > 0")
 
             next_emit_time = time.perf_counter()
+            synthetic_ts = time.time()
 
             for sample in self._samples:
                 if self._state != AdapterState.STREAMING:
                     break
 
-                # Fixed-rate pacing using monotonic time to reduce drift.
-                next_emit_time += self._target_dt
-                sleep_time = next_emit_time - time.perf_counter()
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
+                if not self._fast_forward:
+                    # Fixed-rate pacing using monotonic time to reduce drift.
+                    next_emit_time += self._target_dt
+                    sleep_time = next_emit_time - time.perf_counter()
+                    if sleep_time > 0:
+                        await asyncio.sleep(sleep_time)
 
-                emitted_sample = self._clone_sample_with_system_timestamp(sample)
+                # Emit sample with chosen timestamping strategy.
+                if self._fast_forward and self._use_system_timestamps:
+                    emitted_sample = self._clone_sample_with_timestamp(sample, synthetic_ts)
+                    if self._target_dt > 0:
+                        synthetic_ts += self._target_dt
+                else:
+                    emitted_sample = self._prepare_emitted_sample(sample)
 
                 self._buffer.append(emitted_sample)
                 current_time = time.time()
@@ -203,6 +217,30 @@ class ReplayEyeTrackerAdapter(EyeTrackerAdapter):
             right_eye_valid=sample.right_eye_valid,
             raw_data=raw_data,
         )
+
+    def _clone_sample_with_timestamp(self, sample: GazeSample, timestamp: float) -> GazeSample:
+        raw_data = dict(sample.raw_data) if sample.raw_data else {}
+        raw_data["stream_timestamp_source"] = "synthetic_time"
+        raw_data["streamed_at"] = time.time()
+
+        return GazeSample(
+            timestamp=timestamp,
+            left_eye_x=sample.left_eye_x,
+            left_eye_y=sample.left_eye_y,
+            right_eye_x=sample.right_eye_x,
+            right_eye_y=sample.right_eye_y,
+            left_pupil_diameter=sample.left_pupil_diameter,
+            right_pupil_diameter=sample.right_pupil_diameter,
+            left_eye_valid=sample.left_eye_valid,
+            right_eye_valid=sample.right_eye_valid,
+            raw_data=raw_data,
+        )
+
+    def _prepare_emitted_sample(self, sample: GazeSample) -> GazeSample:
+        """Choose emitted timestamp strategy based on config."""
+        if self._use_system_timestamps:
+            return self._clone_sample_with_system_timestamp(sample)
+        return sample
 
     def _load_samples_from_file(self, file_path: Path) -> List[GazeSample]:
         samples: List[GazeSample] = []
