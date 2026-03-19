@@ -3,7 +3,7 @@
 Usage:
     python -m backend.analysis.plot_experiments --show
 
-It reads CSV logs from logs/experiments, plots timestamp vs. score, colors by
+It reads CSV logs from backend/logs/experiments, plots timestamp vs. score, colors by
 operation mode, and overlays predicted scores as a dashed line.
 """
 from __future__ import annotations
@@ -16,8 +16,8 @@ from typing import Iterable, List, Optional
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# Default location of experiment logs relative to the repo root
-DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs" / "experiments"
+# Default location of experiment logs (backend/logs/experiments)
+DEFAULT_LOG_DIR = Path(__file__).resolve().parents[1] / "logs" / "experiments"
 
 # Deterministic color cache for modes (covers known modes and any extras like QUESTIONNAIRE)
 _PALETTE_BASE = {
@@ -67,11 +67,6 @@ def _parse_estimates(csv_path: Path) -> pd.DataFrame:
                 "is_predicted": bool(is_predicted),
             }
         )
-
-    for estimate in estimates:
-        if estimate["mode"] in {"PROACTIVE"}:
-            if not estimate["is_predicted"]:
-                print(estimate)
 
     tidy = pd.DataFrame(estimates)
     if tidy.empty:
