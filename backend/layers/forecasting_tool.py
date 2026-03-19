@@ -389,8 +389,8 @@ class ForecastingTool:
         latest_window = input_sequence[-1]
         window_duration = latest_window.window_end - latest_window.window_start
 
-        # Create PredictedFeatures with predicted raw component values.
-        # ReactiveTool computes final score (incl. baseline normalization).
+        # Create PredictedFeatures with predicted contributor values.
+        # ReactiveTool computes final score (incl. optional baseline normalization).
         predicted_features = PredictedFeatures(
             prediction_timestamp=latest_window.window_end,
             target_window_start=latest_window.window_end + horizon_seconds,

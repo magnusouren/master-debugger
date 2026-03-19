@@ -180,6 +180,12 @@ class ReactiveTool:
             "anticipation_velocity": [],
             "perceived_difficulty_std": [],
             "ipi": [],  # Information Processing Index from crunchwiz
+            # Contributor-space baselines (for proactive predicted contrib_* windows)
+            "contrib_ipa": [],
+            "contrib_fixation_duration": [],
+            "contrib_anticipation": [],
+            "contrib_perceived_difficulty": [],
+            "contrib_ipi": [],
         }
         self._logger.system(
             "baseline_recording_started",
@@ -460,71 +466,6 @@ class ReactiveTool:
         components: dict[str, float] = {}
         raw_values: dict = {}
         missing_metrics: list[str] = []
-
-        # --- 1. IPA - Index of Pupillary Activity (weight 0.2) ---
-        if "pupil_diameter" in enabled:
-            ipa_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["pupil_diameter"]["load"]["ipa"]
-            )
-            if ipa_series:
-                mean_ipa = sum(ipa_series) / len(ipa_series)
-                raw_values["ipa"] = mean_ipa
-                score = self._normalize_metric("ipa", mean_ipa, fallback_lo=0.5, fallback_hi=2.5)
-                components["ipa"] = score
-
-        # --- 2. Fixation Duration (weight 0.2) ---
-        if "fixation_duration" in enabled:
-            dur_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
-            )
-            if dur_series:
-                mean_dur = sum(dur_series) / len(dur_series)
-                raw_values["fixation_duration_ms"] = mean_dur
-                score = self._normalize_metric("fixation_duration_ms", mean_dur, fallback_lo=150.0, fallback_hi=500.0)
-                components["fixation_duration"] = score
-
-        # --- 3. Anticipation - Saccade Velocity (weight 0.2) ---
-        if "saccade_amplitude" in enabled:
-            vel_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
-            )
-            if vel_series:
-                mean_vel = sum(vel_series) / len(vel_series)
-                raw_values["anticipation_velocity"] = mean_vel
-                score = self._normalize_metric("anticipation_velocity", mean_vel, fallback_lo=1.0, fallback_hi=5.0)
-                components["anticipation"] = score
-
-        # --- 4. Perceived Difficulty - Saccade Velocity Variability (weight 0.2) ---
-        # Compute std of mean velocities across windows (aggregated approach)
-        if "saccade_amplitude" in enabled:
-            vel_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
-            )
-            if len(vel_series) >= 2:
-                # Compute std of velocities across windows
-                mean_vel = sum(vel_series) / len(vel_series)
-                variance = sum((v - mean_vel) ** 2 for v in vel_series) / len(vel_series)
-                velocity_std = math.sqrt(variance)
-                raw_values["perceived_difficulty_std"] = velocity_std
-                score = self._normalize_metric("perceived_difficulty_std", velocity_std, fallback_lo=0.5, fallback_hi=10.0)
-                components["perceived_difficulty"] = score
-
-        # --- 5. Information Processing Index (weight 0.2) ---
-        # Uses IPI from signal processing (crunchwiz formula)
-        # IPI = count(short_fix_short_sac) / count(long_fix_short_sac)
-        # Higher IPI = rapid scanning, Lower IPI = deeper processing
-        if "ipi" in enabled:
-            ipi_series = self._metric_series(
-                windows, METRIC_KEYGROUPS["ipi"]["load"]["value"]
-            )
-            if ipi_series:
-                mean_ipi = sum(ipi_series) / len(ipi_series)
-                raw_values["ipi"] = mean_ipi
-                # Lower IPI indicates deeper processing (higher cognitive load)
-                # So we invert: high IPI (scanning) = low load, low IPI (focused) = high load
-                score = 1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0)
-                components["ipi"] = score
-
         expected_components = [
             "ipa",
             "fixation_duration",
@@ -532,6 +473,97 @@ class ReactiveTool:
             "perceived_difficulty",
             "ipi",
         ]
+        contributor_feature_keys = {
+            "ipa": "contrib_ipa",
+            "fixation_duration": "contrib_fixation_duration",
+            "anticipation": "contrib_anticipation",
+            "perceived_difficulty": "contrib_perceived_difficulty",
+            "ipi": "contrib_ipi",
+        }
+
+        # Path A: contributor-space windows (proactive predictions)
+        # If contrib_* keys are present, use them directly.
+        contributor_series = {
+            name: self._metric_series(windows, key)
+            for name, key in contributor_feature_keys.items()
+        }
+        has_direct_contributors = any(len(series) > 0 for series in contributor_series.values())
+
+        if has_direct_contributors:
+            for name, key in contributor_feature_keys.items():
+                series = contributor_series[name]
+                if not series:
+                    continue
+                mean_value = sum(series) / len(series)
+                raw_values[key] = mean_value
+                components[name] = self._normalize_metric(
+                    key,
+                    mean_value,
+                    fallback_lo=0.0,
+                    fallback_hi=1.0,
+                )
+
+        # Path B: observed raw metrics (reactive windows and baseline recording)
+        else:
+            # --- 1. IPA - Index of Pupillary Activity (weight 0.2) ---
+            if "pupil_diameter" in enabled:
+                ipa_series = self._metric_series(
+                    windows, METRIC_KEYGROUPS["pupil_diameter"]["load"]["ipa"]
+                )
+                if ipa_series:
+                    mean_ipa = sum(ipa_series) / len(ipa_series)
+                    raw_values["ipa"] = mean_ipa
+                    score = self._normalize_metric("ipa", mean_ipa, fallback_lo=0.5, fallback_hi=2.5)
+                    components["ipa"] = score
+
+            # --- 2. Fixation Duration (weight 0.2) ---
+            if "fixation_duration" in enabled:
+                dur_series = self._metric_series(
+                    windows, METRIC_KEYGROUPS["fixation_duration"]["load"]["mean_duration_ms"]
+                )
+                if dur_series:
+                    mean_dur = sum(dur_series) / len(dur_series)
+                    raw_values["fixation_duration_ms"] = mean_dur
+                    score = self._normalize_metric("fixation_duration_ms", mean_dur, fallback_lo=150.0, fallback_hi=500.0)
+                    components["fixation_duration"] = score
+
+            # --- 3. Anticipation - Saccade Velocity (weight 0.2) ---
+            if "saccade_amplitude" in enabled:
+                vel_series = self._metric_series(
+                    windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
+                )
+                if vel_series:
+                    mean_vel = sum(vel_series) / len(vel_series)
+                    raw_values["anticipation_velocity"] = mean_vel
+                    score = self._normalize_metric("anticipation_velocity", mean_vel, fallback_lo=1.0, fallback_hi=5.0)
+                    components["anticipation"] = score
+
+            # --- 4. Perceived Difficulty - Saccade Velocity Variability (weight 0.2) ---
+            # Compute std of mean velocities across windows (aggregated approach)
+            if "saccade_amplitude" in enabled:
+                vel_series = self._metric_series(
+                    windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
+                )
+                if len(vel_series) >= 2:
+                    mean_vel = sum(vel_series) / len(vel_series)
+                    variance = sum((v - mean_vel) ** 2 for v in vel_series) / len(vel_series)
+                    velocity_std = math.sqrt(variance)
+                    raw_values["perceived_difficulty_std"] = velocity_std
+                    score = self._normalize_metric("perceived_difficulty_std", velocity_std, fallback_lo=0.5, fallback_hi=10.0)
+                    components["perceived_difficulty"] = score
+
+            # --- 5. Information Processing Index (weight 0.2) ---
+            if "ipi" in enabled:
+                ipi_series = self._metric_series(
+                    windows, METRIC_KEYGROUPS["ipi"]["load"]["value"]
+                )
+                if ipi_series:
+                    mean_ipi = sum(ipi_series) / len(ipi_series)
+                    raw_values["ipi"] = mean_ipi
+                    # Lower IPI indicates deeper processing (higher cognitive load)
+                    score = 1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0)
+                    components["ipi"] = score
+
         for name in expected_components:
             if name not in components:
                 components[name] = 0.5
@@ -542,6 +574,9 @@ class ReactiveTool:
             for metric_name, value in raw_values.items():
                 if metric_name in self._baseline_samples:
                     self._baseline_samples[metric_name].append(value)
+            for name, key in contributor_feature_keys.items():
+                if key in self._baseline_samples:
+                    self._baseline_samples[key].append(float(components[name]))
         # Strict equal weighting: each of 5 components contributes exactly 0.2
         score = (
             0.2 * components["ipa"]
@@ -736,6 +771,30 @@ class ReactiveTool:
         """
         contribs = {}
         enabled = self._enabled(features)
+        contributor_feature_keys = {
+            "ipa": "contrib_ipa",
+            "fixation_duration": "contrib_fixation_duration",
+            "anticipation": "contrib_anticipation",
+            "perceived_difficulty": "contrib_perceived_difficulty",
+            "ipi": "contrib_ipi",
+        }
+
+        # Contributor-space windows (typically proactive predictions)
+        direct_series = {
+            name: self._metric_series(features, key)
+            for name, key in contributor_feature_keys.items()
+        }
+        if any(len(series) > 0 for series in direct_series.values()):
+            for name, key in contributor_feature_keys.items():
+                series = direct_series[name]
+                if not series:
+                    continue
+                mean_value = sum(series) / len(series)
+                contribs[key] = round(mean_value, 4)
+                contribs[f"{name}_score"] = round(
+                    self._normalize_metric(key, mean_value, fallback_lo=0.0, fallback_hi=1.0), 3
+                )
+            return contribs
 
         # --- 1. IPA (Index of Pupillary Activity) ---
         if "pupil_diameter" in enabled:

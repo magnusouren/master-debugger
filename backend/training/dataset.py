@@ -3,7 +3,7 @@ Dataset preparation for XGBoost forecasting.
 
 Creates training samples with:
 - X: History window of contributor values (typically 120 windows = 60 seconds)
-- y: Future component values used by ReactiveTool scoring
+- y: Future contributor values at one target point (typically +30 seconds)
 
 Reuses ReactiveTool._estimate_rule_based() for scoring.
 Splits data by participant for proper evaluation.
@@ -107,7 +107,7 @@ def create_sequences(
 
     Returns:
         X: Input features (N, history_size * n_features)
-        y: Target component vectors (N, 5)
+        y: Target contributor vectors (N, 5)
         participant_ids: List of participant IDs for each sample
     """
     X_list = []
@@ -118,7 +118,7 @@ def create_sequences(
     for (pid, trial), group in df.groupby(['participant_id', 'trial']):
         group = group.sort_values('window_start').reset_index(drop=True)
 
-        # Need at least history_size + horizon windows
+        # Need enough windows to select one target at +horizon.
         if len(group) < history_size + horizon:
             continue
 
@@ -127,35 +127,24 @@ def create_sequences(
             # History window rows
             history_rows = group.iloc[i:i + history_size]
 
-            # Target window(s)
-            target_rows = group.iloc[i + history_size:i + history_size + horizon]
+            # Target point: one future window at +horizon from history tail.
+            target_idx = i + history_size + horizon - 1
+            target_row = group.iloc[target_idx]
 
-            # Build target components from target horizon window(s)
-            # using the same raw metrics expected by ReactiveTool.
-            ipa_series = pd.to_numeric(target_rows.get("pupil_ipa"), errors="coerce").dropna()
-            fixation_series = pd.to_numeric(
-                target_rows.get("fixation_mean_duration_ms"), errors="coerce"
-            ).dropna()
-            velocity_series = pd.to_numeric(
-                target_rows.get("saccade_mean_velocity"), errors="coerce"
-            ).dropna()
-            ipi_series = pd.to_numeric(target_rows.get("ipi_value"), errors="coerce").dropna()
-
-            if (
-                len(ipa_series) == 0
-                or len(fixation_series) == 0
-                or len(velocity_series) == 0
-                or len(ipi_series) == 0
-            ):
+            # Build target in contributor space (same 5 values as model input features).
+            # Keep quality gate on raw source metrics to avoid training on neutral-fallback labels.
+            required_raw_values = [
+                pd.to_numeric(target_row.get("pupil_ipa"), errors="coerce"),
+                pd.to_numeric(target_row.get("fixation_mean_duration_ms"), errors="coerce"),
+                pd.to_numeric(target_row.get("saccade_mean_velocity"), errors="coerce"),
+                pd.to_numeric(target_row.get("saccade_velocity_std"), errors="coerce"),
+                pd.to_numeric(target_row.get("ipi_value"), errors="coerce"),
+            ]
+            if any(pd.isna(v) for v in required_raw_values):
                 continue
 
-            target_vector = [
-                float(ipa_series.mean()),
-                float(fixation_series.mean()),
-                float(velocity_series.mean()),
-                float(velocity_series.std(ddof=0)) if len(velocity_series) >= 2 else 0.0,
-                float(ipi_series.mean()),
-            ]
+            target_contribs = compute_contributor_features(target_row.to_dict())
+            target_vector = [float(target_contribs[col]) for col in TARGET_COLUMNS]
 
             # Flatten history features
             # Exactly 5 calculated contributor values are used as model inputs.
