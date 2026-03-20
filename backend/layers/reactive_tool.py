@@ -385,6 +385,10 @@ class ReactiveTool:
         if self._current_estimate:
             return self._current_estimate.score
         return None
+
+    def get_latest_estimate(self) -> Optional[UserStateEstimate]:
+        """Return the latest computed estimate without side effects."""
+        return self._current_estimate
     
     def get_score_history(self, n_samples: int = 10) -> List[float]:
         """

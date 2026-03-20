@@ -66,6 +66,11 @@ class RuntimeController:
             self._config.reactive_tool,
             logger=self._logger
         )
+        # Passive observer to score observed windows during proactive mode without affecting main logic
+        self._reactive_observer = ReactiveTool(
+            self._config.reactive_tool,
+            logger=self._logger
+        )
         self._feedback_layer = FeedbackLayer(
             self._config.feedback_layer,
             logger=self._logger
@@ -212,6 +217,7 @@ class RuntimeController:
         self._signal_processing.configure(config.signal_processing)
         self._forecasting.configure(config.forecasting)
         self._reactive_tool.configure(config.reactive_tool)
+        self._reactive_observer.configure(config.reactive_tool)
         self._feedback_layer.configure(config.feedback_layer)
         
         self._logger.system(
@@ -906,6 +912,7 @@ class RuntimeController:
             # Start baseline recording
             self._status = SystemStatus.CALIBRATING
             self._reactive_tool.start_baseline_recording(self._participant_id)
+            self._reactive_observer.start_baseline_recording(self._participant_id)
 
             # Record for the specified duration
             self._logger.system(
@@ -933,6 +940,10 @@ class RuntimeController:
 
             # Stop baseline recording
             baseline = self._reactive_tool.stop_baseline_recording(self._participant_id)
+            self._reactive_observer.stop_baseline_recording(self._participant_id)
+
+            if baseline:
+                self._reactive_observer.set_baseline(baseline)
 
             if baseline:
                 self._logger.system(
@@ -999,6 +1010,7 @@ class RuntimeController:
             participant_id: Unique identifier for the participant.
         """
         self._reactive_tool.start_baseline_recording(participant_id)
+        self._reactive_observer.start_baseline_recording(participant_id)
 
     def stop_baseline_recording(self, participant_id: str):
         """
@@ -1010,11 +1022,16 @@ class RuntimeController:
         Returns:
             ParticipantBaseline object with computed statistics, or None if insufficient data.
         """
-        return self._reactive_tool.stop_baseline_recording(participant_id)
+        baseline = self._reactive_tool.stop_baseline_recording(participant_id)
+        self._reactive_observer.stop_baseline_recording(participant_id)
+        if baseline:
+            self._reactive_observer.set_baseline(baseline)
+        return baseline
 
     def clear_baseline(self) -> None:
         """Clear the current baseline (revert to static thresholds)."""
         self._reactive_tool.clear_baseline()
+        self._reactive_observer.clear_baseline()
 
     def has_baseline(self) -> bool:
         """Check if a valid baseline is loaded."""
@@ -1096,16 +1113,42 @@ class RuntimeController:
         ):
             # Baseline: observed features -> reactive
             self._reactive_tool.add_features(features)
+
+            if self._reactive_tool.is_recording_baseline():
+                self._reactive_observer.add_features(features)
+
             return
         
 
-        # Proactive: observed features -> forecasting
-        self._forecasting.add_features(features)
-        # During baseline recording in proactive mode, feed observed windows
-        # to reactive so baseline statistics are computed from real signal data.
-        if self._reactive_tool.is_recording_baseline():
-            self._reactive_tool.add_features(features)
+        if self._operation_mode == OperationMode.PROACTIVE:
+            self._forecasting.add_features(features)
 
+            # Parallel observed scoring for analysis only (does not drive feedback)
+            self._reactive_observer.add_features(features)
+            obs_estimate = self._reactive_observer.get_latest_estimate()
+            if obs_estimate:
+                if not getattr(obs_estimate, "estimate_id", None):
+                    obs_estimate.estimate_id = f"{self._next_estimate_id()}-obs"
+                obs_log_payload = {
+                    "timestamp": obs_estimate.timestamp,
+                    "estimate_id": obs_estimate.estimate_id,
+                    "score": obs_estimate.score.score,
+                    "is_predicted": False,
+                    "confidence": obs_estimate.score.confidence,
+                    "contributing_features": obs_estimate.contributing_features,
+                    "model_type": obs_estimate.model_type,
+                    "model_version": obs_estimate.model_version,
+                    "metadata": obs_estimate.metadata,
+                    "source_type": "observed_features",
+                    "source_window_id": obs_estimate.source_window_id,
+                    "forecast_id": None,
+                    "experiment_time_sec": self._experiment_time_sec(obs_estimate.timestamp),
+                }
+                self._logger.experiment(
+                    "observer_user_state_estimate_logged",
+                    obs_log_payload,
+                    level="INFO",
+                )
     
     def _on_predicted_features(self, predicted: PredictedFeatures) -> None:
         """
@@ -1179,8 +1222,10 @@ class RuntimeController:
         experiment_time_sec = self._experiment_time_sec(estimate.timestamp)
 
         log_payload = {
+            "timestamp": estimate.timestamp,
             "estimate_id": estimate.estimate_id,
             "score": estimate.score.score,
+            "is_predicted": estimate.source_type == "predicted_features" or (estimate.metadata.get("source_type") == "predicted_features" if estimate.metadata else False),
             "confidence": estimate.score.confidence,
             "contributing_features": estimate.contributing_features,
             "model_type": estimate.model_type,
@@ -1260,10 +1305,12 @@ class RuntimeController:
 
         # Start reactive tool
         self._reactive_tool.start()
+        self._reactive_observer.start()
 
-        # Schedule automatic baseline recording
+        # Schedule automatic baseline recording unless explicitly disabled
         # Wait 5 seconds, then record baseline calibration for the amount of seconds specified in config
-        asyncio.create_task(self._run_baseline_calibration(self._config.controller.calibration_duration_seconds))
+        if self._config.controller.calibration_duration_seconds > 0:
+            asyncio.create_task(self._run_baseline_calibration(self._config.controller.calibration_duration_seconds))
 
         self._logger.system(
             "experiment_started",
@@ -1349,6 +1396,8 @@ class RuntimeController:
         # Stop reactive tool
         self._reactive_tool.stop()
         self._reactive_tool.reset()
+        self._reactive_observer.stop()
+        self._reactive_observer.reset()
 
         # Stop eye tracker streaming (but keep connection for potential future sessions)
         await self._eye_tracker_adapter.stop_streaming()

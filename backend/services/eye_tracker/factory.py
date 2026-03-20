@@ -7,6 +7,7 @@ import asyncio
 from typing import Optional
 
 from backend.services.eye_tracker.base import EyeTrackerAdapter
+from backend.services.eye_tracker.replay_adapter import ReplayEyeTrackerAdapter
 from backend.services.eye_tracker.simulated_adapter import SimulatedEyeTrackerAdapter
 from backend.services.eye_tracker.tobii_pro_adapter import TobiiProEyeTrackerAdapter
 from backend.types.config import SystemConfig
@@ -70,6 +71,27 @@ def create_eye_tracker_adapter(
             {"type": "simulated"},
             level="INFO"
         )
+
+    elif mode.upper() == "REPLAY":
+        if not config.eye_tracker.filepath:
+            error_msg = "Filepath must be provided for REPLAY mode"
+            logger.system(
+                "eye_tracker_adapter_missing_filepath",
+                level="ERROR"
+            )
+            raise ValueError(error_msg)
+        
+        adapter = ReplayEyeTrackerAdapter(
+            file_path=config.eye_tracker.filepath,
+            batch_size=batch_size,
+            flush_interval_ms=flush_interval_ms,
+            loop=loop
+        )
+        logger.system(
+            "eye_tracker_adapter_created",
+            {"type": "replay", "filepath": config.eye_tracker.filepath},
+            level="INFO"
+        )
         
     elif mode.upper() == "TOBII":
         adapter = TobiiProEyeTrackerAdapter(
@@ -86,7 +108,7 @@ def create_eye_tracker_adapter(
     else:
         error_msg = (
             f"Invalid eye tracker mode: {mode}. "
-            f"Valid modes are: SIMULATED, TOBII"
+            f"Valid modes are: SIMULATED, REPLAY, TOBII"
         )
         logger.system(
             "eye_tracker_adapter_invalid_mode",
