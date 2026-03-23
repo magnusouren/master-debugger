@@ -1,5 +1,5 @@
 {
-  "version": "20260322_193821",
+  "version": "20260323_151621",
   "model_type": "xgboost_regressor",
   "task": "sequence_to_one_windowfeatures_forecasting",
   "history_window_size": 60,
@@ -137,20 +137,20 @@
   ],
   "metrics": {
     "overall": {
-      "rmse": 191.3799191072564,
-      "mae": 107.52667999267578,
-      "r2": 0.38323503732681274
+      "rmse": 192.37514213769927,
+      "mae": 109.7153091430664,
+      "r2": 0.36881840229034424
     },
     "per_target": {
       "pupil_ipa": {
-        "rmse": 0.14837536640772775,
-        "mae": 0.09880668669939041,
-        "r2": 0.6559481620788574
+        "rmse": 0.12779081975665377,
+        "mae": 0.0918615311384201,
+        "r2": 0.6544982194900513
       },
       "fixation_mean_duration_ms": {
-        "rmse": 270.65207716734784,
-        "mae": 214.95449829101562,
-        "r2": 0.11052590608596802
+        "rmse": 272.05950635844357,
+        "mae": 219.33888244628906,
+        "r2": 0.08314138650894165
       }
     }
   },
@@ -163,7 +163,7 @@
     "colsample_bynode": null,
     "colsample_bytree": 0.8,
     "device": null,
-    "early_stopping_rounds": 20,
+    "early_stopping_rounds": 50,
     "enable_categorical": false,
     "eval_metric": null,
     "feature_types": null,
@@ -172,18 +172,18 @@
     "grow_policy": null,
     "importance_type": null,
     "interaction_constraints": null,
-    "learning_rate": 0.05,
+    "learning_rate": 0.03,
     "max_bin": null,
     "max_cat_threshold": null,
     "max_cat_to_onehot": null,
     "max_delta_step": null,
-    "max_depth": 6,
+    "max_depth": 4,
     "max_leaves": null,
     "min_child_weight": 3,
     "missing": NaN,
     "monotone_constraints": null,
     "multi_strategy": null,
-    "n_estimators": 500,
+    "n_estimators": 1000,
     "n_jobs": -1,
     "num_parallel_tree": null,
     "random_state": 42,

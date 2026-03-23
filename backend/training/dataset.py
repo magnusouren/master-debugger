@@ -40,14 +40,14 @@ DEFAULT_TARGET_COLUMNS = [
     "fixation_mean_duration_ms",
 ]
 
-# DEFAULT_ENABLED_METRICS = [
-#     "fixation_duration",
-#     "saccade_amplitude",
-#     "pupil_diameter",
-#     "blink_rate",
-#     "data_quality",
-#     "ipi",
-# ]
+DEFAULT_ENABLED_METRICS = [
+    "fixation_duration",
+    "saccade_amplitude",
+    "pupil_diameter",
+    "blink_rate",
+    "data_quality",
+    "ipi",
+]
 
 # # These columns are expected to be present in emip_features.parquet
 # # produced by preprocess.py + SignalProcessingLayer.
@@ -404,7 +404,7 @@ def prepare_dataset(
     horizon_steps = int(getattr(config, "prediction_horizon", PREDICTION_HORIZON))
 
     print("\nMissing-value summary:")
-    for col in input_columns + target_columns:
+    for col in set(input_columns + target_columns):
         if col in df.columns:
             missing = df[col].isna().sum()
             print(f"{col}: {missing} missing of {len(df)}")

@@ -225,7 +225,7 @@ def main() -> None:
     parser.add_argument(
         "--config",
         type=str,
-        default=None,
+        default="backend/config.yaml",
         help="Path to config.yaml file (uses defaults if not provided)",
     )
     parser.add_argument(
