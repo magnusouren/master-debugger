@@ -210,12 +210,16 @@ class ReactiveTool:
             if len(values) >= 3:  # Need at least 3 samples
                 mean_val = sum(values) / len(values)
                 std_val = math.sqrt(sum((v - mean_val) ** 2 for v in values) / len(values))
+                p02_5 = self._percentile(values, 2.5)
+                p97_5 = self._percentile(values, 97.5)
                 metrics[metric_name] = MetricBaseline(
                     mean=mean_val,
                     std=max(std_val, 0.001),  # Avoid zero std
                     min_value=min(values),
                     max_value=max(values),
                     sample_count=len(values),
+                    p02_5=p02_5,
+                    p97_5=p97_5,
                 )
 
         if not metrics:
@@ -239,7 +243,13 @@ class ReactiveTool:
             {
                 "participant_id": participant_id,
                 "duration_seconds": round(duration, 1),
-                "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
+                "metrics": {
+                    k: {
+                        "mean": round(v.mean, 4),
+                        "std": round(v.std, 4),
+                        "p02_5": round(v.p02_5, 4) if v.p02_5 is not None else None,
+                        "p97_5": round(v.p97_5, 4) if v.p97_5 is not None else None,
+                    }
                            for k, v in metrics.items()},
             },
             level="INFO"
@@ -265,12 +275,13 @@ class ReactiveTool:
         """Check if a valid baseline is loaded."""
         return self._baseline is not None and self._baseline.is_valid
 
-    def get_feedback_trigger_bounds(self, std_multiplier: float = 2.0) -> Optional[Dict[str, float | int]]:
+    def get_feedback_trigger_bounds(self, std_multiplier: float = 2.0) -> Optional[Dict[str, float | int | str]]:
         """
         Get dynamic feedback trigger bounds from baseline score statistics.
 
-        Returns lower/upper bounds for the final cognitive-load score
-        using mean ± std_multiplier * std, or None if unavailable.
+        Returns lower/upper bounds for the final cognitive-load score.
+        Prefers empirical baseline quantiles (2.5th / 97.5th percentiles), and
+        falls back to mean ± std_multiplier * std if quantiles are unavailable.
         """
         if self._baseline is None or not self._baseline.is_valid:
             return None
@@ -279,16 +290,44 @@ class ReactiveTool:
         if metric is None:
             return None
 
-        lower = metric.mean - (std_multiplier * metric.std)
-        upper = metric.mean + (std_multiplier * metric.std)
+        if metric.p02_5 is not None and metric.p97_5 is not None:
+            lower = float(metric.p02_5)
+            upper = float(metric.p97_5)
+            rule = "baseline_empirical_p2_5_p97_5"
+        else:
+            lower = metric.mean - (std_multiplier * metric.std)
+            upper = metric.mean + (std_multiplier * metric.std)
+            rule = "baseline_mean_pm_2sd"
 
         return {
+            "rule": rule,
             "mean": metric.mean,
             "std": metric.std,
             "lower": lower,
             "upper": upper,
             "sample_count": metric.sample_count,
         }
+
+    @staticmethod
+    def _percentile(values: List[float], percentile: float) -> Optional[float]:
+        """
+        Compute percentile using linear interpolation between closest ranks.
+        """
+        if not values:
+            return None
+
+        sorted_vals = sorted(float(v) for v in values)
+        if len(sorted_vals) == 1:
+            return sorted_vals[0]
+
+        p = max(0.0, min(100.0, float(percentile)))
+        rank = (len(sorted_vals) - 1) * (p / 100.0)
+        lo = int(math.floor(rank))
+        hi = int(math.ceil(rank))
+        if lo == hi:
+            return sorted_vals[lo]
+        frac = rank - lo
+        return sorted_vals[lo] * (1.0 - frac) + sorted_vals[hi] * frac
 
     def is_recording_baseline(self) -> bool:
         """Check if baseline recording is currently active."""

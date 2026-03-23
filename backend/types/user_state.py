@@ -14,6 +14,9 @@ class MetricBaseline:
     min_value: float
     max_value: float
     sample_count: int
+    # Optional empirical bounds from baseline samples (e.g., outer 5% => 2.5/97.5 percentiles).
+    p02_5: Optional[float] = None
+    p97_5: Optional[float] = None
 
 
 @dataclass

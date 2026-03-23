@@ -89,6 +89,9 @@ class RuntimeController:
         self._pending_feedback_version: int = 0
         self._last_delivered_version: int = 0
         self._feedback_generation_task: Optional[asyncio.Task] = None
+        # Prevent repeated deliveries while score remains outside threshold bounds.
+        # Rearms once score returns to the in-bound region.
+        self._feedback_threshold_rearmed: bool = True
         
         # Statistics TODO - figure out what to track
         self._stats: Dict[str, Any] = {
@@ -235,6 +238,8 @@ class RuntimeController:
 
         self._operation_mode = mode
         self._logger.set_experiment_mode(mode.value)
+        # Re-arm threshold gating when mode changes.
+        self._feedback_threshold_rearmed = True
 
         # Keep the stored configuration in sync with the current operation mode
         if self._config is not None and getattr(self._config, "controller", None) is not None:
@@ -671,17 +676,22 @@ class RuntimeController:
             score = float(self._current_user_state.score.score)
             bounds = self._reactive_tool.get_feedback_trigger_bounds(std_multiplier=2.0)
 
-            # Preferred rule: trigger when score is outside baseline mean ± 2*SD.
+            # Preferred rule: trigger when score is outside baseline empirical
+            # 2.5/97.5 percentile bounds (fallback: mean ± 2*SD).
             if bounds is not None:
                 lower = bounds["lower"]
                 upper = bounds["upper"]
+                rule = str(bounds.get("rule", "baseline_mean_pm_2sd"))
+                outside_band = score < lower or score > upper
 
-                if lower <= score <= upper:
+                if not outside_band:
+                    # Score is back inside the baseline band; allow next crossing to trigger.
+                    self._feedback_threshold_rearmed = True
                     self._logger.system(
                         "feedback_delivery_threshold_not_met",
                         {
                             "score": score,
-                            "rule": "baseline_mean_pm_2sd",
+                            "rule": rule,
                             "baseline_mean": bounds["mean"],
                             "baseline_std": bounds["std"],
                             "lower_bound": lower,
@@ -693,9 +703,27 @@ class RuntimeController:
                     )
                     return False
 
+                if not self._feedback_threshold_rearmed:
+                    self._logger.system(
+                        "feedback_delivery_threshold_not_met",
+                        {
+                            "score": score,
+                            "rule": rule,
+                            "baseline_mean": bounds["mean"],
+                            "baseline_std": bounds["std"],
+                            "lower_bound": lower,
+                            "upper_bound": upper,
+                            "baseline_sample_count": int(bounds["sample_count"]),
+                            "pending_version": self._pending_feedback_version,
+                            "reason": "outside_band_not_rearmed",
+                        },
+                        level="DEBUG",
+                    )
+                    return False
+
                 payload = {
                     "score": score,
-                    "rule": "baseline_mean_pm_2sd",
+                    "rule": rule,
                     "baseline_mean": bounds["mean"],
                     "baseline_std": bounds["std"],
                     "lower_bound": lower,
@@ -703,6 +731,8 @@ class RuntimeController:
                     "baseline_sample_count": int(bounds["sample_count"]),
                     "pending_version": self._pending_feedback_version,
                 }
+                # Disarm after delivery; must re-enter band before another trigger.
+                self._feedback_threshold_rearmed = False
                 self._logger.system(
                     "feedback_delivery_threshold_met",
                     payload,
@@ -718,6 +748,8 @@ class RuntimeController:
             # Fallback rule for sessions without baseline score stats.
             threshold = self._config.controller.min_score_for_feedback
             if score < threshold:
+                # Score below trigger threshold; re-arm for the next upward crossing.
+                self._feedback_threshold_rearmed = True
                 self._logger.system(
                     "feedback_delivery_threshold_not_met",
                     {
@@ -730,12 +762,27 @@ class RuntimeController:
                 )
                 return False
 
+            if not self._feedback_threshold_rearmed:
+                self._logger.system(
+                    "feedback_delivery_threshold_not_met",
+                    {
+                        "score": score,
+                        "rule": "static_min_score",
+                        "threshold": threshold,
+                        "pending_version": self._pending_feedback_version,
+                        "reason": "threshold_not_rearmed",
+                    },
+                    level="DEBUG",
+                )
+                return False
+
             payload = {
                 "score": score,
                 "rule": "static_min_score",
                 "threshold": threshold,
                 "pending_version": self._pending_feedback_version,
             }
+            self._feedback_threshold_rearmed = False
             self._logger.system(
                 "feedback_delivery_threshold_met",
                 payload,
@@ -995,8 +1042,15 @@ class RuntimeController:
                 self._logger.system(
                     "baseline_calibration_completed",
                     {
-                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
-                                   for k, v in baseline.metrics.items()},
+                        "metrics": {
+                            k: {
+                                "mean": round(v.mean, 4),
+                                "std": round(v.std, 4),
+                                "p02_5": round(v.p02_5, 4) if v.p02_5 is not None else None,
+                                "p97_5": round(v.p97_5, 4) if v.p97_5 is not None else None,
+                            }
+                            for k, v in baseline.metrics.items()
+                        },
                     },
                     level="INFO"
                 )
@@ -1004,8 +1058,15 @@ class RuntimeController:
                 self._logger.experiment(
                     "baseline_calibration_completed",
                     {
-                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
-                                   for k, v in baseline.metrics.items()},
+                        "metrics": {
+                            k: {
+                                "mean": round(v.mean, 4),
+                                "std": round(v.std, 4),
+                                "p02_5": round(v.p02_5, 4) if v.p02_5 is not None else None,
+                                "p97_5": round(v.p97_5, 4) if v.p97_5 is not None else None,
+                            }
+                            for k, v in baseline.metrics.items()
+                        },
                     },
                     level="INFO"
                 )
@@ -1345,6 +1406,7 @@ class RuntimeController:
         self._window_counter = 0
         self._estimate_counter = 0
         self._experiment_start_time = datetime.now(timezone.utc).timestamp()
+        self._feedback_threshold_rearmed = True
 
         # start processing layers if not already running
         self._signal_processing.start()
