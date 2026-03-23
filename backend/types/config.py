@@ -179,8 +179,8 @@ class TrainingConfig:
     # Sequence settings
     # With 1-second windows at 50% overlap, windows arrive every 0.5 seconds
     # history_window_size=120 means 120 × 0.5s = 60 seconds of history
-    history_window_size: int = 120  # Number of past windows as input
-    prediction_horizon: int = 60    # Windows to look ahead (~30 seconds)
+    history_window_size: int = 60  
+    prediction_horizon: int = 20   
 
     # Split ratios
     train_ratio: float = 0.7

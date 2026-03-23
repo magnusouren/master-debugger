@@ -14,6 +14,7 @@ to the Signal Processing output to ensure compatibility with downstream logic.
 from typing import Optional, List, Callable
 from collections import deque
 import time
+import numpy as np
 
 from backend.services.logger_service import LoggerService
 from backend.types import (
@@ -368,29 +369,114 @@ class ForecastingTool:
             )
             return None
 
-        # Get prediction from XGBoost model
-        infer_started_at = time.perf_counter()
-        predicted_components, confidence = self._forecaster.predict_with_confidence(input_sequence)
-        infer_elapsed_ms = (time.perf_counter() - infer_started_at) * 1000.0
+        # Derive schema from model metadata
+        model_info = getattr(self._forecaster, "_metadata", {}) or {}
+        model_history_size = int(model_info.get("history_window_size", getattr(self._forecaster, "history_size", 0) or len(input_sequence)))
+        input_columns = list(model_info.get("input_columns", getattr(self._forecaster, "feature_names", [])))
+        if not input_columns:
+            input_columns = ["pupil_ipa", "fixation_mean_duration_ms"]
+        target_columns = list(model_info.get("target_columns", TARGET_COLUMNS))
 
-        if predicted_components is None:
-            return None
-
-        missing_targets = [k for k in TARGET_COLUMNS if k not in predicted_components]
-        if missing_targets:
+        if len(input_sequence) < model_history_size:
             self._logger.system(
-                "forecasting_tool_prediction_missing_targets",
-                {"missing_targets": missing_targets},
+                "forecasting_tool_not_enough_history",
+                {
+                    "have_windows": len(input_sequence),
+                    "need_windows": model_history_size,
+                },
                 level="WARNING",
             )
             return None
 
-        # Get the latest window for timing info
-        latest_window = input_sequence[-1]
+        # Use only the last model_history_size windows
+        recent = list(input_sequence)[-model_history_size:]
+
+        # Flatten features in window order using declared input_columns
+        flat_features: List[float] = []
+        missing_inputs: List[str] = []
+        for w in recent:
+            window_dict = w.features if hasattr(w, "features") else w
+            for col in input_columns:
+                if isinstance(window_dict, dict):
+                    val = window_dict.get(col)
+                    if val is None:
+                        missing_inputs.append(col)
+                    flat_features.append(self._forecaster._safe_float(val))
+                else:
+                    missing_inputs.append(col)
+                    flat_features.append(float("nan"))
+
+        infer_started_at = time.perf_counter()
+        try:
+            pred = self._forecaster._model.predict(np.array([flat_features]))
+        except Exception as e:
+            last_window = recent[-1]
+            self._logger.system(
+                "forecasting_tool_inference_error",
+                {
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "history_windows": len(input_sequence),
+                    "model_history_size": model_history_size,
+                    "input_columns": input_columns,
+                    "target_columns": target_columns,
+                    "flat_feature_count": len(flat_features),
+                    "last_window_keys": (
+                        sorted(list(last_window.features.keys()))
+                        if hasattr(last_window, "features")
+                        else list(last_window.keys())
+                        if isinstance(last_window, dict)
+                        else None
+                    ),
+                },
+                level="ERROR",
+            )
+            return None
+
+        infer_elapsed_ms = (time.perf_counter() - infer_started_at) * 1000.0
+
+        pred_arr = np.asarray(pred)
+        self._logger.system(
+            "forecasting_tool_prediction_shape",
+            {
+                "shape": list(pred_arr.shape),
+                "target_columns": target_columns,
+                "missing_inputs": sorted(set(missing_inputs)),
+            },
+            level="DEBUG",
+        )
+
+        if pred_arr.ndim == 2 and pred_arr.shape[0] >= 1:
+            pred_row = pred_arr[0]
+        elif pred_arr.ndim == 1:
+            pred_row = pred_arr
+        else:
+            self._logger.system(
+                "forecasting_tool_unexpected_prediction_shape",
+                {"shape": list(pred_arr.shape)},
+                level="ERROR",
+            )
+            return None
+
+        if len(pred_row) < len(target_columns):
+            self._logger.system(
+                "forecasting_tool_prediction_missing_targets",
+                {
+                    "expected": target_columns,
+                    "got_len": len(pred_row),
+                },
+                level="ERROR",
+            )
+            return None
+
+        predicted_components = {
+            col: float(pred_row[idx]) for idx, col in enumerate(target_columns)
+        }
+
+        # Fill timing from latest window
+        latest_window = recent[-1]
         window_duration = latest_window.window_end - latest_window.window_start
 
-        # Create PredictedFeatures with predicted raw component values.
-        # ReactiveTool computes final score (incl. baseline normalization).
         predicted_features = PredictedFeatures(
             prediction_timestamp=latest_window.window_end,
             target_window_start=latest_window.window_end + horizon_seconds,
@@ -399,16 +485,21 @@ class ForecastingTool:
             forecast_id=forecast_id,
             window_id=self._next_pred_window_id(forecast_id),
             features=predicted_components,
-            enabled_metrics=latest_window.enabled_metrics.copy(),
-            confidence=confidence,
+            enabled_metrics=(latest_window.enabled_metrics or []).copy(),
+            confidence=1.0,
             uncertainty={},
         )
+
+        # Preserve sample/valid ratios on the prediction object for downstream consumers
+        setattr(predicted_features, "sample_count", latest_window.sample_count)
+        setattr(predicted_features, "valid_sample_ratio", latest_window.valid_sample_ratio)
 
         self._logger.system(
             "forecasting_tool_inference_timing",
             {
                 "inference_ms": round(infer_elapsed_ms, 3),
-                "confidence": round(confidence, 3),
+                "confidence": round(predicted_features.confidence, 3),
+                "target_columns": target_columns,
             },
             level="DEBUG",
         )

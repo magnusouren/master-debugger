@@ -140,6 +140,61 @@ class XGBoostForecaster:
 
         return features
 
+    def _safe_float(self, value: Any) -> float:
+        """Best-effort float conversion; handles arrays via nanmean."""
+        try:
+            if value is None:
+                return float('nan')
+
+            arr = np.asarray(value)
+            if arr.size == 0:
+                return float('nan')
+            if arr.ndim == 0:
+                return float(arr)
+
+            # For vectors/matrices, fall back to mean to avoid scalar cast errors
+            return float(np.nanmean(arr))
+        except Exception:
+            return float('nan')
+
+    def _extract_features_by_model_names(
+        self,
+        history: List[Dict[str, Any]],
+        model_feature_names: List[str],
+    ) -> List[float]:
+        """
+        Build the feature vector following the model's recorded feature names.
+
+        Supports names like "t-59_pupil_ipa" where t-0 is the most recent
+        window. Falls back to NaN when history is insufficient.
+        """
+        features: List[float] = []
+        for name in model_feature_names:
+            value = float('nan')
+            idx = None
+            metric = name
+
+            # Parse time-offset format: t-<k>_<metric>
+            if name.startswith("t-") and "_" in name[2:]:
+                try:
+                    offset_part, metric = name.split("_", 1)
+                    k = int(offset_part.replace("t-", ""))
+                    idx = len(history) - 1 - k  # t-0 is latest
+                except ValueError:
+                    idx = None
+
+            if idx is not None and 0 <= idx < len(history):
+                window = history[idx]
+                window_dict = window.features if hasattr(window, "features") else window
+                raw_val = None
+                if isinstance(window_dict, dict):
+                    raw_val = window_dict.get(metric)
+                value = self._safe_float(raw_val)
+
+            features.append(value)
+
+        return features
+
     def predict(self, history: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
         """
         Predict future target component values.
@@ -161,20 +216,48 @@ class XGBoostForecaster:
         # Take the most recent windows
         recent = history[-self._history_size:]
 
-        # Extract and flatten features
-        features = []
-        for window in recent:
-            # Handle both WindowFeatures objects and dicts
-            if hasattr(window, 'features'):
-                window_dict = window.features
-            else:
-                window_dict = window
+        # Extract and flatten features using model names when available
+        model_feature_names = list(getattr(self._model, "feature_names_in_", [])) or list(self._feature_names)
 
-            features.extend(self.extract_features_from_window(window_dict))
+        if model_feature_names:
+            features = self._extract_features_by_model_names(recent, model_feature_names)
+        else:
+            features = []
+            for window in recent:
+                window_dict = window.features if hasattr(window, 'features') else window
+                features.extend(self.extract_features_from_window(window_dict))
 
         # Predict
         X = np.array([features])
-        prediction = self._model.predict(X)[0]
+
+        # Capture the most recent window keys for debugging shape mismatches
+        last_window = recent[-1]
+        last_window_dict = last_window.features if hasattr(last_window, "features") else last_window
+        last_window_keys = (
+            sorted(list(last_window_dict.keys()))
+            if isinstance(last_window_dict, dict)
+            else "unavailable"
+        )
+
+        try:
+            prediction = self._model.predict(X)[0]
+        except ValueError as e:
+            expected_features = getattr(
+                self._model,
+                "n_features_in_",
+                len(model_feature_names) or len(self._feature_names) or len(FEATURE_COLUMNS) * self._history_size,
+            )
+            raise ValueError(
+                "Feature shape mismatch during forecasting inference: "
+                f"expected_features={expected_features}, "
+                f"got_features={X.shape[1]}, "
+                f"history_size={self._history_size}, "
+                f"features_per_window={len(FEATURE_COLUMNS)}, "
+                f"metadata_feature_names={len(self._feature_names)}, "
+                f"model_feature_names={getattr(self._model, 'feature_names_in_', None)}, "
+                f"last_window_keys={last_window_keys}, "
+                f"metadata_version={self._metadata.get('version') if self._metadata else None}"
+            ) from e
 
         # Multi-target model: return expected target component mapping.
         if isinstance(prediction, np.ndarray) and prediction.ndim == 1 and len(prediction) == len(TARGET_COLUMNS):
