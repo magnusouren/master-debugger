@@ -102,6 +102,7 @@ class ReactiveTool:
     """
     Estimates user state from eye-tracking features.
     """
+    BASELINE_SCORE_METRIC = "cognitive_load_score"
     
     def __init__(
         self,
@@ -180,6 +181,7 @@ class ReactiveTool:
             "anticipation_velocity": [],
             "perceived_difficulty_std": [],
             "ipi": [],  # Information Processing Index from crunchwiz
+            self.BASELINE_SCORE_METRIC: [],  # Final score used for delivery triggering
         }
         self._logger.system(
             "baseline_recording_started",
@@ -263,6 +265,31 @@ class ReactiveTool:
         """Check if a valid baseline is loaded."""
         return self._baseline is not None and self._baseline.is_valid
 
+    def get_feedback_trigger_bounds(self, std_multiplier: float = 2.0) -> Optional[Dict[str, float | int]]:
+        """
+        Get dynamic feedback trigger bounds from baseline score statistics.
+
+        Returns lower/upper bounds for the final cognitive-load score
+        using mean ± std_multiplier * std, or None if unavailable.
+        """
+        if self._baseline is None or not self._baseline.is_valid:
+            return None
+
+        metric = self._baseline.metrics.get(self.BASELINE_SCORE_METRIC)
+        if metric is None:
+            return None
+
+        lower = metric.mean - (std_multiplier * metric.std)
+        upper = metric.mean + (std_multiplier * metric.std)
+
+        return {
+            "mean": metric.mean,
+            "std": metric.std,
+            "lower": lower,
+            "upper": upper,
+            "sample_count": metric.sample_count,
+        }
+
     def is_recording_baseline(self) -> bool:
         """Check if baseline recording is currently active."""
         return self._is_recording_baseline
@@ -332,6 +359,10 @@ class ReactiveTool:
         raw_score = float(raw_score)
         raw_score = max(0.0, min(1.0, raw_score))
         score = self._smooth_score(raw_score)
+
+        # Keep a baseline distribution of the final score used by delivery trigger logic.
+        if self._is_recording_baseline and self.BASELINE_SCORE_METRIC in self._baseline_samples:
+            self._baseline_samples[self.BASELINE_SCORE_METRIC].append(score)
 
         confidence = self._compute_confidence(windows, score)
 

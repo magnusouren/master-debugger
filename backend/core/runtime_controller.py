@@ -668,34 +668,82 @@ class RuntimeController:
 
         # Check user state threshold (if user state is available)
         if self._current_user_state is not None:
+            score = float(self._current_user_state.score.score)
+            bounds = self._reactive_tool.get_feedback_trigger_bounds(std_multiplier=2.0)
+
+            # Preferred rule: trigger when score is outside baseline mean ± 2*SD.
+            if bounds is not None:
+                lower = bounds["lower"]
+                upper = bounds["upper"]
+
+                if lower <= score <= upper:
+                    self._logger.system(
+                        "feedback_delivery_threshold_not_met",
+                        {
+                            "score": score,
+                            "rule": "baseline_mean_pm_2sd",
+                            "baseline_mean": bounds["mean"],
+                            "baseline_std": bounds["std"],
+                            "lower_bound": lower,
+                            "upper_bound": upper,
+                            "baseline_sample_count": int(bounds["sample_count"]),
+                            "pending_version": self._pending_feedback_version,
+                        },
+                        level="DEBUG",
+                    )
+                    return False
+
+                payload = {
+                    "score": score,
+                    "rule": "baseline_mean_pm_2sd",
+                    "baseline_mean": bounds["mean"],
+                    "baseline_std": bounds["std"],
+                    "lower_bound": lower,
+                    "upper_bound": upper,
+                    "baseline_sample_count": int(bounds["sample_count"]),
+                    "pending_version": self._pending_feedback_version,
+                }
+                self._logger.system(
+                    "feedback_delivery_threshold_met",
+                    payload,
+                    level="INFO",
+                )
+                self._logger.experiment(
+                    "feedback_delivery_threshold_met",
+                    payload,
+                    level="INFO",
+                )
+                return True
+
+            # Fallback rule for sessions without baseline score stats.
             threshold = self._config.controller.min_score_for_feedback
-            if self._current_user_state.score.score < threshold:
+            if score < threshold:
                 self._logger.system(
                     "feedback_delivery_threshold_not_met",
                     {
-                        "score": self._current_user_state.score.score,
+                        "score": score,
+                        "rule": "static_min_score",
                         "threshold": threshold,
                         "pending_version": self._pending_feedback_version,
                     },
                     level="DEBUG",
                 )
                 return False
+
+            payload = {
+                "score": score,
+                "rule": "static_min_score",
+                "threshold": threshold,
+                "pending_version": self._pending_feedback_version,
+            }
             self._logger.system(
                 "feedback_delivery_threshold_met",
-                {
-                    "score": self._current_user_state.score.score,
-                    "threshold": threshold,
-                    "pending_version": self._pending_feedback_version,
-                },
+                payload,
                 level="INFO",
             )
             self._logger.experiment(
                 "feedback_delivery_threshold_met",
-                {
-                    "score": self._current_user_state.score.score,
-                    "threshold": threshold,
-                    "pending_version": self._pending_feedback_version,
-                },
+                payload,
                 level="INFO",
             )
         return True
