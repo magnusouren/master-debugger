@@ -1,28 +1,31 @@
 """
-Train XGBoost model for cognitive load forecasting.
+Train XGBoost model for WindowFeatures forecasting.
 
 Usage:
     python -m backend.training.train_xgboost
     python -m backend.training.train_xgboost --config backend/config.yaml
 """
+from __future__ import annotations
+
 import argparse
 import json
-from pathlib import Path
-from datetime import datetime
 import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
+
 import numpy as np
 
 try:
     import xgboost as xgb
 except ImportError:
     print("XGBoost not installed. Run: pip install xgboost")
-    exit(1)
+    raise SystemExit(1)
 
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from backend.types import TrainingConfig, SystemConfig
+from backend.types import SystemConfig, TrainingConfig
 from backend.training.dataset import prepare_dataset
-from backend.models.forecast_feature_schema import TARGET_COLUMNS, compute_score_from_target_components
 
 
 def train_model(
@@ -30,20 +33,11 @@ def train_model(
     y_train: np.ndarray,
     X_val: np.ndarray,
     y_val: np.ndarray,
-    feature_names: list,
+    feature_names: List[str],
     config: TrainingConfig,
 ) -> xgb.XGBRegressor:
     """
     Train XGBoost regressor with early stopping.
-
-    Args:
-        X_train, y_train: Training data
-        X_val, y_val: Validation data
-        feature_names: List of feature names
-        config: TrainingConfig with hyperparameters
-
-    Returns:
-        Trained XGBoost model
     """
     print("\n--- Training XGBoost ---")
 
@@ -68,8 +62,13 @@ def train_model(
         verbose=False,
     )
 
-    print(f"\nBest iteration: {model.best_iteration}")
-    print(f"Best validation score: {model.best_score:.4f}")
+    best_iteration = getattr(model, "best_iteration", None)
+    best_score = getattr(model, "best_score", None)
+
+    if best_iteration is not None:
+        print(f"\nBest iteration: {best_iteration}")
+    if best_score is not None:
+        print(f"Best validation score: {best_score:.4f}")
 
     return model
 
@@ -78,91 +77,81 @@ def evaluate_model(
     model: xgb.XGBRegressor,
     X_test: np.ndarray,
     y_test: np.ndarray,
-    threshold: float = 0.6
-) -> dict:
+    target_columns: List[str],
+) -> Dict[str, Any]:
     """
     Evaluate model on test set.
 
-    Args:
-        model: Trained model
-        X_test, y_test: Test data
-        threshold: Threshold for binary classification metrics
-
-    Returns:
-        Dictionary of evaluation metrics
+    Returns overall metrics plus per-target metrics.
     """
     print("\n--- Evaluation on Test Set ---")
 
     y_pred = model.predict(X_test)
 
-    # Convert component vectors -> strict 5x0.2 score for primary metrics.
-    y_test_score = np.array([
-        compute_score_from_target_components({
-            key: float(y_test[i, idx]) for idx, key in enumerate(TARGET_COLUMNS)
-        })
-        for i in range(len(y_test))
-    ])
-    y_pred_score = np.array([
-        compute_score_from_target_components({
-            key: float(y_pred[i, idx]) for idx, key in enumerate(TARGET_COLUMNS)
-        })
-        for i in range(len(y_pred))
-    ])
+    # Overall regression metrics across all outputs
+    mse = mean_squared_error(y_test, y_pred)
+    rmse = float(np.sqrt(mse))
+    mae = float(mean_absolute_error(y_test, y_pred))
+    r2 = float(r2_score(y_test, y_pred, multioutput="uniform_average"))
 
-    # Regression metrics
-    mse = mean_squared_error(y_test_score, y_pred_score)
-    rmse = np.sqrt(mse)
-    mae = mean_absolute_error(y_test_score, y_pred_score)
-    r2 = r2_score(y_test_score, y_pred_score)
+    print(f"Overall RMSE: {rmse:.4f}")
+    print(f"Overall MAE:  {mae:.4f}")
+    print(f"Overall R²:   {r2:.4f}")
 
-    print(f"RMSE: {rmse:.4f}")
-    print(f"MAE: {mae:.4f}")
-    print(f"R²: {r2:.4f}")
+    # Per-target metrics
+    per_target: Dict[str, Dict[str, float]] = {}
+    print("\nPer-target metrics:")
+    for idx, col in enumerate(target_columns):
+        yt = y_test[:, idx]
+        yp = y_pred[:, idx]
 
-    # Binary classification metrics (above/below threshold)
-    y_test_binary = (y_test_score >= threshold).astype(int)
-    y_pred_binary = (y_pred_score >= threshold).astype(int)
+        col_mse = mean_squared_error(yt, yp)
+        col_rmse = float(np.sqrt(col_mse))
+        col_mae = float(mean_absolute_error(yt, yp))
+        col_r2 = float(r2_score(yt, yp))
 
-    accuracy = (y_test_binary == y_pred_binary).mean()
-    true_positives = ((y_test_binary == 1) & (y_pred_binary == 1)).sum()
-    false_positives = ((y_test_binary == 0) & (y_pred_binary == 1)).sum()
-    false_negatives = ((y_test_binary == 1) & (y_pred_binary == 0)).sum()
+        per_target[col] = {
+            "rmse": col_rmse,
+            "mae": col_mae,
+            "r2": col_r2,
+        }
 
-    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
-    recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-
-    print(f"\nBinary classification (threshold={threshold}):")
-    print(f"Accuracy: {accuracy:.4f}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall: {recall:.4f}")
-    print(f"F1: {f1:.4f}")
+        print(
+            f"  {col:<24} "
+            f"RMSE={col_rmse:>8.4f} "
+            f"MAE={col_mae:>8.4f} "
+            f"R²={col_r2:>8.4f}"
+        )
 
     return {
-        'rmse': rmse,
-        'mae': mae,
-        'r2': r2,
-        'accuracy': accuracy,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
+        "overall": {
+            "rmse": rmse,
+            "mae": mae,
+            "r2": r2,
+        },
+        "per_target": per_target,
     }
 
 
 def get_feature_importance(
     model: xgb.XGBRegressor,
-    feature_names: list,
-    top_n: int = 20
-) -> dict:
-    """Get top feature importances."""
+    feature_names: List[str],
+    top_n: int = 20,
+) -> Dict[str, float]:
+    """
+    Get top feature importances.
+    """
     importances = np.asarray(model.feature_importances_)
+
+    # Multi-output models may return one vector per target
     if importances.ndim == 2:
-        # Multi-target model returns one importance vector per target.
         importances = importances.mean(axis=0)
+
     indices = np.argsort(importances)[::-1][:top_n]
 
     print(f"\n--- Top {top_n} Feature Importances ---")
-    importance_dict = {}
+    importance_dict: Dict[str, float] = {}
+
     for i in indices:
         print(f"{feature_names[i]}: {importances[i]:.4f}")
         importance_dict[feature_names[i]] = float(importances[i])
@@ -172,8 +161,10 @@ def get_feature_importance(
 
 def save_model(
     model: xgb.XGBRegressor,
-    metrics: dict,
-    feature_names: list,
+    metrics: Dict[str, Any],
+    feature_names: List[str],
+    target_columns: List[str],
+    input_columns: List[str],
     output_dir: Path,
     config: TrainingConfig,
 ) -> Path:
@@ -184,39 +175,35 @@ def save_model(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate version string
     version = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_name = f"xgb_forecaster_{version}"
 
-    # Save model
     model_path = output_dir / f"{model_name}.json"
     model.save_model(str(model_path))
     print(f"\nModel saved to: {model_path}")
 
-    # Save metadata
     metadata = {
-        'version': version,
-        'model_type': 'xgboost_regressor',
-        'target_columns': TARGET_COLUMNS,
-        'history_window_size': config.history_window_size,
-        'prediction_horizon': config.prediction_horizon,
-        'n_features': len(feature_names),
-        'feature_names': feature_names,
-        'metrics': metrics,
-        'xgboost_params': model.get_params(),
+        "version": version,
+        "model_type": "xgboost_regressor",
+        "task": "sequence_to_one_windowfeatures_forecasting",
+        "history_window_size": config.history_window_size,
+        "prediction_horizon": config.prediction_horizon,
+        "input_columns": input_columns,
+        "target_columns": target_columns,
+        "n_features": len(feature_names),
+        "feature_names": feature_names,
+        "metrics": metrics,
+        "xgboost_params": model.get_params(),
     }
 
     metadata_path = output_dir / f"{model_name}_metadata.json"
-    with open(metadata_path, 'w') as f:
+    with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2, default=str)
     print(f"Metadata saved to: {metadata_path}")
 
-    # Write latest model/metadata as real files (not symlinks) for
-    # cross-platform compatibility, especially on Windows.
     latest_model = output_dir / "latest.json"
     latest_metadata = output_dir / "latest_metadata.json"
 
-    # Remove existing files/symlinks first
     if latest_model.is_symlink() or latest_model.exists():
         latest_model.unlink()
     if latest_metadata.is_symlink() or latest_metadata.exists():
@@ -228,14 +215,18 @@ def save_model(
     return model_path
 
 
-def main():
-    """Main training pipeline."""
-    parser = argparse.ArgumentParser(description="Train XGBoost cognitive load forecaster")
+def main() -> None:
+    """
+    Main training pipeline.
+    """
+    parser = argparse.ArgumentParser(
+        description="Train XGBoost WindowFeatures forecaster"
+    )
     parser.add_argument(
         "--config",
         type=str,
-        default=None,
-        help="Path to config.yaml file (uses defaults if not provided)"
+        default="backend/config.yaml",
+        help="Path to config.yaml file (uses defaults if not provided)",
     )
     parser.add_argument(
         "--split-dir",
@@ -246,10 +237,9 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("XGBoost Cognitive Load Forecaster Training")
+    print("XGBoost WindowFeatures Forecaster Training")
     print("=" * 60)
 
-    # Load training config from file or use defaults
     if args.config:
         print(f"Loading config from: {args.config}")
         system_config = SystemConfig.from_file(args.config)
@@ -258,35 +248,40 @@ def main():
         print("Using default TrainingConfig")
         config = TrainingConfig()
 
-    # Prepare dataset
     split_dir = Path(args.split_dir) if args.split_dir else None
+
     dataset = prepare_dataset(config=config, split_dir=split_dir)
 
-    # Train model
     model = train_model(
-        dataset['X_train'],
-        dataset['y_train'],
-        dataset['X_val'],
-        dataset['y_val'],
-        dataset['feature_names'],
+        dataset["X_train"],
+        dataset["y_train"],
+        dataset["X_val"],
+        dataset["y_val"],
+        dataset["feature_names"],
         config=config,
     )
 
-    # Evaluate
     metrics = evaluate_model(
         model,
-        dataset['X_test'],
-        dataset['y_test'],
+        dataset["X_test"],
+        dataset["y_test"],
+        dataset["target_columns"],
     )
 
-    # Feature importance
-    importance = get_feature_importance(model, dataset['feature_names'])
+    get_feature_importance(model, dataset["feature_names"])
 
-    # Save model
     base_dir = Path(__file__).parent.parent
     output_dir = base_dir / "models" / "trained"
 
-    save_model(model, metrics, dataset['feature_names'], output_dir, config=config)
+    save_model(
+        model=model,
+        metrics=metrics,
+        feature_names=dataset["feature_names"],
+        target_columns=dataset["target_columns"],
+        input_columns=dataset["input_columns"],
+        output_dir=output_dir,
+        config=config,
+    )
 
     print("\n" + "=" * 60)
     print("Training complete!")

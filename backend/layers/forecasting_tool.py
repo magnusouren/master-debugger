@@ -5,15 +5,15 @@ Position: Between Signal Processing and Reactive Tool
 Input: Window-based features (e.g., 2–10 Hz)
 Output: Predicted window-based features (same format)
 Configuration: Prediction horizon (seconds into the future), Update rate
-
-This component predicts future feature values based on recent observations.
-Predictions are produced using a trained model based on historical or 
-previously collected eye-tracking data. The output format is identical 
-to the Signal Processing output to ensure compatibility with downstream logic.
 """
-from typing import Optional, List, Callable
+from __future__ import annotations
+
+from typing import Optional, List, Callable, Any, Tuple
 from collections import deque
+from pathlib import Path
 import time
+
+import numpy as np
 
 from backend.services.logger_service import LoggerService
 from backend.types import (
@@ -25,27 +25,27 @@ from backend.models.xgboost_forecaster import XGBoostForecaster
 from backend.models.forecast_feature_schema import TARGET_COLUMNS
 
 
+DEFAULT_INPUT_COLUMNS = [
+    "pupil_ipa",
+    "fixation_mean_duration_ms",
+]
+
+
 class ForecastingTool:
     """
     Predicts future eye-tracking features for proactive intervention.
     """
-    
+
     def __init__(
         self,
         config: Optional[ForecastingConfig] = None,
         logger: Optional[LoggerService] = None,
     ):
-        """
-        Initialize the Forecasting Tool.
-        
-        Args:
-            config: Configuration for forecasting parameters.
-            logger: Logger instance for recording events.
-        """
         self._config = config or ForecastingConfig()
         self._feature_history: deque[WindowFeatures] = deque()
         self._forecaster: Optional[XGBoostForecaster] = None
         self._output_callbacks: List[Callable[[PredictedFeatures], None]] = []
+
         self._is_enabled: bool = False
         self._last_prediction_time: float = 0.0
         self._forecast_counter: int = 0
@@ -53,63 +53,39 @@ class ForecastingTool:
         self._last_warmup_status: Optional[str] = None
         self._id_prefix: str = f"fc{int(time.time())}"
 
-        # Use provided logger or create fallback
         if logger is None:
             from backend.services.logger_service import get_logger
             logger = get_logger()
         self._logger = logger
 
-        # Auto-load model if path specified in config
         if self._config.model_path:
             self.load_model(self._config.model_path)
         else:
             self._logger.system(
                 "forecasting_tool_no_model_configured",
                 {},
-                level="WARNING"
+                level="WARNING",
             )
-    
+
+    # -------------------------------------------------------------------------
+    # Public API
+    # -------------------------------------------------------------------------
+
     def configure(self, config: ForecastingConfig) -> None:
-        """
-        Update forecasting configuration.
-        
-        Args:
-            config: New configuration to apply.
-        """
         self._config = config
-    
+
     def enable(self) -> None:
-        """Enable the forecasting tool (for proactive mode)."""
-        # Ensure a model is available when proactive mode starts.
-        if not self._forecaster or not self._forecaster.is_loaded():
+        if not self._has_loaded_model():
             self.load_model(self._config.model_path)
         self._is_enabled = True
-    
+
     def disable(self) -> None:
-        """Disable the forecasting tool (for reactive mode)."""
         self._is_enabled = False
-    
+
     def is_enabled(self) -> bool:
-        """
-        Check if forecasting is currently enabled.
-        
-        Returns:
-            True if forecasting is active.
-        """
         return self._is_enabled
-    
+
     def load_model(self, model_path: Optional[str] = None) -> bool:
-        """
-        Load a trained forecasting model.
-
-        Args:
-            model_path: Path to the model file. If None, loads latest model.
-
-        Returns:
-            True if model loaded successfully.
-        """
-        from pathlib import Path
-
         try:
             self._forecaster = XGBoostForecaster()
             path = Path(model_path) if model_path else None
@@ -118,99 +94,85 @@ class ForecastingTool:
             if success:
                 self._logger.system(
                     "forecasting_tool_model_loaded",
-                    {"model_path": str(model_path), "info": self._forecaster.get_model_info()},
+                    {
+                        "model_path": str(model_path),
+                        "info": self._forecaster.get_model_info(),
+                    },
                 )
             else:
                 self._logger.system(
                     "forecasting_tool_model_load_failed",
                     {"model_path": str(model_path)},
-                    level="WARNING"
+                    level="WARNING",
                 )
 
             return success
         except Exception as e:
             self._logger.system(
                 "forecasting_tool_model_load_error",
-                {"model_path": str(model_path), "error": str(e)},
-                level="ERROR"
+                {
+                    "model_path": str(model_path),
+                    "error": str(e),
+                },
+                level="ERROR",
             )
             return False
-    
+
     def unload_model(self) -> None:
-        """Unload the current model and free resources."""
         self._forecaster = None
         self._logger.system("forecasting_tool_model_unloaded", {})
-    
+
     def add_features(self, features: WindowFeatures) -> None:
-        # 1. Add new features to history buffer
-        self._feature_history.append(features)
+        self._append_to_history(features)
+        self._trim_history(features.window_end)
 
-        # 2. Calculate cutoff time for history retention
-        cutoff_time = features.window_end - self._config.history_window_seconds
+        if not self._is_enabled:
+            return
 
-        # 3. Remove all windows older than cutoff
-        while (
-            self._feature_history
-            and self._feature_history[0].window_end < cutoff_time
-        ):
-            self._feature_history.popleft()
+        if not self._should_update_prediction():
+            return
 
-        # 4. Trigger prediction if allowed
-        if self._is_enabled and self._should_update_prediction():
-            prediction = self.predict()
-            if (
-                prediction
-                and prediction.confidence >= self._config.min_confidence_threshold
-            ):
-                for callback in self._output_callbacks:
-                    try:
-                        callback(prediction)
-                    except Exception as e:
-                        self._logger.system(
-                            "forecasting_tool_callback_error",
-                            {"error": str(e)},
-                            level="ERROR"
-                        )
-    
+        prediction = self.predict()
+        if prediction is None:
+            return
+
+        if prediction.confidence < self._config.min_confidence_threshold:
+            return
+
+        for callback in list(self._output_callbacks):
+            try:
+                callback(prediction)
+            except Exception as e:
+                self._logger.system(
+                    "forecasting_tool_callback_error",
+                    {"error": str(e)},
+                    level="ERROR",
+                )
+
     def predict(self) -> Optional[PredictedFeatures]:
-        """
-        Generate a prediction for future features.
-        
-        Returns:
-            Predicted features or None if prediction not possible.
-        """
-
         if not self._config.prediction_horizon_seconds:
             self._logger.system(
                 "forecasting_tool_no_horizon_configured",
                 {},
-                level="WARNING"
+                level="WARNING",
             )
             return None
 
         return self.predict_at_horizon(self._config.prediction_horizon_seconds)
-    
-    def predict_at_horizon(
-        self, horizon_seconds: float
-    ) -> Optional[PredictedFeatures]:
-        """
-        Generate a prediction for a specific time horizon.
-        
-        Args:
-            horizon_seconds: How far into the future to predict.
-            
-        Returns:
-            Predicted features or None if prediction not possible.
-        """
 
+    def predict_at_horizon(self, horizon_seconds: float) -> Optional[PredictedFeatures]:
         started_at = time.perf_counter()
         forecast_id = self._next_forecast_id()
-        window_feature = self._prepare_input_sequence()
 
-        if not window_feature:
+        input_sequence = self._prepare_input_sequence()
+        if not input_sequence:
             return None
-        
-        prediction = self._run_model_inference(window_feature, forecast_id, horizon_seconds)
+
+        prediction = self._run_model_inference(
+            input_sequence=input_sequence,
+            forecast_id=forecast_id,
+            horizon_seconds=horizon_seconds,
+        )
 
         if prediction is not None:
             elapsed_ms = (time.perf_counter() - started_at) * 1000.0
@@ -218,73 +180,62 @@ class ForecastingTool:
                 "forecasting_tool_prediction_latency",
                 {
                     "latency_ms": round(elapsed_ms, 3),
-                    "history_windows": len(window_feature),
+                    "history_windows": len(input_sequence),
                     "horizon_seconds": horizon_seconds,
                 },
                 level="DEBUG",
             )
 
         return prediction
-    
-    def get_prediction_confidence(self) -> float:
-        """
-        Get the confidence of the latest prediction.
 
-        Returns:
-            Confidence score between 0.0 and 1.0.
-        """
-        # Get confidence from the most recent prediction
-        if not self._forecaster or not self._forecaster.is_loaded():
-            return 0.0
-
-        input_sequence = self._prepare_input_sequence()
-        if not input_sequence:
-            return 0.0
-
-        _, confidence = self._forecaster.predict_with_confidence(input_sequence)
-        return confidence
-    
     def register_output_callback(
-        self, callback: Callable[[PredictedFeatures], None]
+        self,
+        callback: Callable[[PredictedFeatures], None],
     ) -> None:
-        """
-        Register a callback to receive predicted features.
-        
-        Args:
-            callback: Function to call with predictions.
-        """
         self._output_callbacks.append(callback)
-    
+
     def unregister_output_callback(
-        self, callback: Callable[[PredictedFeatures], None]
+        self,
+        callback: Callable[[PredictedFeatures], None],
     ) -> None:
-        """
-        Unregister a previously registered callback.
-        
-        Args:
-            callback: The callback function to remove.
-        """
         if callback in self._output_callbacks:
             self._output_callbacks.remove(callback)
-    
+
     def reset(self) -> None:
-        """Reset internal state and history buffer."""
         self._feature_history.clear()
         self._last_prediction_time = 0.0
         self._last_warmup_status = None
         self._forecast_counter = 0
         self._pred_window_counter = 0
 
-    def _next_forecast_id(self) -> str:
-        self._forecast_counter += 1
-        return f"{self._id_prefix}-f{self._forecast_counter:06d}"
+    # -------------------------------------------------------------------------
+    # Internal: history / warmup
+    # -------------------------------------------------------------------------
 
-    def _next_pred_window_id(self, forecast_id: str) -> str:
-        self._pred_window_counter += 1
-        return f"{forecast_id}-w{self._pred_window_counter:04d}"
+    def _append_to_history(self, features: WindowFeatures) -> None:
+        self._feature_history.append(features)
+
+    def _trim_history(self, latest_window_end: float) -> None:
+        cutoff_time = latest_window_end - self._config.history_window_seconds
+        while self._feature_history and self._feature_history[0].window_end < cutoff_time:
+            self._feature_history.popleft()
+
+    def _prepare_input_sequence(self) -> Optional[List[WindowFeatures]]:
+        required_history = self._compute_required_history()
+        can_predict = len(self._feature_history) >= required_history
+
+        self._log_warmup_status(
+            can_predict=can_predict,
+            required_windows=required_history,
+        )
+
+        if not can_predict:
+            return None
+
+        return list(self._feature_history)
 
     def _compute_required_history(self) -> int:
-        if self._forecaster and self._forecaster.is_loaded():
+        if self._has_loaded_model():
             return max(1, int(getattr(self._forecaster, "history_size", 5)))
         return 5
 
@@ -300,7 +251,9 @@ class ForecastingTool:
 
         status = "ready" if can_predict else "warming_up"
         buffer_windows = len(self._feature_history)
-        buffer_fill_ratio = 0.0 if required_windows <= 0 else min(1.0, buffer_windows / required_windows)
+        buffer_fill_ratio = (
+            0.0 if required_windows <= 0 else min(1.0, buffer_windows / required_windows)
+        )
 
         available_history_seconds = 0.0
         if self._feature_history:
@@ -324,74 +277,199 @@ class ForecastingTool:
             },
             level="INFO",
         )
-
         self._last_warmup_status = status
-    
-    # --- Internal methods ---
-    
-    def _prepare_input_sequence(self) -> Optional[List[WindowFeatures]]:
-        """
-        Prepare the input sequence for the prediction model.
 
-        Returns:
-            Prepared feature sequence or None if insufficient data.
-        """
-        required_history = self._compute_required_history()
-        can_predict = len(self._feature_history) >= required_history
-        self._log_warmup_status(can_predict=can_predict, required_windows=required_history)
+    # -------------------------------------------------------------------------
+    # Internal: ids / helpers
+    # -------------------------------------------------------------------------
 
-        if not can_predict:
-            return None
+    def _next_forecast_id(self) -> str:
+        self._forecast_counter += 1
+        return f"{self._id_prefix}-f{self._forecast_counter:06d}"
 
-        return list(self._feature_history)
-    
-    def _run_model_inference(
+    def _next_pred_window_id(self, forecast_id: str) -> str:
+        self._pred_window_counter += 1
+        return f"{forecast_id}-w{self._pred_window_counter:04d}"
+
+    def _has_loaded_model(self) -> bool:
+        return self._forecaster is not None and self._forecaster.is_loaded()
+
+    # -------------------------------------------------------------------------
+    # Internal: schema resolution
+    # -------------------------------------------------------------------------
+
+    def _resolve_model_schema(
         self,
         input_sequence: List[WindowFeatures],
-        forecast_id: str,
-        horizon_seconds: float,
-    ) -> Optional[PredictedFeatures]:
-        """
-        Run the forecasting model on input sequence.
+    ) -> Tuple[int, List[str], List[str]]:
+        metadata = getattr(self._forecaster, "_metadata", {}) or {}
 
-        Args:
-            input_sequence: Prepared feature sequence.
-
-        Returns:
-            Model prediction output, or None if prediction fails.
-        """
-        if not self._forecaster or not self._forecaster.is_loaded():
-            self._logger.system(
-                "forecasting_tool_no_model",
-                {"message": "No model loaded for inference"},
-                level="WARNING"
+        history_size = int(
+            metadata.get(
+                "history_window_size",
+                getattr(self._forecaster, "history_size", 0) or len(input_sequence),
             )
-            return None
+        )
 
-        # Get prediction from XGBoost model
-        infer_started_at = time.perf_counter()
-        predicted_components, confidence = self._forecaster.predict_with_confidence(input_sequence)
-        infer_elapsed_ms = (time.perf_counter() - infer_started_at) * 1000.0
+        input_columns = list(
+            metadata.get(
+                "input_columns",
+                getattr(self._forecaster, "feature_names", []),
+            )
+        )
+        if not input_columns:
+            input_columns = list(DEFAULT_INPUT_COLUMNS)
 
-        if predicted_components is None:
-            return None
+        target_columns = list(metadata.get("target_columns", TARGET_COLUMNS))
+        return history_size, input_columns, target_columns
 
-        missing_targets = [k for k in TARGET_COLUMNS if k not in predicted_components]
-        if missing_targets:
+    def _select_recent_windows(
+        self,
+        input_sequence: List[WindowFeatures],
+        required_history_size: int,
+    ) -> Optional[List[WindowFeatures]]:
+        if len(input_sequence) < required_history_size:
             self._logger.system(
-                "forecasting_tool_prediction_missing_targets",
-                {"missing_targets": missing_targets},
+                "forecasting_tool_not_enough_history",
+                {
+                    "have_windows": len(input_sequence),
+                    "need_windows": required_history_size,
+                },
                 level="WARNING",
             )
             return None
 
-        # Get the latest window for timing info
-        latest_window = input_sequence[-1]
+        return list(input_sequence)[-required_history_size:]
+
+    # -------------------------------------------------------------------------
+    # Internal: feature flattening / model output parsing
+    # -------------------------------------------------------------------------
+
+    def _flatten_windows(
+        self,
+        windows: List[WindowFeatures],
+        input_columns: List[str],
+    ) -> Tuple[List[float], List[str]]:
+        flat_features: List[float] = []
+        missing_inputs: List[str] = []
+
+        for window in windows:
+            feature_dict = window.features or {}
+            for col in input_columns:
+                val = feature_dict.get(col)
+                if val is None:
+                    missing_inputs.append(col)
+                flat_features.append(self._forecaster._safe_float(val))
+
+        return flat_features, missing_inputs
+
+    def _predict_raw_array(
+        self,
+        flat_features: List[float],
+        recent_windows: List[WindowFeatures],
+        input_columns: List[str],
+        target_columns: List[str],
+        model_history_size: int,
+        full_history_size: int,
+    ) -> Optional[np.ndarray]:
+        try:
+            return np.asarray(self._forecaster._model.predict(np.array([flat_features])))
+        except Exception as e:
+            last_window = recent_windows[-1]
+            self._logger.system(
+                "forecasting_tool_inference_error",
+                {
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "history_windows": full_history_size,
+                    "model_history_size": model_history_size,
+                    "input_columns": input_columns,
+                    "target_columns": target_columns,
+                    "flat_feature_count": len(flat_features),
+                    "last_window_keys": sorted(list((last_window.features or {}).keys())),
+                },
+                level="ERROR",
+            )
+            return None
+
+    def _extract_prediction_row(
+        self,
+        pred_arr: np.ndarray,
+        target_columns: List[str],
+        missing_inputs: List[str],
+    ) -> Optional[np.ndarray]:
+        self._logger.system(
+            "forecasting_tool_prediction_shape",
+            {
+                "shape": list(pred_arr.shape),
+                "target_columns": target_columns,
+                "missing_inputs": sorted(set(missing_inputs)),
+            },
+            level="DEBUG",
+        )
+
+        if pred_arr.ndim == 2 and pred_arr.shape[0] >= 1:
+            pred_row = pred_arr[0]
+        elif pred_arr.ndim == 1:
+            pred_row = pred_arr
+        else:
+            self._logger.system(
+                "forecasting_tool_unexpected_prediction_shape",
+                {"shape": list(pred_arr.shape)},
+                level="ERROR",
+            )
+            return None
+
+        if len(pred_row) < len(target_columns):
+            self._logger.system(
+                "forecasting_tool_prediction_missing_targets",
+                {
+                    "expected": target_columns,
+                    "got_len": len(pred_row),
+                },
+                level="ERROR",
+            )
+            return None
+
+        return pred_row
+
+    def _build_predicted_components(
+        self,
+        pred_row: np.ndarray,
+        target_columns: List[str],
+    ) -> dict:
+        return {
+            col: float(pred_row[idx])
+            for idx, col in enumerate(target_columns)
+        }
+
+    # -------------------------------------------------------------------------
+    # Internal: prediction object construction
+    # -------------------------------------------------------------------------
+
+    def _estimate_prediction_confidence(
+        self,
+        missing_inputs: List[str],
+        expected_input_count: int,
+    ) -> float:
+        if expected_input_count <= 0:
+            return 0.0
+
+        missing_ratio = len(missing_inputs) / expected_input_count
+        confidence = 1.0 - missing_ratio
+        return float(max(0.0, min(1.0, confidence)))
+
+    def _build_predicted_features(
+        self,
+        latest_window: WindowFeatures,
+        predicted_components: dict,
+        forecast_id: str,
+        horizon_seconds: float,
+        confidence: float,
+    ) -> PredictedFeatures:
         window_duration = latest_window.window_end - latest_window.window_start
 
-        # Create PredictedFeatures with predicted raw component values.
-        # ReactiveTool computes final score (incl. baseline normalization).
-        predicted_features = PredictedFeatures(
+        predicted = PredictedFeatures(
             prediction_timestamp=latest_window.window_end,
             target_window_start=latest_window.window_end + horizon_seconds,
             target_window_end=latest_window.window_end + horizon_seconds + window_duration,
@@ -399,44 +477,113 @@ class ForecastingTool:
             forecast_id=forecast_id,
             window_id=self._next_pred_window_id(forecast_id),
             features=predicted_components,
-            enabled_metrics=latest_window.enabled_metrics.copy(),
+            enabled_metrics=(latest_window.enabled_metrics or []).copy(),
             confidence=confidence,
             uncertainty={},
         )
 
+        setattr(predicted, "sample_count", latest_window.sample_count)
+        setattr(predicted, "valid_sample_ratio", latest_window.valid_sample_ratio)
+        return predicted
+
+    # -------------------------------------------------------------------------
+    # Internal: core inference
+    # -------------------------------------------------------------------------
+
+    def _run_model_inference(
+        self,
+        input_sequence: List[WindowFeatures],
+        forecast_id: str,
+        horizon_seconds: float,
+    ) -> Optional[PredictedFeatures]:
+        if not self._has_loaded_model():
+            self._logger.system(
+                "forecasting_tool_no_model",
+                {"message": "No model loaded for inference"},
+                level="WARNING",
+            )
+            return None
+
+        model_history_size, input_columns, target_columns = self._resolve_model_schema(
+            input_sequence
+        )
+
+        recent_windows = self._select_recent_windows(
+            input_sequence=input_sequence,
+            required_history_size=model_history_size,
+        )
+        if recent_windows is None:
+            return None
+
+        flat_features, missing_inputs = self._flatten_windows(
+            windows=recent_windows,
+            input_columns=input_columns,
+        )
+
+        infer_started_at = time.perf_counter()
+        pred_arr = self._predict_raw_array(
+            flat_features=flat_features,
+            recent_windows=recent_windows,
+            input_columns=input_columns,
+            target_columns=target_columns,
+            model_history_size=model_history_size,
+            full_history_size=len(input_sequence),
+        )
+        if pred_arr is None:
+            return None
+
+        pred_row = self._extract_prediction_row(
+            pred_arr=pred_arr,
+            target_columns=target_columns,
+            missing_inputs=missing_inputs,
+        )
+        if pred_row is None:
+            return None
+
+        predicted_components = self._build_predicted_components(
+            pred_row=pred_row,
+            target_columns=target_columns,
+        )
+
+        latest_window = recent_windows[-1]
+        expected_input_count = len(recent_windows) * len(input_columns)
+        confidence = self._estimate_prediction_confidence(
+            missing_inputs=missing_inputs,
+            expected_input_count=expected_input_count,
+        )
+
+        predicted_features = self._build_predicted_features(
+            latest_window=latest_window,
+            predicted_components=predicted_components,
+            forecast_id=forecast_id,
+            horizon_seconds=horizon_seconds,
+            confidence=confidence,
+        )
+
+        infer_elapsed_ms = (time.perf_counter() - infer_started_at) * 1000.0
         self._logger.system(
             "forecasting_tool_inference_timing",
             {
                 "inference_ms": round(infer_elapsed_ms, 3),
-                "confidence": round(confidence, 3),
+                "confidence": round(predicted_features.confidence, 3),
+                "target_columns": target_columns,
             },
             level="DEBUG",
         )
 
         return predicted_features
-    
-    def _estimate_uncertainty(
-        self, prediction: PredictedFeatures
-    ) -> dict:
-        """
-        Estimate uncertainty for each predicted feature.
-        
-        Args:
-            prediction: The model's prediction.
-            
-        Returns:
-            Dictionary mapping feature names to uncertainty values.
-        """
 
-        return {}  # TODO: Implement uncertainty estimation
-    
+    # -------------------------------------------------------------------------
+    # Internal: misc
+    # -------------------------------------------------------------------------
+
+    def _estimate_uncertainty(
+        self,
+        prediction: PredictedFeatures,
+    ) -> dict:
+        return {}
+
     def _should_update_prediction(self) -> bool:
-        """
-        Check if a new prediction should be generated based on update rate.
-        
-        Returns:
-            True if prediction should be updated.
-        """
         update_rate = float(self._config.update_rate_hz)
         if update_rate <= 0:
             return True
