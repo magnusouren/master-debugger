@@ -1,17 +1,13 @@
 """
-XGBoost Forecaster - Inference wrapper for cognitive load prediction.
-
-This class is used by ForecastingTool to make predictions at runtime.
+XGBoost Forecaster - runtime inference wrapper for WindowFeatures forecasting.
 """
+from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
+
 import numpy as np
-from backend.models.forecast_feature_schema import (
-    FEATURE_COLUMNS,
-    TARGET_COLUMNS,
-    compute_contributor_features,
-)
 
 try:
     import xgboost as xgb
@@ -20,20 +16,23 @@ except ImportError:
     XGBOOST_AVAILABLE = False
 
 
+DEFAULT_INPUT_COLUMNS = [
+    "pupil_ipa",
+    "fixation_mean_duration_ms",
+]
+
+DEFAULT_TARGET_COLUMNS = [
+    "pupil_ipa",
+    "fixation_mean_duration_ms",
+]
+
+
 class XGBoostForecaster:
     """
-    Wrapper for XGBoost cognitive load forecasting model.
-
-    Handles loading the model and making predictions from WindowFeatures.
+    Runtime wrapper for an XGBoost forecasting model trained on WindowFeatures.
     """
 
     def __init__(self, model_path: Optional[Path] = None):
-        """
-        Initialize the forecaster.
-
-        Args:
-            model_path: Path to model file. If None, tries to load latest model.
-        """
         if not XGBOOST_AVAILABLE:
             raise ImportError("XGBoost is required. Install with: pip install xgboost")
 
@@ -41,22 +40,18 @@ class XGBoostForecaster:
         self._metadata: Dict[str, Any] = {}
         self._history_size: int = 5
         self._feature_names: List[str] = []
+        self._input_columns: List[str] = list(DEFAULT_INPUT_COLUMNS)
+        self._target_columns: List[str] = list(DEFAULT_TARGET_COLUMNS)
 
         if model_path is not None:
             self.load_model(model_path)
 
+    # -------------------------------------------------------------------------
+    # Loading / metadata
+    # -------------------------------------------------------------------------
+
     def load_model(self, model_path: Optional[Path] = None) -> bool:
-        """
-        Load a trained model.
-
-        Args:
-            model_path: Path to model file. If None, loads latest model.
-
-        Returns:
-            True if model loaded successfully.
-        """
         if model_path is None:
-            # Try to load latest model
             base_dir = Path(__file__).parent
             model_path = base_dir / "trained" / "latest.json"
 
@@ -66,37 +61,41 @@ class XGBoostForecaster:
 
         model_path = self._resolve_json_pointer(model_path)
 
-        # Load model
         self._model = xgb.XGBRegressor()
         self._model.load_model(str(model_path))
 
-        # Load metadata
-        metadata_path = model_path.with_name(
-            model_path.stem.replace('.json', '') + "_metadata.json"
-        )
-        if model_path.stem == "latest":
-            metadata_path = model_path.with_name("latest_metadata.json")
-        metadata_path = self._resolve_json_pointer(metadata_path)
-
-        if metadata_path.exists():
-            try:
-                with open(metadata_path, 'r') as f:
-                    self._metadata = json.load(f)
-                self._history_size = self._metadata.get('history_window_size', 5)
-                self._feature_names = self._metadata.get('feature_names', [])
-            except Exception as e:
-                print(f"Warning: Could not parse metadata file {metadata_path}: {e}")
+        metadata_path = self._resolve_metadata_path(model_path)
+        self._load_metadata(metadata_path)
 
         print(f"Loaded model: {model_path}")
         return True
 
-    def _resolve_json_pointer(self, path: Path) -> Path:
-        """
-        Resolve git symlink placeholder files on systems without symlink support.
+    def _resolve_metadata_path(self, model_path: Path) -> Path:
+        if model_path.stem == "latest":
+            metadata_path = model_path.with_name("latest_metadata.json")
+        else:
+            metadata_path = model_path.with_name(f"{model_path.stem}_metadata.json")
+        return self._resolve_json_pointer(metadata_path)
 
-        If a .json file contains plain text instead of JSON, treat that text as
-        a relative target filename and return the resolved path when it exists.
-        """
+    def _load_metadata(self, metadata_path: Path) -> None:
+        self._metadata = {}
+
+        if not metadata_path.exists():
+            return
+
+        try:
+            with open(metadata_path, "r") as f:
+                self._metadata = json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not parse metadata file {metadata_path}: {e}")
+            return
+
+        self._history_size = int(self._metadata.get("history_window_size", 5))
+        self._feature_names = list(self._metadata.get("feature_names", []))
+        self._input_columns = list(self._metadata.get("input_columns", DEFAULT_INPUT_COLUMNS))
+        self._target_columns = list(self._metadata.get("target_columns", DEFAULT_TARGET_COLUMNS))
+
+    def _resolve_json_pointer(self, path: Path) -> Path:
         try:
             if not path.exists() or path.suffix != ".json":
                 return path
@@ -107,224 +106,184 @@ class XGBoostForecaster:
                 if candidate.exists() and candidate.suffix == ".json":
                     return candidate
         except Exception:
-            # Best-effort only; caller continues with original path.
             pass
+
         return path
 
     def is_loaded(self) -> bool:
-        """Check if a model is loaded."""
         return self._model is not None
 
     @property
     def history_size(self) -> int:
-        """Number of historical windows required for prediction."""
         return self._history_size
 
     @property
     def feature_names(self) -> List[str]:
-        """Names of input features."""
-        return self._feature_names
+        return list(self._feature_names)
 
-    def extract_features_from_window(self, window_features: Dict[str, Any]) -> List[float]:
-        """
-        Extract feature values from a WindowFeatures dict.
+    @property
+    def input_columns(self) -> List[str]:
+        return list(self._input_columns)
 
-        Args:
-            window_features: Dictionary of features from signal processing
+    @property
+    def target_columns(self) -> List[str]:
+        return list(self._target_columns)
 
-        Returns:
-            List of feature values in the expected order
-        """
-        contribs = compute_contributor_features(window_features)
-        features = [float(contribs[col]) for col in FEATURE_COLUMNS]
+    # -------------------------------------------------------------------------
+    # Inference
+    # -------------------------------------------------------------------------
 
-        return features
-
-    def _safe_float(self, value: Any) -> float:
-        """Best-effort float conversion; handles arrays via nanmean."""
-        try:
-            if value is None:
-                return float('nan')
-
-            arr = np.asarray(value)
-            if arr.size == 0:
-                return float('nan')
-            if arr.ndim == 0:
-                return float(arr)
-
-            # For vectors/matrices, fall back to mean to avoid scalar cast errors
-            return float(np.nanmean(arr))
-        except Exception:
-            return float('nan')
-
-    def _extract_features_by_model_names(
+    def predict_windows(
         self,
-        history: List[Dict[str, Any]],
-        model_feature_names: List[str],
-    ) -> List[float]:
+        history: List[Any],
+    ) -> Tuple[Optional[Dict[str, float]], float]:
         """
-        Build the feature vector following the model's recorded feature names.
-
-        Supports names like "t-59_pupil_ipa" where t-0 is the most recent
-        window. Falls back to NaN when history is insufficient.
-        """
-        features: List[float] = []
-        for name in model_feature_names:
-            value = float('nan')
-            idx = None
-            metric = name
-
-            # Parse time-offset format: t-<k>_<metric>
-            if name.startswith("t-") and "_" in name[2:]:
-                try:
-                    offset_part, metric = name.split("_", 1)
-                    k = int(offset_part.replace("t-", ""))
-                    idx = len(history) - 1 - k  # t-0 is latest
-                except ValueError:
-                    idx = None
-
-            if idx is not None and 0 <= idx < len(history):
-                window = history[idx]
-                window_dict = window.features if hasattr(window, "features") else window
-                raw_val = None
-                if isinstance(window_dict, dict):
-                    raw_val = window_dict.get(metric)
-                value = self._safe_float(raw_val)
-
-            features.append(value)
-
-        return features
-
-    def predict(self, history: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
-        """
-        Predict future target component values.
-
-        Args:
-            history: List of WindowFeatures dicts (most recent last)
+        Predict target columns from recent WindowFeatures history.
 
         Returns:
-            Predicted target component values, or None if prediction fails
+            (prediction_dict, confidence)
         """
         if not self.is_loaded():
             print("Model not loaded")
-            return None
+            return None, 0.0
 
+        recent = self._select_recent_windows(history)
+        if recent is None:
+            return None, 0.0
+
+        flat_features, missing_inputs = self._flatten_windows(recent)
+
+        try:
+            pred_arr = self._predict_array(flat_features)
+        except ValueError as e:
+            print(f"Inference failed: {e}")
+            return None, 0.0
+
+        pred_row = self._extract_prediction_row(pred_arr)
+        if pred_row is None:
+            return None, 0.0
+
+        prediction = self._prediction_row_to_dict(pred_row)
+        confidence = self._estimate_confidence(
+            missing_inputs=missing_inputs,
+            expected_input_count=len(recent) * len(self._input_columns),
+        )
+        return prediction, confidence
+
+    def _select_recent_windows(self, history: List[Any]) -> Optional[List[Any]]:
         if len(history) < self._history_size:
             print(f"Not enough history: {len(history)} < {self._history_size}")
             return None
 
-        # Take the most recent windows
-        recent = history[-self._history_size:]
+        return list(history)[-self._history_size:]
 
-        # Extract and flatten features using model names when available
-        model_feature_names = list(getattr(self._model, "feature_names_in_", [])) or list(self._feature_names)
+    def _flatten_windows(self, windows: List[Any]) -> Tuple[List[float], List[str]]:
+        flat_features: List[float] = []
+        missing_inputs: List[str] = []
 
-        if model_feature_names:
-            features = self._extract_features_by_model_names(recent, model_feature_names)
-        else:
-            features = []
-            for window in recent:
-                window_dict = window.features if hasattr(window, 'features') else window
-                features.extend(self.extract_features_from_window(window_dict))
+        for window in windows:
+            feature_dict = window.features if hasattr(window, "features") else window
+            feature_dict = feature_dict or {}
 
-        # Predict
-        X = np.array([features])
+            for col in self._input_columns:
+                raw_val = feature_dict.get(col) if isinstance(feature_dict, dict) else None
+                if raw_val is None:
+                    missing_inputs.append(col)
+                flat_features.append(self._safe_float(raw_val))
 
-        # Capture the most recent window keys for debugging shape mismatches
-        last_window = recent[-1]
-        last_window_dict = last_window.features if hasattr(last_window, "features") else last_window
-        last_window_keys = (
-            sorted(list(last_window_dict.keys()))
-            if isinstance(last_window_dict, dict)
-            else "unavailable"
-        )
+        return flat_features, missing_inputs
+
+    def _predict_array(self, flat_features: List[float]) -> np.ndarray:
+        if self._model is None:
+            raise ValueError("Model not loaded")
+
+        X = np.array([flat_features], dtype=np.float32)
 
         try:
-            prediction = self._model.predict(X)[0]
+            prediction = self._model.predict(X)
         except ValueError as e:
             expected_features = getattr(
                 self._model,
                 "n_features_in_",
-                len(model_feature_names) or len(self._feature_names) or len(FEATURE_COLUMNS) * self._history_size,
+                len(self._input_columns) * self._history_size,
             )
             raise ValueError(
                 "Feature shape mismatch during forecasting inference: "
-                f"expected_features={expected_features}, "
-                f"got_features={X.shape[1]}, "
-                f"history_size={self._history_size}, "
-                f"features_per_window={len(FEATURE_COLUMNS)}, "
-                f"metadata_feature_names={len(self._feature_names)}, "
-                f"model_feature_names={getattr(self._model, 'feature_names_in_', None)}, "
-                f"last_window_keys={last_window_keys}, "
-                f"metadata_version={self._metadata.get('version') if self._metadata else None}"
+                f"expected_features={expected_features}, got_features={X.shape[1]}, "
+                f"history_size={self._history_size}, input_columns={self._input_columns}"
             ) from e
 
-        # Multi-target model: return expected target component mapping.
-        if isinstance(prediction, np.ndarray) and prediction.ndim == 1 and len(prediction) == len(TARGET_COLUMNS):
-            return {
-                key: float(prediction[idx])
-                for idx, key in enumerate(TARGET_COLUMNS)
-            }
+        return np.asarray(prediction)
 
-        # Backward-compatible fallback for older single-target models.
-        scalar = float(prediction)
-        return {"predicted_cognitive_load": max(0.0, min(1.0, scalar))}
+    def _extract_prediction_row(self, pred_arr: np.ndarray) -> Optional[np.ndarray]:
+        if pred_arr.ndim == 2 and pred_arr.shape[0] >= 1:
+            pred_row = pred_arr[0]
+        elif pred_arr.ndim == 1:
+            pred_row = pred_arr
+        else:
+            return None
 
-    def predict_with_confidence(
-        self, history: List[Dict[str, Any]]
-    ) -> tuple[Optional[Dict[str, float]], float]:
-        """
-        Predict with confidence estimate.
+        if len(pred_row) < len(self._target_columns):
+            return None
 
-        Returns:
-            (prediction, confidence) tuple
-        """
-        prediction = self.predict(history)
+        return pred_row
 
-        if prediction is None:
-            return None, 0.0
+    def _prediction_row_to_dict(self, pred_row: np.ndarray) -> Dict[str, float]:
+        return {
+            col: float(pred_row[idx])
+            for idx, col in enumerate(self._target_columns)
+        }
 
-        # Simple confidence based on data quality
-        # In production, could use prediction intervals or ensemble variance
-        confidence = 0.7  # Base confidence
+    def _estimate_confidence(
+        self,
+        missing_inputs: List[str],
+        expected_input_count: int,
+    ) -> float:
+        if expected_input_count <= 0:
+            return 0.0
 
-        # Reduce confidence if missing data
-        recent = history[-self._history_size:]
-        missing_count = 0
-        for window in recent:
-            window_dict = window.features if hasattr(window, 'features') else window
-            contribs = compute_contributor_features(window_dict)
-            for col in FEATURE_COLUMNS:
-                val = contribs.get(col)
-                if val is None or (isinstance(val, float) and np.isnan(val)):
-                    missing_count += 1
+        missing_ratio = len(missing_inputs) / expected_input_count
+        confidence = 1.0 - missing_ratio
+        return float(max(0.0, min(1.0, confidence)))
 
-        total_features = len(FEATURE_COLUMNS) * self._history_size
-        missing_ratio = missing_count / total_features
-        confidence = confidence * (1 - missing_ratio * 0.5)
+    def _safe_float(self, value: Any) -> float:
+        try:
+            if value is None:
+                return float("nan")
 
-        return prediction, confidence
+            arr = np.asarray(value)
+            if arr.size == 0:
+                return float("nan")
+            if arr.ndim == 0:
+                return float(arr)
+
+            return float(np.nanmean(arr))
+        except Exception:
+            return float("nan")
+
+    # -------------------------------------------------------------------------
+    # Info
+    # -------------------------------------------------------------------------
 
     def get_model_info(self) -> Dict[str, Any]:
-        """Get model metadata."""
         if not self._metadata:
-            return {'loaded': self.is_loaded()}
+            return {"loaded": self.is_loaded()}
 
         return {
-            'loaded': self.is_loaded(),
-            'version': self._metadata.get('version'),
-            'history_window_size': self._history_size,
-            'prediction_horizon': self._metadata.get('prediction_horizon'),
-            'metrics': self._metadata.get('metrics', {}),
+            "loaded": self.is_loaded(),
+            "version": self._metadata.get("version"),
+            "history_window_size": self._history_size,
+            "prediction_horizon": self._metadata.get("prediction_horizon"),
+            "input_columns": self._input_columns,
+            "target_columns": self._target_columns,
+            "metrics": self._metadata.get("metrics", {}),
         }
 
 
-# Singleton instance for easy access
 _default_forecaster: Optional[XGBoostForecaster] = None
 
 
 def get_forecaster() -> XGBoostForecaster:
-    """Get or create the default forecaster instance."""
     global _default_forecaster
     if _default_forecaster is None:
         _default_forecaster = XGBoostForecaster()
