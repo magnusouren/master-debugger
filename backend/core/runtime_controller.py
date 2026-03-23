@@ -960,7 +960,6 @@ class RuntimeController:
             # Start baseline recording
             self._status = SystemStatus.CALIBRATING
             self._reactive_tool.start_baseline_recording(self._participant_id)
-            self._reactive_observer.start_baseline_recording(self._participant_id)
 
             # Record for the specified duration
             self._logger.system(
@@ -988,7 +987,6 @@ class RuntimeController:
 
             # Stop baseline recording
             baseline = self._reactive_tool.stop_baseline_recording(self._participant_id)
-            self._reactive_observer.stop_baseline_recording(self._participant_id)
 
             if baseline:
                 self._reactive_observer.set_baseline(baseline)
@@ -1058,7 +1056,6 @@ class RuntimeController:
             participant_id: Unique identifier for the participant.
         """
         self._reactive_tool.start_baseline_recording(participant_id)
-        self._reactive_observer.start_baseline_recording(participant_id)
 
     def stop_baseline_recording(self, participant_id: str):
         """
@@ -1071,7 +1068,6 @@ class RuntimeController:
             ParticipantBaseline object with computed statistics, or None if insufficient data.
         """
         baseline = self._reactive_tool.stop_baseline_recording(participant_id)
-        self._reactive_observer.stop_baseline_recording(participant_id)
         if baseline:
             self._reactive_observer.set_baseline(baseline)
         return baseline
@@ -1169,6 +1165,12 @@ class RuntimeController:
         
 
         if self._operation_mode == OperationMode.PROACTIVE:
+            # During baseline calibration in proactive mode, the main reactive tool
+            # must consume observed windows so baseline stats are computed from
+            # real data (predicted windows are intentionally blocked while recording).
+            if self._reactive_tool.is_recording_baseline():
+                self._reactive_tool.add_features(features)
+
             self._forecasting.add_features(features)
 
             # Parallel observed scoring for analysis only (does not drive feedback)
