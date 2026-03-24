@@ -600,6 +600,14 @@ function handleError(message: { payload: Record<string, unknown> }): void {
 async function handleFeedbackInteraction(
     feedbackInteraction: FeedbackInteraction,
 ) {
+    if (
+        feedbackInteraction.interaction_type === 'dismissed' ||
+        feedbackInteraction.interaction_type === 'done' ||
+        feedbackInteraction.interaction_type === 'rejected'
+    ) {
+        webviewProvider?.removeFeedback(feedbackInteraction.feedback_id);
+    }
+
     if (feedbackInteraction.interaction_type === 'highlighted') {
         feedbackRenderer?.highlightFeedback(feedbackInteraction.feedback_id);
     }
