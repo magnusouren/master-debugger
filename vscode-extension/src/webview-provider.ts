@@ -153,6 +153,16 @@ export class FeedbackViewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
+     * Remove a single feedback item in the webview by ID.
+     */
+    public removeFeedback(feedbackId: string): void {
+        this._postMessage({
+            type: 'removeFeedback',
+            payload: { feedbackId },
+        });
+    }
+
+    /**
      * Handle messages from the webview
      */
     private _handleWebviewMessage(message: {
