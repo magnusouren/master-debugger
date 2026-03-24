@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -28,21 +28,93 @@ _PALETTE_BASE = {
 }
 _MODE_COLOR_CACHE: dict[str, str] = {}
 
+# Fallback bounds for logs (e.g., replay runs) without baseline/threshold events.
+_DEFAULT_TRIGGER_BOUNDS: dict[str, float | str] = {
+    "rule": "fallback_default_band",
+    "lower": 0.45,
+    "upper": 0.55,
+    "mean": 0.5,
+    "std": 0.05,
+}
 
-def _parse_estimates(csv_path: Path) -> pd.DataFrame:
-    """Load a single experiment CSV into a tidy DataFrame of estimates."""
+
+def _to_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, float | str]]]:
+    """Load a single experiment CSV into a tidy DataFrame of estimates + trigger bounds."""
     df = pd.read_csv(csv_path)
     if "timestamp" not in df.columns or "data" not in df.columns or "mode" not in df.columns:
         raise ValueError(f"File {csv_path} is missing expected columns")
 
     estimates: list[dict] = []
+    trigger_bounds: Optional[dict[str, float | str]] = None
     for _, row in df.iterrows():
-        if str(row.get("event_type", "")) not in ("user_state_estimate_logged", "observer_user_state_estimate_logged"):
-            continue
+        event_type = str(row.get("event_type", ""))
 
         try:
             payload = json.loads(row["data"])
         except json.JSONDecodeError:
+            continue
+
+        # Prefer explicit runtime trigger bounds when available.
+        if event_type == "feedback_delivery_threshold_met":
+            lower = _to_float(payload.get("lower_bound"))
+            upper = _to_float(payload.get("upper_bound"))
+            rule = str(payload.get("rule", ""))
+            if lower is not None and upper is not None:
+                trigger_bounds = {
+                    "rule": rule or "baseline_mean_pm_2sd",
+                    "lower": lower,
+                    "upper": upper,
+                }
+                mean = _to_float(payload.get("baseline_mean"))
+                std = _to_float(payload.get("baseline_std"))
+                if mean is not None:
+                    trigger_bounds["mean"] = mean
+                if std is not None:
+                    trigger_bounds["std"] = std
+            else:
+                threshold = _to_float(payload.get("threshold"))
+                if rule == "static_min_score" and threshold is not None:
+                    trigger_bounds = {
+                        "rule": rule,
+                        "threshold": threshold,
+                    }
+
+        # Fallback: infer bounds from baseline summary if no explicit trigger event is present yet.
+        if trigger_bounds is None and event_type == "baseline_calibration_completed":
+            score_metric = payload.get("metrics", {}).get("cognitive_load_score", {})
+            mean = _to_float(score_metric.get("mean"))
+            std = _to_float(score_metric.get("std"))
+            p02_5 = _to_float(score_metric.get("p02_5"))
+            p97_5 = _to_float(score_metric.get("p97_5"))
+            if p02_5 is not None and p97_5 is not None:
+                trigger_bounds = {
+                    "rule": "baseline_empirical_p2_5_p97_5",
+                    "lower": p02_5,
+                    "upper": p97_5,
+                }
+                if mean is not None:
+                    trigger_bounds["mean"] = mean
+                if std is not None:
+                    trigger_bounds["std"] = std
+            elif mean is not None and std is not None:
+                trigger_bounds = {
+                    "rule": "baseline_mean_pm_2sd",
+                    "lower": mean - (2.0 * std),
+                    "upper": mean + (2.0 * std),
+                    "mean": mean,
+                    "std": std,
+                }
+
+        if event_type not in ("user_state_estimate_logged", "observer_user_state_estimate_logged"):
             continue
 
         score = payload.get("score")
@@ -69,10 +141,15 @@ def _parse_estimates(csv_path: Path) -> pd.DataFrame:
         )
 
     tidy = pd.DataFrame(estimates)
-    if tidy.empty:
-        return tidy
 
-    return tidy.sort_values("timestamp")
+    if trigger_bounds is None:
+        # No trigger/baseline events were logged (common in replay); use a neutral default band.
+        trigger_bounds = _DEFAULT_TRIGGER_BOUNDS.copy()
+
+    if tidy.empty:
+        return tidy, trigger_bounds
+
+    return tidy.sort_values("timestamp"), trigger_bounds
 
 
 def _color_for_mode(mode: str) -> Optional[str]:
@@ -109,7 +186,7 @@ def _smooth_series(
     return series
 
 
-def plot_estimates(df: pd.DataFrame, title: str) -> plt.Figure:
+def plot_estimates(df: pd.DataFrame, title: str, trigger_bounds: Optional[dict[str, float | str]] = None) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(10, 5))
 
     # Plot observed segments without bridging gaps between separated occurrences of the same mode.
@@ -156,6 +233,33 @@ def plot_estimates(df: pd.DataFrame, title: str) -> plt.Figure:
             linewidth=1.5,
             color="#444444",
         )
+
+    if trigger_bounds:
+        rule = str(trigger_bounds.get("rule", ""))
+        lower = _to_float(trigger_bounds.get("lower"))
+        upper = _to_float(trigger_bounds.get("upper"))
+        threshold = _to_float(trigger_bounds.get("threshold"))
+        mean = _to_float(trigger_bounds.get("mean"))
+
+        if lower is not None and upper is not None:
+            band_label = (
+                "Trigger band (2.5–97.5 pct)"
+                if rule == "baseline_empirical_p2_5_p97_5"
+                else "Trigger band (mean ± 2 SD)"
+            )
+            ax.axhspan(lower, upper, color="#999999", alpha=0.1, label=band_label, zorder=0)
+            ax.axhline(lower, color="#b22222", linestyle=":", linewidth=1.2, label=f"Lower bound ({lower:.3f})")
+            ax.axhline(upper, color="#b22222", linestyle=":", linewidth=1.2, label=f"Upper bound ({upper:.3f})")
+            if mean is not None:
+                ax.axhline(mean, color="#6a6a6a", linestyle="-.", linewidth=1.1, label=f"Baseline mean ({mean:.3f})")
+        elif threshold is not None:
+            ax.axhline(
+                threshold,
+                color="#b22222",
+                linestyle=":",
+                linewidth=1.2,
+                label=f"Trigger threshold ({threshold:.3f})",
+            )
 
     ax.set_title(title)
     ax.set_xlabel("Timestamp")
@@ -208,10 +312,10 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     figures: list[plt.Figure] = []
     for csv_path in csv_files:
-        df = _parse_estimates(csv_path)
+        df, trigger_bounds = _parse_estimates(csv_path)
         if df.empty:
             continue
-        fig = plot_estimates(df, title=csv_path.stem)
+        fig = plot_estimates(df, title=csv_path.stem, trigger_bounds=trigger_bounds)
         figures.append(fig)
         output_path = output_dir / f"{csv_path.stem}.png"
         fig.savefig(output_path, dpi=150)

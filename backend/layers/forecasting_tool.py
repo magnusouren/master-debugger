@@ -337,9 +337,59 @@ class ForecastingTool:
                 },
                 level="WARNING",
             )
-            return None
 
         return list(input_sequence)[-required_history_size:]
+
+    # -------------------------------------------------------------------------
+    # Internal: feature flattening / model output parsing
+    # -------------------------------------------------------------------------
+
+    def _flatten_windows(
+        self,
+        windows: List[WindowFeatures],
+        input_columns: List[str],
+    ) -> Tuple[List[float], List[str]]:
+        flat_features: List[float] = []
+        missing_inputs: List[str] = []
+
+        for window in windows:
+            feature_dict = window.features or {}
+            for col in input_columns:
+                val = feature_dict.get(col)
+                if val is None:
+                    missing_inputs.append(col)
+                flat_features.append(self._forecaster._safe_float(val))
+
+        return flat_features, missing_inputs
+
+    def _predict_raw_array(
+        self,
+        flat_features: List[float],
+        recent_windows: List[WindowFeatures],
+        input_columns: List[str],
+        target_columns: List[str],
+        model_history_size: int,
+        full_history_size: int,
+    ) -> Optional[np.ndarray]:
+        try:
+            return np.asarray(self._forecaster._model.predict(np.array([flat_features])))
+        except Exception as e:
+            last_window = recent_windows[-1]
+            self._logger.system(
+                "forecasting_tool_inference_error",
+                {
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "history_windows": full_history_size,
+                    "model_history_size": model_history_size,
+                    "input_columns": input_columns,
+                    "target_columns": target_columns,
+                    "flat_feature_count": len(flat_features),
+                    "last_window_keys": sorted(list((last_window.features or {}).keys())),
+                },
+                level="ERROR",
+            )
+            return None
 
     # -------------------------------------------------------------------------
     # Internal: feature flattening / model output parsing

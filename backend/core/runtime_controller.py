@@ -668,34 +668,84 @@ class RuntimeController:
 
         # Check user state threshold (if user state is available)
         if self._current_user_state is not None:
+            score = float(self._current_user_state.score.score)
+            bounds = self._reactive_tool.get_feedback_trigger_bounds(std_multiplier=2.0)
+
+            # Preferred rule: trigger when score is outside baseline empirical
+            # 2.5/97.5 percentile bounds (fallback: mean ± 2*SD).
+            if bounds is not None:
+                lower = bounds["lower"]
+                upper = bounds["upper"]
+                rule = str(bounds.get("rule", "baseline_mean_pm_2sd"))
+
+                if lower <= score <= upper:
+                    self._logger.system(
+                        "feedback_delivery_threshold_not_met",
+                        {
+                            "score": score,
+                            "rule": rule,
+                            "baseline_mean": bounds["mean"],
+                            "baseline_std": bounds["std"],
+                            "lower_bound": lower,
+                            "upper_bound": upper,
+                            "baseline_sample_count": int(bounds["sample_count"]),
+                            "pending_version": self._pending_feedback_version,
+                        },
+                        level="DEBUG",
+                    )
+                    return False
+
+                payload = {
+                    "score": score,
+                    "rule": rule,
+                    "baseline_mean": bounds["mean"],
+                    "baseline_std": bounds["std"],
+                    "lower_bound": lower,
+                    "upper_bound": upper,
+                    "baseline_sample_count": int(bounds["sample_count"]),
+                    "pending_version": self._pending_feedback_version,
+                }
+                self._logger.system(
+                    "feedback_delivery_threshold_met",
+                    payload,
+                    level="INFO",
+                )
+                self._logger.experiment(
+                    "feedback_delivery_threshold_met",
+                    payload,
+                    level="INFO",
+                )
+                return True
+
+            # Fallback rule for sessions without baseline score stats.
             threshold = self._config.controller.min_score_for_feedback
-            if self._current_user_state.score.score < threshold:
+            if score < threshold:
                 self._logger.system(
                     "feedback_delivery_threshold_not_met",
                     {
-                        "score": self._current_user_state.score.score,
+                        "score": score,
+                        "rule": "static_min_score",
                         "threshold": threshold,
                         "pending_version": self._pending_feedback_version,
                     },
                     level="DEBUG",
                 )
                 return False
+
+            payload = {
+                "score": score,
+                "rule": "static_min_score",
+                "threshold": threshold,
+                "pending_version": self._pending_feedback_version,
+            }
             self._logger.system(
                 "feedback_delivery_threshold_met",
-                {
-                    "score": self._current_user_state.score.score,
-                    "threshold": threshold,
-                    "pending_version": self._pending_feedback_version,
-                },
+                payload,
                 level="INFO",
             )
             self._logger.experiment(
                 "feedback_delivery_threshold_met",
-                {
-                    "score": self._current_user_state.score.score,
-                    "threshold": threshold,
-                    "pending_version": self._pending_feedback_version,
-                },
+                payload,
                 level="INFO",
             )
         return True
@@ -912,7 +962,6 @@ class RuntimeController:
             # Start baseline recording
             self._status = SystemStatus.CALIBRATING
             self._reactive_tool.start_baseline_recording(self._participant_id)
-            self._reactive_observer.start_baseline_recording(self._participant_id)
 
             # Record for the specified duration
             self._logger.system(
@@ -940,7 +989,6 @@ class RuntimeController:
 
             # Stop baseline recording
             baseline = self._reactive_tool.stop_baseline_recording(self._participant_id)
-            self._reactive_observer.stop_baseline_recording(self._participant_id)
 
             if baseline:
                 self._reactive_observer.set_baseline(baseline)
@@ -949,8 +997,15 @@ class RuntimeController:
                 self._logger.system(
                     "baseline_calibration_completed",
                     {
-                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
-                                   for k, v in baseline.metrics.items()},
+                        "metrics": {
+                            k: {
+                                "mean": round(v.mean, 4),
+                                "std": round(v.std, 4),
+                                "p02_5": round(v.p02_5, 4) if v.p02_5 is not None else None,
+                                "p97_5": round(v.p97_5, 4) if v.p97_5 is not None else None,
+                            }
+                            for k, v in baseline.metrics.items()
+                        },
                     },
                     level="INFO"
                 )
@@ -958,8 +1013,15 @@ class RuntimeController:
                 self._logger.experiment(
                     "baseline_calibration_completed",
                     {
-                        "metrics": {k: {"mean": round(v.mean, 4), "std": round(v.std, 4)}
-                                   for k, v in baseline.metrics.items()},
+                        "metrics": {
+                            k: {
+                                "mean": round(v.mean, 4),
+                                "std": round(v.std, 4),
+                                "p02_5": round(v.p02_5, 4) if v.p02_5 is not None else None,
+                                "p97_5": round(v.p97_5, 4) if v.p97_5 is not None else None,
+                            }
+                            for k, v in baseline.metrics.items()
+                        },
                     },
                     level="INFO"
                 )
@@ -1010,7 +1072,6 @@ class RuntimeController:
             participant_id: Unique identifier for the participant.
         """
         self._reactive_tool.start_baseline_recording(participant_id)
-        self._reactive_observer.start_baseline_recording(participant_id)
 
     def stop_baseline_recording(self, participant_id: str):
         """
@@ -1023,7 +1084,6 @@ class RuntimeController:
             ParticipantBaseline object with computed statistics, or None if insufficient data.
         """
         baseline = self._reactive_tool.stop_baseline_recording(participant_id)
-        self._reactive_observer.stop_baseline_recording(participant_id)
         if baseline:
             self._reactive_observer.set_baseline(baseline)
         return baseline
@@ -1121,6 +1181,12 @@ class RuntimeController:
         
 
         if self._operation_mode == OperationMode.PROACTIVE:
+            # During baseline calibration in proactive mode, the main reactive tool
+            # must consume observed windows so baseline stats are computed from
+            # real data (predicted windows are intentionally blocked while recording).
+            if self._reactive_tool.is_recording_baseline():
+                self._reactive_tool.add_features(features)
+
             self._forecasting.add_features(features)
 
             # Parallel observed scoring for analysis only (does not drive feedback)
