@@ -378,12 +378,18 @@ class ForecastingTool:
 
         missing_targets = [k for k in TARGET_COLUMNS if k not in predicted_components]
         if missing_targets:
+            # TODO: Revisit model/output schema alignment so we can remove this fallback.
+            for target in missing_targets:
+                predicted_components[target] = 0.5
+
             self._logger.system(
                 "forecasting_tool_prediction_missing_targets",
-                {"missing_targets": missing_targets},
+                {
+                    "missing_targets": missing_targets,
+                    "fallback_value": 0.5,
+                },
                 level="WARNING",
             )
-            return None
 
         # Get the latest window for timing info
         latest_window = input_sequence[-1]
