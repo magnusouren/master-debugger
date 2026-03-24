@@ -515,6 +515,12 @@ class RuntimeController:
             interaction: User interaction data.
         """
 
+        interaction_type = (
+            interaction.interaction_type.value
+            if hasattr(interaction.interaction_type, "value")
+            else str(interaction.interaction_type)
+        )
+
         # Map interaction types to log categories
         category_map = {
             "presented": "feedback_presented_to_user",
@@ -526,15 +532,15 @@ class RuntimeController:
         }
         
         category_msg = category_map.get(
-            interaction.interaction_type,
-            f"feedback_interaction_unknown_type: {interaction.interaction_type}"
+            interaction_type,
+            f"feedback_interaction_unknown_type: {interaction_type}"
         )
         
         self._logger.system(
             category_msg,
             {
                 "feedback_id": interaction.feedback_id,
-                "action_taken": interaction.interaction_type,
+                "action_taken": interaction_type,
             },
             level="INFO",
         )
@@ -542,12 +548,51 @@ class RuntimeController:
             category_msg,
             {
                 "feedback_id": interaction.feedback_id,
-                "action_taken": interaction.interaction_type,
+                "action_taken": interaction_type,
             },
             level="INFO",
         )
 
+        if interaction_type in ("dismissed", "done"):
+            self._remove_feedback_from_pending(interaction.feedback_id)
+
         return True
+
+    def _remove_feedback_from_pending(self, feedback_id: str) -> None:
+        """
+        Remove a feedback item from currently pending feedback by its ID.
+
+        This prevents dismissed/done items from being redelivered from the
+        currently cached feedback version.
+        """
+        if self._pending_feedback is None:
+            return
+
+        original_count = len(self._pending_feedback.items)
+        filtered_items = [
+            item
+            for item in self._pending_feedback.items
+            if item.metadata.feedback_id != feedback_id
+        ]
+
+        if len(filtered_items) == original_count:
+            return
+
+        self._pending_feedback.items = filtered_items
+
+        if not self._pending_feedback.items:
+            self._pending_feedback = None
+            self._pending_feedback_version = 0
+
+        self._logger.system(
+            "feedback_removed_from_pending_cache",
+            {
+                "feedback_id": feedback_id,
+                "pending_feedback_version": self._pending_feedback_version,
+                "pending_items_remaining": len(filtered_items),
+            },
+            level="DEBUG",
+        )
     
     def register_event_handler(
         self, handler: Callable[[DomainEvent], None]
