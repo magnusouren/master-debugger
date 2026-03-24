@@ -14,6 +14,10 @@ export type InteractionCallback = (interaction: FeedbackInteraction) => void;
 /** Command ID for dismissing feedback */
 export const DISMISS_FEEDBACK_COMMAND = 'eyeTrackingDebugger.dismissFeedback';
 
+/** Command ID for marking feedback as done */
+export const MARK_FEEDBACK_DONE_COMMAND =
+    'eyeTrackingDebugger.markFeedbackDone';
+
 export class FeedbackRenderer {
     private decorationType: vscode.TextEditorDecorationType | null = null;
     private diagnosticCollection: vscode.DiagnosticCollection;
@@ -35,6 +39,16 @@ export class FeedbackRenderer {
             ),
         );
         context.subscriptions.push(dismissCommand);
+
+        // Register mark-done command
+        const markDoneCommand = vscode.commands.registerCommand(
+            MARK_FEEDBACK_DONE_COMMAND,
+            (feedbackId: string) => (
+                this.recordInteraction(feedbackId, 'done'),
+                this.removeHighlightById(feedbackId)
+            ),
+        );
+        context.subscriptions.push(markDoneCommand);
 
         // Register code action provider for dismiss quick fix
         const codeActionProvider = new FeedbackCodeActionProvider(
@@ -191,7 +205,7 @@ export class FeedbackRenderer {
 }
 
 /**
- * Code action provider that offers "Dismiss Feedback" quick fix for feedback diagnostics.
+ * Code action provider that offers quick fixes for feedback diagnostics.
  */
 class FeedbackCodeActionProvider implements vscode.CodeActionProvider {
     constructor(private diagnosticCollection: vscode.DiagnosticCollection) {}
@@ -230,6 +244,19 @@ class FeedbackCodeActionProvider implements vscode.CodeActionProvider {
                 action.diagnostics = [diagnostic];
                 action.isPreferred = false;
                 actions.push(action);
+
+                const doneAction = new vscode.CodeAction(
+                    'Mark Feedback as Done',
+                    vscode.CodeActionKind.QuickFix,
+                );
+                doneAction.command = {
+                    command: MARK_FEEDBACK_DONE_COMMAND,
+                    title: 'Mark Feedback as Done',
+                    arguments: [feedbackId],
+                };
+                doneAction.diagnostics = [diagnostic];
+                doneAction.isPreferred = false;
+                actions.push(doneAction);
             }
         }
 
