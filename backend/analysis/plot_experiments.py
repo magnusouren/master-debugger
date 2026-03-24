@@ -37,6 +37,15 @@ _DEFAULT_TRIGGER_BOUNDS: dict[str, float | str] = {
     "std": 0.05,
 }
 
+_FEEDBACK_INTERACTION_MARKERS: dict[str, str] = {
+    "feedback_presented_to_user": "P",
+    "feedback_accepted_by_user": "A",
+    "feedback_rejected_by_user": "R",
+    "feedback_marked_done_by_user": "D",
+    "feedback_dismissed_by_user": "X",
+    "feedback_highlighted_in_code": "H",
+}
+
 
 def _to_float(value: Any) -> Optional[float]:
     try:
@@ -47,13 +56,56 @@ def _to_float(value: Any) -> Optional[float]:
         return None
 
 
-def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, float | str]]]:
-    """Load a single experiment CSV into a tidy DataFrame of estimates + trigger bounds."""
+def _parse_timestamp(value: Any) -> Optional[pd.Timestamp]:
+    """Parse mixed timestamp values from log payload/columns."""
+    try:
+        if isinstance(value, (int, float)):
+            ts_num = pd.to_datetime(value, unit="s", utc=True, errors="coerce")
+            if pd.isna(ts_num):
+                return None
+            return ts_num.tz_convert(None)
+        ts = pd.to_datetime(value, utc=True)
+        if pd.isna(ts):
+            return None
+        return ts.tz_convert(None)
+    except (TypeError, ValueError):
+        return None
+
+
+def _marker_for_feedback_interaction(event_type: str, payload: dict[str, Any]) -> Optional[str]:
+    marker = _FEEDBACK_INTERACTION_MARKERS.get(event_type)
+    if marker:
+        return marker
+
+    # Fallback: derive from action_taken when event_type is generic.
+    action_taken = str(payload.get("action_taken", "")).strip().lower()
+    action_map = {
+        "presented": "P",
+        "accepted": "A",
+        "rejected": "R",
+        "done": "D",
+        "dismissed": "X",
+        "highlighted": "H",
+    }
+    if action_taken in action_map:
+        return action_map[action_taken]
+
+    if event_type.startswith("feedback_interaction_unknown_type") and ":" in event_type:
+        unknown = event_type.split(":", 1)[1].strip()
+        if unknown:
+            return unknown[0].upper()
+
+    return None
+
+
+def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, float | str]], pd.DataFrame]:
+    """Load a single experiment CSV into estimates, trigger bounds, and feedback interactions."""
     df = pd.read_csv(csv_path)
     if "timestamp" not in df.columns or "data" not in df.columns or "mode" not in df.columns:
         raise ValueError(f"File {csv_path} is missing expected columns")
 
     estimates: list[dict] = []
+    feedback_interactions: list[dict[str, Any]] = []
     trigger_bounds: Optional[dict[str, float | str]] = None
     for _, row in df.iterrows():
         event_type = str(row.get("event_type", ""))
@@ -62,6 +114,20 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
             payload = json.loads(row["data"])
         except json.JSONDecodeError:
             continue
+
+        marker = _marker_for_feedback_interaction(event_type, payload)
+        if marker is not None:
+            interaction_ts = _parse_timestamp(payload.get("timestamp"))
+            if interaction_ts is None:
+                interaction_ts = _parse_timestamp(row.get("timestamp"))
+            if interaction_ts is not None and not pd.isna(interaction_ts):
+                feedback_interactions.append(
+                    {
+                        "timestamp": interaction_ts,
+                        "marker": marker,
+                        "event_type": event_type,
+                    }
+                )
 
         # Priority 1: baseline calibration bounds (should win over runtime threshold events).
         if event_type in ("baseline_calibration_completed", "baseline_calibration_complete"):
@@ -121,12 +187,11 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
         if score is None:
             continue
 
-        # Prefer payload timestamp; if it's a numeric epoch (seconds), convert accordingly.
-        ts_val = payload.get("timestamp")
-        if isinstance(ts_val, (int, float)):
-            ts = pd.to_datetime(ts_val, unit="s", utc=True).tz_convert(None)
-        else:
-            ts = pd.to_datetime(ts_val or row["timestamp"])
+        ts = _parse_timestamp(payload.get("timestamp"))
+        if ts is None:
+            ts = _parse_timestamp(row["timestamp"])
+        if ts is None or pd.isna(ts):
+            continue
         mode = str(row.get("mode", "")).upper() or "UNKNOWN"
         source_type = payload.get("source_type") or payload.get("metadata", {}).get("source_type")
         is_predicted = source_type == "predicted_features"
@@ -141,15 +206,65 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
         )
 
     tidy = pd.DataFrame(estimates)
+    interactions_df = pd.DataFrame(feedback_interactions)
+    if not interactions_df.empty:
+        interactions_df = interactions_df.sort_values("timestamp")
 
     if trigger_bounds is None:
         # No trigger/baseline events were logged (common in replay); use a neutral default band.
         trigger_bounds = _DEFAULT_TRIGGER_BOUNDS.copy()
 
     if tidy.empty:
-        return tidy, trigger_bounds
+        return tidy, trigger_bounds, interactions_df
 
-    return tidy.sort_values("timestamp"), trigger_bounds
+    return tidy.sort_values("timestamp"), trigger_bounds, interactions_df
+
+
+def _nearest_score_at_timestamp(df: pd.DataFrame, ts: pd.Timestamp) -> Optional[float]:
+    if df.empty:
+        return None
+
+    if pd.isna(ts):
+        return None
+
+    sorted_df = df.sort_values("timestamp")
+    timestamp_series = pd.to_datetime(sorted_df["timestamp"], utc=True, errors="coerce")
+    score_series = pd.to_numeric(sorted_df["score"], errors="coerce")
+
+    valid_mask = (~timestamp_series.isna()) & (~score_series.isna())
+    if not valid_mask.any():
+        return None
+
+    ts_utc = pd.to_datetime(ts, utc=True, errors="coerce")
+    if pd.isna(ts_utc):
+        return None
+
+    x = timestamp_series.loc[valid_mask].astype("int64").reset_index(drop=True)
+    y = score_series.loc[valid_mask].astype(float).reset_index(drop=True)
+    if x.empty:
+        return None
+
+    target = int(ts_utc.value)
+
+    # Clamp outside range to nearest endpoint.
+    if target <= int(x.iloc[0]):
+        return float(y.iloc[0])
+    if target >= int(x.iloc[-1]):
+        return float(y.iloc[-1])
+
+    right = int(x.searchsorted(target, side="left"))
+    left = max(0, right - 1)
+
+    x0 = int(x.iloc[left])
+    x1 = int(x.iloc[right])
+    y0 = float(y.iloc[left])
+    y1 = float(y.iloc[right])
+
+    if x1 == x0:
+        return y1
+
+    ratio = (target - x0) / (x1 - x0)
+    return y0 + (ratio * (y1 - y0))
 
 
 def _color_for_mode(mode: str) -> Optional[str]:
@@ -186,8 +301,14 @@ def _smooth_series(
     return series
 
 
-def plot_estimates(df: pd.DataFrame, title: str, trigger_bounds: Optional[dict[str, float | str]] = None) -> plt.Figure:
+def plot_estimates(
+    df: pd.DataFrame,
+    title: str,
+    trigger_bounds: Optional[dict[str, float | str]] = None,
+    feedback_interactions: Optional[pd.DataFrame] = None,
+) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(10, 5))
+    plotted_reference_rows: list[dict[str, Any]] = []
 
     # Plot observed segments without bridging gaps between separated occurrences of the same mode.
     actual = df[~df["is_predicted"]].sort_values("timestamp")
@@ -223,6 +344,13 @@ def plot_estimates(df: pd.DataFrame, title: str, trigger_bounds: Optional[dict[s
             color=_color_for_mode(mode),
             linewidth=1.8,
         )
+        plotted_reference_rows.extend(
+            {
+                "timestamp": ts,
+                "score": score,
+            }
+            for ts, score in zip(seg_sorted["timestamp"], smoothed_score)
+        )
         used_labels.add(mode)
 
     predicted = df[df["is_predicted"]].sort_values("timestamp")
@@ -234,6 +362,13 @@ def plot_estimates(df: pd.DataFrame, title: str, trigger_bounds: Optional[dict[s
             linestyle="--",
             linewidth=1.5,
             color="#444444",
+        )
+        plotted_reference_rows.extend(
+            {
+                "timestamp": ts,
+                "score": score,
+            }
+            for ts, score in zip(predicted["timestamp"], predicted["score"])
         )
 
     if trigger_bounds:
@@ -260,6 +395,41 @@ def plot_estimates(df: pd.DataFrame, title: str, trigger_bounds: Optional[dict[s
                 color="#b22222",
                 linestyle=":",
                 linewidth=1.2,
+            )
+
+    if feedback_interactions is not None and not feedback_interactions.empty:
+        plotted_reference_df = pd.DataFrame(plotted_reference_rows)
+        interaction_legend_added = False
+        for _, interaction in feedback_interactions.iterrows():
+            marker_ts = interaction["timestamp"]
+            marker = str(interaction.get("marker", "")).strip().upper()
+            if not marker:
+                continue
+
+            marker_y = _nearest_score_at_timestamp(plotted_reference_df, marker_ts)
+            if marker_y is None:
+                continue
+
+            legend_label = "Feedback interactions" if not interaction_legend_added else None
+            interaction_legend_added = True
+
+            ax.scatter(
+                [marker_ts],
+                [marker_y],
+                s=22,
+                color="#111111",
+                zorder=6,
+                label=legend_label,
+            )
+            ax.annotate(
+                marker,
+                (marker_ts, marker_y),
+                xytext=(0, 7),
+                textcoords="offset points",
+                ha="center",
+                fontsize=7,
+                color="#111111",
+                zorder=7,
             )
 
     ax.set_title(title)
@@ -302,6 +472,11 @@ def main() -> None:
     parser.add_argument("--all", dest="include_all", action="store_true", help="Plot all matching files instead of the newest")
     parser.add_argument("--output-dir", help="Directory to save plots (defaults to backend/analysis/figures)")
     parser.add_argument("--show", action="store_true", help="Display the plot window")
+    parser.add_argument(
+        "--feedback-interactions",
+        action="store_true",
+        help="Overlay logged feedback interactions as single-point markers with one-character labels",
+    )
 
     args = parser.parse_args()
 
@@ -313,10 +488,15 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     figures: list[plt.Figure] = []
     for csv_path in csv_files:
-        df, trigger_bounds = _parse_estimates(csv_path)
+        df, trigger_bounds, feedback_interactions = _parse_estimates(csv_path)
         if df.empty:
             continue
-        fig = plot_estimates(df, title=csv_path.stem, trigger_bounds=trigger_bounds)
+        fig = plot_estimates(
+            df,
+            title=csv_path.stem,
+            trigger_bounds=trigger_bounds,
+            feedback_interactions=feedback_interactions if args.feedback_interactions else None,
+        )
         figures.append(fig)
         output_path = output_dir / f"{csv_path.stem}.png"
         fig.savefig(output_path, dpi=150)
