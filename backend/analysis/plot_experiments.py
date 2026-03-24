@@ -63,33 +63,8 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
         except json.JSONDecodeError:
             continue
 
-        # Prefer explicit runtime trigger bounds when available.
-        if event_type == "feedback_delivery_threshold_met":
-            lower = _to_float(payload.get("lower_bound"))
-            upper = _to_float(payload.get("upper_bound"))
-            rule = str(payload.get("rule", ""))
-            if lower is not None and upper is not None:
-                trigger_bounds = {
-                    "rule": rule or "baseline_mean_pm_2sd",
-                    "lower": lower,
-                    "upper": upper,
-                }
-                mean = _to_float(payload.get("baseline_mean"))
-                std = _to_float(payload.get("baseline_std"))
-                if mean is not None:
-                    trigger_bounds["mean"] = mean
-                if std is not None:
-                    trigger_bounds["std"] = std
-            else:
-                threshold = _to_float(payload.get("threshold"))
-                if rule == "static_min_score" and threshold is not None:
-                    trigger_bounds = {
-                        "rule": rule,
-                        "threshold": threshold,
-                    }
-
-        # Fallback: infer bounds from baseline summary if no explicit trigger event is present yet.
-        if trigger_bounds is None and event_type == "baseline_calibration_completed":
+        # Priority 1: baseline calibration bounds (should win over runtime threshold events).
+        if event_type in ("baseline_calibration_completed", "baseline_calibration_complete"):
             score_metric = payload.get("metrics", {}).get("cognitive_load_score", {})
             mean = _to_float(score_metric.get("mean"))
             std = _to_float(score_metric.get("std"))
@@ -113,6 +88,31 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     "mean": mean,
                     "std": std,
                 }
+
+        # Priority 2: explicit runtime trigger bounds (only if baseline calibration not available).
+        elif trigger_bounds is None and event_type == "feedback_delivery_threshold_met":
+            lower = _to_float(payload.get("lower_bound"))
+            upper = _to_float(payload.get("upper_bound"))
+            rule = str(payload.get("rule", ""))
+            if lower is not None and upper is not None:
+                trigger_bounds = {
+                    "rule": rule or "baseline_mean_pm_2sd",
+                    "lower": lower,
+                    "upper": upper,
+                }
+                mean = _to_float(payload.get("baseline_mean"))
+                std = _to_float(payload.get("baseline_std"))
+                if mean is not None:
+                    trigger_bounds["mean"] = mean
+                if std is not None:
+                    trigger_bounds["std"] = std
+            else:
+                threshold = _to_float(payload.get("threshold"))
+                if rule == "static_min_score" and threshold is not None:
+                    trigger_bounds = {
+                        "rule": rule,
+                        "threshold": threshold,
+                    }
 
         if event_type not in ("user_state_estimate_logged", "observer_user_state_estimate_logged"):
             continue
@@ -212,7 +212,9 @@ def plot_estimates(df: pd.DataFrame, title: str, trigger_bounds: Optional[dict[s
     for mode, segment in segments:
         seg_sorted = segment.sort_values("timestamp")
         label = None if mode in used_labels else f"{mode.title()} observed"
-        smoothed_score = _smooth_series(seg_sorted["score"], method="ema", alpha=0.25)
+        # smoothed_score = _smooth_series(seg_sorted["score"], method="ema", alpha=0.25)
+        smoothed_score = _smooth_series(seg_sorted["score"], method="rolling", alpha=0.25)
+        # smoothed_score = seg_sorted["score"]
 
         ax.plot(
             seg_sorted["timestamp"],
@@ -247,18 +249,17 @@ def plot_estimates(df: pd.DataFrame, title: str, trigger_bounds: Optional[dict[s
                 if rule == "baseline_empirical_p2_5_p97_5"
                 else "Trigger band (mean ± 2 SD)"
             )
-            ax.axhspan(lower, upper, color="#999999", alpha=0.1, label=band_label, zorder=0)
-            ax.axhline(lower, color="#b22222", linestyle=":", linewidth=1.2, label=f"Lower bound ({lower:.3f})")
-            ax.axhline(upper, color="#b22222", linestyle=":", linewidth=1.2, label=f"Upper bound ({upper:.3f})")
+            ax.axhspan(lower, upper, color="#999999", alpha=0.1, zorder=0)
+            ax.axhline(lower, color="#b22222", linestyle=":", linewidth=1.2)
+            ax.axhline(upper, color="#b22222", linestyle=":", linewidth=1.2)
             if mean is not None:
-                ax.axhline(mean, color="#6a6a6a", linestyle="-.", linewidth=1.1, label=f"Baseline mean ({mean:.3f})")
+                ax.axhline(mean, color="#6a6a6a", linestyle="-.", linewidth=1.1)
         elif threshold is not None:
             ax.axhline(
                 threshold,
                 color="#b22222",
                 linestyle=":",
                 linewidth=1.2,
-                label=f"Trigger threshold ({threshold:.3f})",
             )
 
     ax.set_title(title)
