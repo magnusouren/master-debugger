@@ -27,7 +27,17 @@ interface ClearFeedbackMessage {
   payload: Record<string, never>;
 }
 
-type ExtensionMessage = ConnectionStatusMessage | StatusUpdateMessage | FeedbackUpdateMessage | ClearFeedbackMessage;
+interface RemoveFeedbackMessage {
+  type: "removeFeedback";
+  payload: { feedbackId: string };
+}
+
+type ExtensionMessage =
+  | ConnectionStatusMessage
+  | StatusUpdateMessage
+  | FeedbackUpdateMessage
+  | ClearFeedbackMessage
+  | RemoveFeedbackMessage;
 
 export function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
@@ -55,6 +65,11 @@ export function App() {
         break;
       case "clearFeedback":
         setFeedbackItems([]);
+        break;
+      case "removeFeedback":
+        setFeedbackItems((prevItems) =>
+          prevItems.filter((item) => item.metadata.feedback_id !== message.payload.feedbackId)
+        );
         break;
     }
   }, []);
