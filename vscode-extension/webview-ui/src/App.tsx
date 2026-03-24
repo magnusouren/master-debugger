@@ -42,6 +42,7 @@ type ExtensionMessage =
 export function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const isConnected = status ? (status.status !== "disconnected") : false;
+  const eyeTrackerConnected = !!status?.eye_tracker_model;
   const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
 
   // Handle messages from the extension
@@ -151,7 +152,11 @@ export function App() {
         <div className="section">
           <ExperimentIDs
             experimentIsRunning={status?.experiment_active ?? false}
+            eyeTrackerConnected={eyeTrackerConnected}
             startExperiment={async (experimentId: string, participantId: string) => {
+              if (!eyeTrackerConnected) {
+                return;
+              }
               vscode.postMessage({
                 type: "startExperiment",
                 payload: { experimentId, participantId }
@@ -174,7 +179,7 @@ export function App() {
             onTriggerFeedback={handleTriggerFeedback}
             onConnectEyeTracker={handleConnectEyeTracker}
             onDisconnectEyeTracker={handleDisconnectEyeTracker}
-            eyeTrackerConnected={!!status?.eye_tracker_model}
+            eyeTrackerConnected={eyeTrackerConnected}
           />
         </div>
         {status &&

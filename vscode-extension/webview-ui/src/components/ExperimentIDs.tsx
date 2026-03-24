@@ -2,12 +2,14 @@ import { useState } from "react";
 
 interface ExperimentIDsProps {
   experimentIsRunning: boolean;
+  eyeTrackerConnected: boolean;
   startExperiment: (experimentId: string, participantId: string) => Promise<void>;
   endExperiment: () => void;
 }
 
 export function ExperimentIDs({
   experimentIsRunning,
+  eyeTrackerConnected,
   startExperiment,
   endExperiment
 
@@ -18,6 +20,11 @@ export function ExperimentIDs({
   const [errorMessage, setErrorMessage] = useState("");
 
   const handleStartExperiment = async () => {
+    if (!eyeTrackerConnected) {
+      setErrorMessage("Connect an eye tracker before starting an experiment.");
+      return;
+    }
+
     if (!experimentId || !participantId) {
       setErrorMessage("Experiment ID and Participant ID are required.");
       return;
@@ -70,7 +77,12 @@ export function ExperimentIDs({
           </div>
           <div className="experiment-setting">
             {!experimentIsRunning ? (
-              <button className="btn" onClick={handleStartExperiment}>
+              <button
+                className="btn"
+                onClick={handleStartExperiment}
+                disabled={!eyeTrackerConnected}
+                title={!eyeTrackerConnected ? "Connect an eye tracker to start an experiment" : undefined}
+              >
                 Start Experiment
               </button>
             ) : (
