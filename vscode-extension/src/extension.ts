@@ -637,6 +637,24 @@ async function startExperiment(
     experimentID?: string,
     participantID?: string,
 ): Promise<void> {
+    try {
+        const statusPayload = await fetchStatus(host, port);
+        if (
+            isStatusUpdatePayload(statusPayload) &&
+            !statusPayload.eye_tracker_model
+        ) {
+            vscode.window.showWarningMessage(
+                'Cannot start experiment: no eye tracker connected.',
+            );
+            return;
+        }
+    } catch (error) {
+        console.error(
+            'Failed to verify eye tracker status before starting experiment:',
+            error,
+        );
+    }
+
     if (!experimentID) {
         experimentID = await vscode.window.showInputBox({
             prompt: 'Enter Experiment ID',
