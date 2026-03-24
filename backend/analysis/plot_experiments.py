@@ -28,6 +28,15 @@ _PALETTE_BASE = {
 }
 _MODE_COLOR_CACHE: dict[str, str] = {}
 
+# Fallback bounds for logs (e.g., replay runs) without baseline/threshold events.
+_DEFAULT_TRIGGER_BOUNDS: dict[str, float | str] = {
+    "rule": "fallback_default_band",
+    "lower": 0.45,
+    "upper": 0.55,
+    "mean": 0.5,
+    "std": 0.05,
+}
+
 
 def _to_float(value: Any) -> Optional[float]:
     try:
@@ -132,6 +141,11 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
         )
 
     tidy = pd.DataFrame(estimates)
+
+    if trigger_bounds is None:
+        # No trigger/baseline events were logged (common in replay); use a neutral default band.
+        trigger_bounds = _DEFAULT_TRIGGER_BOUNDS.copy()
+
     if tidy.empty:
         return tidy, trigger_bounds
 

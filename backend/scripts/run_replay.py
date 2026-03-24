@@ -71,13 +71,13 @@ async def run_single(replay_file: Path, config_path: str, output_dir: Path) -> P
         return None
 
     csv_path = matches[-1]
-    df = _parse_estimates(csv_path)
+    df, trigger_bounds = _parse_estimates(csv_path)
     if df.empty:
         print(f"[WARN] No estimates in log for {replay_file}")
         return csv_path
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    fig = plot_estimates(df, title=f"{experiment_id}")
+    fig = plot_estimates(df, title=f"{experiment_id}", trigger_bounds=trigger_bounds)
     outfile = output_dir / f"plot_{experiment_id}.png"
     fig.savefig(outfile, dpi=150)
     plt.close(fig)
