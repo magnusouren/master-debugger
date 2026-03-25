@@ -1034,9 +1034,13 @@ class RuntimeController:
 
             # Stop baseline recording
             baseline = self._reactive_tool.stop_baseline_recording(self._participant_id)
+            calibrated_bounds = None
 
             if baseline:
                 self._reactive_observer.set_baseline(baseline)
+                # Two-step calibration: baseline must be active before scoring
+                # baseline windows for feedback trigger bounds.
+                calibrated_bounds = self._reactive_tool.calibrate_feedback_trigger_bounds_from_baseline_windows()
 
             if baseline:
                 self._logger.system(
@@ -1054,6 +1058,29 @@ class RuntimeController:
                     },
                     level="INFO"
                 )
+
+                if calibrated_bounds is not None:
+                    self._logger.system(
+                        "feedback_trigger_bounds_calibrated",
+                        calibrated_bounds,
+                        level="INFO",
+                    )
+                    self._logger.experiment(
+                        "feedback_trigger_bounds_calibrated",
+                        calibrated_bounds,
+                        level="INFO",
+                    )
+                else:
+                    self._logger.system(
+                        "feedback_trigger_bounds_calibration_fallback",
+                        {"reason": "insufficient_data_after_baseline"},
+                        level="INFO",
+                    )
+                    self._logger.experiment(
+                        "feedback_trigger_bounds_calibration_fallback",
+                        {"reason": "insufficient_data_after_baseline"},
+                        level="INFO",
+                    )
 
                 self._logger.experiment(
                     "baseline_calibration_completed",
@@ -1131,6 +1158,7 @@ class RuntimeController:
         baseline = self._reactive_tool.stop_baseline_recording(participant_id)
         if baseline:
             self._reactive_observer.set_baseline(baseline)
+            self._reactive_tool.calibrate_feedback_trigger_bounds_from_baseline_windows()
         return baseline
 
     def clear_baseline(self) -> None:

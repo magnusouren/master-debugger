@@ -130,6 +130,8 @@ class ReactiveTool:
         self._is_recording_baseline: bool = False
         self._baseline_start_time: float = 0.0
         self._baseline_samples: Dict[str, List[float]] = {}  # metric_name -> values
+        self._baseline_feature_windows: List[WindowFeatures] = []
+        self._feedback_trigger_bounds: Optional[Dict[str, float | int | str]] = None
 
         # Use provided logger or create fallback
         if logger is None:
@@ -164,6 +166,8 @@ class ReactiveTool:
         self._baseline = None
         self._is_recording_baseline = False
         self._baseline_samples = {}
+        self._baseline_feature_windows = []
+        self._feedback_trigger_bounds = None
 
     # --- Baseline calibration methods ---
 
@@ -175,6 +179,8 @@ class ReactiveTool:
         """
         self._is_recording_baseline = True
         self._baseline_start_time = time.time()
+        self._baseline_feature_windows = []
+        self._feedback_trigger_bounds = None
         self._baseline_samples = {
             "ipa": [],
             "fixation_duration_ms": [],
@@ -269,6 +275,7 @@ class ReactiveTool:
     def clear_baseline(self) -> None:
         """Clear the current baseline (revert to static thresholds)."""
         self._baseline = None
+        self._feedback_trigger_bounds = None
         self._logger.system("baseline_cleared", {}, level="INFO")
 
     def has_baseline(self) -> bool:
@@ -277,36 +284,101 @@ class ReactiveTool:
 
     def get_feedback_trigger_bounds(self, std_multiplier: float = 2.0) -> Optional[Dict[str, float | int | str]]:
         """
-        Get dynamic feedback trigger bounds from baseline score statistics.
+        Return persisted trigger bounds calibrated after baseline activation.
 
-        Returns lower/upper bounds for the final cognitive-load score.
-        Prefers empirical baseline quantiles (2.5th / 97.5th percentiles), and
-        falls back to mean ± std_multiplier * std if quantiles are unavailable.
+        Parameter kept for backward compatibility with existing call sites.
         """
+        _ = std_multiplier
+        if self._feedback_trigger_bounds is None:
+            return None
+        return dict(self._feedback_trigger_bounds)
+
+    def calibrate_feedback_trigger_bounds_from_baseline_windows(
+        self,
+    ) -> Optional[Dict[str, float | int | str]]:
+        """Calibrate persistent trigger bounds after baseline is active.
+
+        Two-step calibration is required: we first compute ParticipantBaseline,
+        then rescore the recorded baseline windows in that calibrated space.
+        """
+        self._feedback_trigger_bounds = None
+
         if self._baseline is None or not self._baseline.is_valid:
+            self._logger.system(
+                "feedback_trigger_bounds_calibration_fallback",
+                {"reason": "baseline_missing_or_invalid"},
+                level="INFO",
+            )
             return None
 
-        metric = self._baseline.metrics.get(self.BASELINE_SCORE_METRIC)
-        if metric is None:
+        observed_windows = [
+            wf
+            for wf in self._baseline_feature_windows
+            if not getattr(wf, "is_predicted", False)
+        ]
+        if len(observed_windows) < 3:
+            self._logger.system(
+                "feedback_trigger_bounds_calibration_fallback",
+                {
+                    "reason": "insufficient_observed_baseline_windows",
+                    "window_count": len(observed_windows),
+                },
+                level="INFO",
+            )
             return None
 
-        if metric.p02_5 is not None and metric.p97_5 is not None:
-            lower = float(metric.p02_5)
-            upper = float(metric.p97_5)
+        scores = self._score_windows_in_current_calibrated_space(observed_windows)
+        if len(scores) < 3:
+            self._logger.system(
+                "feedback_trigger_bounds_calibration_fallback",
+                {
+                    "reason": "insufficient_calibrated_scores",
+                    "score_count": len(scores),
+                },
+                level="INFO",
+            )
+            return None
+
+        mean_val = sum(scores) / len(scores)
+        std_val = math.sqrt(sum((v - mean_val) ** 2 for v in scores) / len(scores))
+        std_val = max(std_val, 0.001)
+        p02_5 = self._percentile(scores, 2.5)
+        p97_5 = self._percentile(scores, 97.5)
+
+        if p02_5 is not None and p97_5 is not None:
+            lower = float(p02_5)
+            upper = float(p97_5)
             rule = "baseline_empirical_p2_5_p97_5"
         else:
-            lower = metric.mean - (std_multiplier * metric.std)
-            upper = metric.mean + (std_multiplier * metric.std)
+            lower = mean_val - (2.0 * std_val)
+            upper = mean_val + (2.0 * std_val)
             rule = "baseline_mean_pm_2sd"
 
-        return {
+        self._feedback_trigger_bounds = {
             "rule": rule,
-            "mean": metric.mean,
-            "std": metric.std,
-            "lower": lower,
-            "upper": upper,
-            "sample_count": metric.sample_count,
+            "mean": float(mean_val),
+            "std": float(std_val),
+            "lower": float(lower),
+            "upper": float(upper),
+            "sample_count": int(len(scores)),
         }
+
+        self._baseline.metrics[self.BASELINE_SCORE_METRIC] = MetricBaseline(
+            mean=float(mean_val),
+            std=float(std_val),
+            min_value=float(min(scores)),
+            max_value=float(max(scores)),
+            sample_count=int(len(scores)),
+            p02_5=p02_5,
+            p97_5=p97_5,
+        )
+
+        self._logger.system(
+            "feedback_trigger_bounds_calibrated",
+            dict(self._feedback_trigger_bounds),
+            level="INFO",
+        )
+        return dict(self._feedback_trigger_bounds)
 
     @staticmethod
     def _percentile(values: List[float], percentile: float) -> Optional[float]:
@@ -359,6 +431,10 @@ class ReactiveTool:
         Add new window-based features and keep only features
         within the last window_size_seconds (e.g. last 60s).
         """
+        if self._is_recording_baseline and not getattr(features, "is_predicted", False):
+            # Keep observed baseline windows so we can rescore them after baseline is set.
+            self._baseline_feature_windows.append(features)
+
         self._feature_window.append(features)
 
         # Time-based sliding window
@@ -371,6 +447,50 @@ class ReactiveTool:
 
         if self._is_running:
             self.estimate()
+
+    def _score_windows_in_current_calibrated_space(self, windows: List[WindowFeatures]) -> List[float]:
+        """Replay observed windows through the current calibrated scoring pipeline."""
+        if not windows:
+            return []
+
+        ordered = sorted(windows, key=lambda w: w.window_end)
+        horizon = self._config.window_size_seconds
+        alpha = float(self._config.score_smoothing_factor)
+        local_windows: deque[WindowFeatures] = deque()
+        local_history: deque[float] = deque()
+        scores: List[float] = []
+
+        for wf in ordered:
+            local_windows.append(wf)
+            cutoff_ts = wf.window_end - horizon
+            while local_windows and local_windows[0].window_end < cutoff_ts:
+                local_windows.popleft()
+
+            active_windows = list(local_windows)
+            if len(active_windows) < 3:
+                continue
+
+            if self._model_type == ModelType.RULE_BASED:
+                raw_score = self._estimate_rule_based(active_windows)
+            elif self._model_type == ModelType.ML_CLASSIFIER:
+                raw_score = self._estimate_ml_classifier(active_windows)
+            else:
+                raw_score = self._estimate_sequence_model(active_windows)
+
+            if raw_score is None:
+                raw_score = 0.5
+
+            raw = max(0.0, min(1.0, float(raw_score)))
+            prev = local_history[-1] if local_history else None
+            smoothed = raw if prev is None else (alpha * raw + (1.0 - alpha) * prev)
+
+            local_history.append(smoothed)
+            while len(local_history) > 60:
+                local_history.popleft()
+
+            scores.append(float(smoothed))
+
+        return scores
     
     def estimate(self) -> Optional[UserStateEstimate]:
         """

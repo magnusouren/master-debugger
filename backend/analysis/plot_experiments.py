@@ -98,6 +98,27 @@ def _marker_for_feedback_interaction(event_type: str, payload: dict[str, Any]) -
     return None
 
 
+def _trigger_bounds_from_payload(payload: dict[str, Any]) -> Optional[dict[str, float | str]]:
+    """Extract trigger bounds from payload if lower/upper are available."""
+    lower = _to_float(payload.get("lower"))
+    upper = _to_float(payload.get("upper"))
+    if lower is None or upper is None:
+        return None
+
+    out: dict[str, float | str] = {
+        "rule": str(payload.get("rule", "baseline_mean_pm_2sd")),
+        "lower": lower,
+        "upper": upper,
+    }
+    mean = _to_float(payload.get("mean"))
+    std = _to_float(payload.get("std"))
+    if mean is not None:
+        out["mean"] = mean
+    if std is not None:
+        out["std"] = std
+    return out
+
+
 def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, float | str]], pd.DataFrame]:
     """Load a single experiment CSV into estimates, trigger bounds, and feedback interactions."""
     df = pd.read_csv(csv_path)
@@ -129,8 +150,14 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     }
                 )
 
-        # Priority 1: baseline calibration bounds (should win over runtime threshold events).
-        if event_type in ("baseline_calibration_completed", "baseline_calibration_complete"):
+        # Priority 1: explicit calibrated trigger bounds (post-baseline, runtime scoring space).
+        if event_type == "feedback_trigger_bounds_calibrated":
+            parsed_bounds = _trigger_bounds_from_payload(payload)
+            if parsed_bounds is not None:
+                trigger_bounds = parsed_bounds
+
+        # Priority 2: baseline calibration summary (fallback for older logs).
+        elif event_type in ("baseline_calibration_completed", "baseline_calibration_complete"):
             score_metric = payload.get("metrics", {}).get("cognitive_load_score", {})
             mean = _to_float(score_metric.get("mean"))
             std = _to_float(score_metric.get("std"))
@@ -155,7 +182,7 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     "std": std,
                 }
 
-        # Priority 2: explicit runtime trigger bounds (only if baseline calibration not available).
+        # Priority 3: threshold-met event payload (fallback for older logs).
         elif trigger_bounds is None and event_type == "feedback_delivery_threshold_met":
             lower = _to_float(payload.get("lower_bound"))
             upper = _to_float(payload.get("upper_bound"))
