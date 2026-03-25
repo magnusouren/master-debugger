@@ -119,11 +119,9 @@ def _trigger_bounds_from_payload(payload: dict[str, Any]) -> Optional[dict[str, 
     return out
 
 
-def _event_timestamp(payload: dict[str, Any], row: pd.Series) -> Optional[pd.Timestamp]:
-    ts = _parse_timestamp(payload.get("timestamp"))
-    if ts is None:
-        ts = _parse_timestamp(row.get("timestamp"))
-    return ts
+def _event_timestamp(row: pd.Series) -> Optional[pd.Timestamp]:
+    """Use CSV log-row timestamp for event timing in plots."""
+    return _parse_timestamp(row.get("timestamp"))
 
 
 def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, float | str]], pd.DataFrame]:
@@ -161,7 +159,7 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
         if event_type == "feedback_trigger_bounds_calibrated":
             parsed_bounds = _trigger_bounds_from_payload(payload)
             if parsed_bounds is not None:
-                bounds_ts = _event_timestamp(payload, row)
+                bounds_ts = _event_timestamp(row)
                 if bounds_ts is not None:
                     parsed_bounds["set_at"] = bounds_ts.isoformat()
                 trigger_bounds = parsed_bounds
@@ -179,7 +177,7 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     "lower": p02_5,
                     "upper": p97_5,
                 }
-                bounds_ts = _event_timestamp(payload, row)
+                bounds_ts = _event_timestamp(row)
                 if bounds_ts is not None:
                     trigger_bounds["set_at"] = bounds_ts.isoformat()
                 if mean is not None:
@@ -194,7 +192,7 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     "mean": mean,
                     "std": std,
                 }
-                bounds_ts = _event_timestamp(payload, row)
+                bounds_ts = _event_timestamp(row)
                 if bounds_ts is not None:
                     trigger_bounds["set_at"] = bounds_ts.isoformat()
 
@@ -209,7 +207,7 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     "lower": lower,
                     "upper": upper,
                 }
-                bounds_ts = _event_timestamp(payload, row)
+                bounds_ts = _event_timestamp(row)
                 if bounds_ts is not None:
                     trigger_bounds["set_at"] = bounds_ts.isoformat()
                 mean = _to_float(payload.get("baseline_mean"))
