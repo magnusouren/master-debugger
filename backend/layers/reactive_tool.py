@@ -728,22 +728,23 @@ class ReactiveTool:
         ]
         for name in expected_components:
             if name not in components:
-                components[name] = 0.5
                 missing_metrics.append(name)
+
+        active_metrics = [name for name in expected_components if name in components]
 
         # Record samples if in baseline recording mode
         if self._is_recording_baseline:
             for metric_name, value in raw_values.items():
                 if metric_name in self._baseline_samples:
                     self._baseline_samples[metric_name].append(value)
-        # Strict equal weighting: each of 5 components contributes exactly 0.2
-        score = (
-            0.2 * components["ipa"]
-            + 0.2 * components["fixation_duration"]
-            + 0.2 * components["anticipation"]
-            + 0.2 * components["perceived_difficulty"]
-            + 0.2 * components["ipi"]
-        )
+        # Equal weighting across only currently available components.
+        if not active_metrics:
+            score = 0.5
+        else:
+            weight = 1.0 / float(len(active_metrics))
+            score = sum(weight * components[name] for name in active_metrics)
+
+        print(f"Debug: components={components}, missing={missing_metrics}, score={score}")
 
         # Log individual metrics with raw values and normalized scores
         self._logger.system(
@@ -752,7 +753,8 @@ class ReactiveTool:
                 "raw_values": {k: round(v, 4) if v is not None else None for k, v in raw_values.items()},
                 "normalized_scores": {k: round(s, 3) for k, s in components.items()},
                 "final_score": round(score, 3),
-                "active_metrics": [k for k in expected_components if k not in missing_metrics],
+                "active_metrics": active_metrics,
+                "component_weight": round(1.0 / len(active_metrics), 3) if active_metrics else None,
                 "missing_metrics_fallback": missing_metrics,
                 "using_baseline": self.has_baseline(),
             },

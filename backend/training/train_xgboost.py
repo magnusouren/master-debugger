@@ -86,7 +86,14 @@ def evaluate_model(
     """
     print("\n--- Evaluation on Test Set ---")
 
-    y_pred = model.predict(X_test)
+    y_pred = np.asarray(model.predict(X_test))
+    y_test = np.asarray(y_test)
+
+    if y_pred.ndim == 1:
+        y_pred = y_pred.reshape(-1, 1)
+
+    if y_test.ndim == 1:
+        y_test = y_test.reshape(-1, 1)
 
     # Overall regression metrics across all outputs
     mse = mean_squared_error(y_test, y_pred)
