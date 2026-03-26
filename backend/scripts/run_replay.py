@@ -71,13 +71,39 @@ async def run_single(replay_file: Path, config_path: str, output_dir: Path) -> P
         return None
 
     csv_path = matches[-1]
-    df, trigger_bounds = _parse_estimates(csv_path)
+    try:
+        parsed = _parse_estimates(csv_path)
+    except Exception as e:
+        print(f"[WARN] Could not parse estimates from {csv_path.name}: {e}")
+        return csv_path
+
+    # Backward/forward compatibility: parser may return
+    # (df, trigger_bounds) or (df, trigger_bounds, feedback_interactions).
+    if isinstance(parsed, tuple) and len(parsed) == 3:
+        df, trigger_bounds, feedback_interactions = parsed
+    elif isinstance(parsed, tuple) and len(parsed) == 2:
+        df, trigger_bounds = parsed
+        feedback_interactions = None
+    else:
+        print(f"[WARN] Unexpected parse result shape for {csv_path.name}")
+        return csv_path
+
     if df.empty:
         print(f"[WARN] No estimates in log for {replay_file}")
         return csv_path
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    fig = plot_estimates(df, title=f"{experiment_id}", trigger_bounds=trigger_bounds)
+    try:
+        fig = plot_estimates(
+            df,
+            title=f"{experiment_id}",
+            trigger_bounds=trigger_bounds,
+            feedback_interactions=feedback_interactions,
+        )
+    except Exception as e:
+        print(f"[WARN] Could not plot estimates for {csv_path.name}: {e}")
+        return csv_path
+
     outfile = output_dir / f"plot_{experiment_id}.png"
     fig.savefig(outfile, dpi=150)
     plt.close(fig)

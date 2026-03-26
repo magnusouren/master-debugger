@@ -31,10 +31,10 @@ _MODE_COLOR_CACHE: dict[str, str] = {}
 # Fallback bounds for logs (e.g., replay runs) without baseline/threshold events.
 _DEFAULT_TRIGGER_BOUNDS: dict[str, float | str] = {
     "rule": "fallback_default_band",
-    "lower": 0.45,
-    "upper": 0.55,
-    "mean": 0.5,
-    "std": 0.05,
+    "lower": 0.0,
+    "upper": 0.0,
+    "mean": 0.0,
+    "std": 0.0,
 }
 
 _FEEDBACK_INTERACTION_MARKERS: dict[str, str] = {
