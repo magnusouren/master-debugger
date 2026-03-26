@@ -743,9 +743,6 @@ class ReactiveTool:
         else:
             weight = 1.0 / float(len(active_metrics))
             score = sum(weight * components[name] for name in active_metrics)
-
-        print(f"Debug: components={components}, missing={missing_metrics}, score={score}")
-
         # Log individual metrics with raw values and normalized scores
         self._logger.system(
             "user_state_metrics",
