@@ -103,6 +103,9 @@ class ReactiveTool:
     Estimates user state from eye-tracking features.
     """
     BASELINE_SCORE_METRIC = "cognitive_load_score"
+    IPA_FALLBACK_LO = 0.25
+    IPA_FALLBACK_HI = 2.5
+    PROACTIVE_IPA_CONFIDENCE = 0.7
     
     def __init__(
         self,
@@ -579,6 +582,72 @@ class ReactiveTool:
     def get_latest_estimate(self) -> Optional[UserStateEstimate]:
         """Return the latest computed estimate without side effects."""
         return self._current_estimate
+
+    def normalize_ipa_against_baseline(self, ipa_value: float) -> float:
+        """
+        Normalize IPA to score space using the same baseline-aware logic as rule-based scoring.
+        """
+        score = self._normalize_metric(
+            "ipa",
+            float(ipa_value),
+            fallback_lo=self.IPA_FALLBACK_LO,
+            fallback_hi=self.IPA_FALLBACK_HI,
+        )
+        return float(max(0.0, min(1.0, score)))
+
+    def estimate_from_predicted_ipa(
+        self,
+        predicted_ipa: float,
+        timestamp: float,
+        source_window_id: Optional[str] = None,
+        forecast_id: Optional[str] = None,
+        normalize_against_baseline: bool = True,
+    ) -> UserStateEstimate:
+        """
+        Build a proactive IPA-only estimate.
+
+        Observed reactive scoring still uses the multi-metric pipeline in estimate().
+        This path is additive for forecasted IPA-only proactive use.
+        """
+        ipa_raw = float(predicted_ipa)
+
+        if normalize_against_baseline:
+            raw_score = self.normalize_ipa_against_baseline(ipa_raw)
+        else:
+            raw_score = float(max(0.0, min(1.0, ipa_raw)))
+
+        score = self._smooth_score(raw_score)
+
+        result = UserStateScore(
+            score=score,
+            confidence=self.PROACTIVE_IPA_CONFIDENCE,
+            state_type=UserStateType.COGNITIVE_LOAD,
+        )
+
+        estimate = UserStateEstimate(
+            timestamp=float(timestamp),
+            score=result,
+            contributing_features={
+                "ipa_raw": round(ipa_raw, 6),
+                "ipa_score": round(raw_score, 6),
+            },
+            model_version=None,
+            model_type="ipa_forecast",
+            metadata={
+                "raw_score": raw_score,
+                "source_type": "predicted_ipa",
+                "forecast_id": forecast_id,
+                "source_window_id": source_window_id,
+                "using_baseline": self.has_baseline() if normalize_against_baseline else False,
+                "normalize_against_baseline": bool(normalize_against_baseline),
+            },
+            source_window_id=source_window_id,
+            forecast_id=forecast_id,
+            source_type="predicted_ipa",
+        )
+
+        self._current_estimate = estimate
+        return estimate
     
     def get_score_history(self, n_samples: int = 10) -> List[float]:
         """
@@ -663,7 +732,12 @@ class ReactiveTool:
             if ipa_series:
                 mean_ipa = sum(ipa_series) / len(ipa_series)
                 raw_values["ipa"] = mean_ipa
-                score = self._normalize_metric("ipa", mean_ipa, fallback_lo=0.5, fallback_hi=2.5)
+                score = self._normalize_metric(
+                    "ipa",
+                    mean_ipa,
+                    fallback_lo=self.IPA_FALLBACK_LO,
+                    fallback_hi=self.IPA_FALLBACK_HI,
+                )
                 components["ipa"] = score
 
         # --- 2. Fixation Duration (weight 0.2) ---
@@ -718,6 +792,10 @@ class ReactiveTool:
                 # So we invert: high IPI (scanning) = low load, low IPI (focused) = high load
                 score = 1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0)
                 components["ipi"] = score
+
+        if len(components) == 1 and "ipa" in components:
+            # If only IPA is available, use it as the sole metric (still normalized to 0-1)
+            return float(max(0.0, min(1.0, components["ipa"])))
 
         expected_components = [
             "ipa",
@@ -940,7 +1018,13 @@ class ReactiveTool:
                 mean_ipa = sum(ipa_series) / len(ipa_series)
                 contribs["ipa_raw"] = round(mean_ipa, 4)
                 contribs["ipa_score"] = round(
-                    self._normalize_metric("ipa", mean_ipa, fallback_lo=0.5, fallback_hi=2.5), 3
+                    self._normalize_metric(
+                        "ipa",
+                        mean_ipa,
+                        fallback_lo=self.IPA_FALLBACK_LO,
+                        fallback_hi=self.IPA_FALLBACK_HI,
+                    ),
+                    3,
                 )
 
         # --- 2. Fixation Duration ---
