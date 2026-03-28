@@ -838,7 +838,7 @@ class ReactiveTool:
 
         if len(components) == 1 and "ipa" in components:
             # If only IPA is available, use it as the sole metric (still normalized to 0-1)
-            return float(max(0.0, min(1.0, components["ipa"])))
+            return 0.5 * components["ipa"] + 0.25  # Scale IPA to contribute between 0.25 and 0.75 for better single-metric fallback
 
         expected_components = [
             "ipa",
