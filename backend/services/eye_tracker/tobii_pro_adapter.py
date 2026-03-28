@@ -16,25 +16,21 @@ from backend.services.logger_service import get_logger
 
 
 REPLAY_TSV_HEADER = [
-    "Time",
-    "Type",
-    "Trial",
-    "Timing",
-    "L Raw X [px]",
-    "L Raw Y [px]",
-    "R Raw X [px]",
-    "R Raw Y [px]",
-    "L POR X [px]",
-    "L POR Y [px]",
-    "R POR X [px]",
-    "R POR Y [px]",
-    "Pupil Confidence",
-    "L Mapped Diameter [mm]",
-    "R Mapped Diameter [mm]",
-    "L Validity",
-    "R Validity",
-    "Frame",
-    "Aux1",
+    "device_timestamp_us",
+    "system_timestamp_s",
+
+    "left_x_norm",
+    "left_y_norm",
+    "right_x_norm",
+    "right_y_norm",
+
+    "left_pupil_mm",
+    "right_pupil_mm",
+
+    "left_valid",
+    "right_valid",
+
+    "frame"
 ]
 
 
@@ -424,7 +420,7 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
         device_ts = gaze_data.get("device_time_stamp")
         if device_ts is not None:
             # Convert from microseconds to seconds
-            timestamp = device_ts / 1_000_000.0
+            timestamp = max(device_ts / 1_000_000.0, 0.000001)
         else:
             timestamp = time.time()
         
@@ -467,50 +463,42 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
             self._loop.call_soon_threadsafe(self._samples_callback, batch)
 
     def _record_batch(self, batch: List[GazeSample]) -> None:
-        """Write one flushed batch to replay-compatible TSV."""
+        """Write deterministic replay TSV (runtime GazeSample format)."""
         with self._record_lock:
-            if not self._record_enabled or not self._record_writer or not self._record_file:
+            if not self._record_enabled or not self._record_writer:
                 return
 
             for sample in batch:
+
                 raw_data = sample.raw_data or {}
-                device_time_stamp = raw_data.get("device_time_stamp")
-                if isinstance(device_time_stamp, (int, float)):
-                    timestamp_us = int(device_time_stamp)
+
+                device_ts = raw_data.get("device_time_stamp")
+
+                if isinstance(device_ts, (int, float)):
+                    device_timestamp_us = int(device_ts)
                 else:
-                    timestamp_us = int(sample.timestamp * 1_000_000)
-
-                left_x_px = sample.left_eye_x * self._screen_width if sample.left_eye_x is not None else 0
-                left_y_px = sample.left_eye_y * self._screen_height if sample.left_eye_y is not None else 0
-                right_x_px = sample.right_eye_x * self._screen_width if sample.right_eye_x is not None else 0
-                right_y_px = sample.right_eye_y * self._screen_height if sample.right_eye_y is not None else 0
-
-                left_valid = 1 if sample.left_eye_valid else 4
-                right_valid = 1 if sample.right_eye_valid else 4
+                    device_timestamp_us = int(sample.timestamp * 1_000_000)
 
                 self._frame_counter += 1
 
                 self._record_writer.writerow([
-                    timestamp_us,
-                    "SMP",
-                    self._trial_id,
-                    "",
-                    left_x_px,
-                    left_y_px,
-                    right_x_px,
-                    right_y_px,
-                    "",
-                    "",
-                    "",
-                    "",
-                    "",
-                    sample.left_pupil_diameter,
-                    sample.right_pupil_diameter,
-                    left_valid,
-                    right_valid,
-                    self._frame_counter,
-                    "",
+                    device_timestamp_us,
+                    sample.timestamp,
+
+                    sample.left_eye_x if sample.left_eye_x is not None else "",
+                    sample.left_eye_y if sample.left_eye_y is not None else "",
+                    sample.right_eye_x if sample.right_eye_x is not None else "",
+                    sample.right_eye_y if sample.right_eye_y is not None else "",
+
+                    sample.left_pupil_diameter if sample.left_pupil_diameter is not None else "",
+                    sample.right_pupil_diameter if sample.right_pupil_diameter is not None else "",
+
+                    1 if sample.left_eye_valid else 0,
+                    1 if sample.right_eye_valid else 0,
+
+                    self._frame_counter
                 ])
+
             try:
                 self._record_file.flush()
             except Exception:
