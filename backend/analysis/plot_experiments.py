@@ -60,7 +60,15 @@ def _parse_timestamp(value: Any) -> Optional[pd.Timestamp]:
     """Parse mixed timestamp values from log payload/columns."""
     try:
         if isinstance(value, (int, float)):
-            ts_num = pd.to_datetime(value, unit="s", utc=True, errors="coerce")
+            numeric = float(value)
+            # Runtime payloads can contain relative seconds (e.g. 8939.12),
+            # which should not be interpreted as Unix epoch.
+            if numeric >= 1.0e12:
+                ts_num = pd.to_datetime(numeric, unit="ms", utc=True, errors="coerce")
+            elif numeric >= 1.0e9:
+                ts_num = pd.to_datetime(numeric, unit="s", utc=True, errors="coerce")
+            else:
+                return None
             if pd.isna(ts_num):
                 return None
             return ts_num.tz_convert(None)
@@ -98,6 +106,32 @@ def _marker_for_feedback_interaction(event_type: str, payload: dict[str, Any]) -
     return None
 
 
+def _trigger_bounds_from_payload(payload: dict[str, Any]) -> Optional[dict[str, float | str]]:
+    """Extract trigger bounds from payload if lower/upper are available."""
+    lower = _to_float(payload.get("lower"))
+    upper = _to_float(payload.get("upper"))
+    if lower is None or upper is None:
+        return None
+
+    out: dict[str, float | str] = {
+        "rule": str(payload.get("rule", "baseline_mean_pm_2sd")),
+        "lower": lower,
+        "upper": upper,
+    }
+    mean = _to_float(payload.get("mean"))
+    std = _to_float(payload.get("std"))
+    if mean is not None:
+        out["mean"] = mean
+    if std is not None:
+        out["std"] = std
+    return out
+
+
+def _event_timestamp(row: pd.Series) -> Optional[pd.Timestamp]:
+    """Use CSV log-row timestamp for event timing in plots."""
+    return _parse_timestamp(row.get("timestamp"))
+
+
 def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, float | str]], pd.DataFrame]:
     """Load a single experiment CSV into estimates, trigger bounds, and feedback interactions."""
     df = pd.read_csv(csv_path)
@@ -107,6 +141,7 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
     estimates: list[dict] = []
     feedback_interactions: list[dict[str, Any]] = []
     trigger_bounds: Optional[dict[str, float | str]] = None
+    baseline_completed_ts: Optional[pd.Timestamp] = None
     for _, row in df.iterrows():
         event_type = str(row.get("event_type", ""))
 
@@ -129,8 +164,21 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     }
                 )
 
-        # Priority 1: baseline calibration bounds (should win over runtime threshold events).
-        if event_type in ("baseline_calibration_completed", "baseline_calibration_complete"):
+        # Priority 1: explicit calibrated trigger bounds (post-baseline, runtime scoring space).
+        if event_type == "feedback_trigger_bounds_calibrated":
+            parsed_bounds = _trigger_bounds_from_payload(payload)
+            if parsed_bounds is not None:
+                bounds_ts = _event_timestamp(row)
+                if bounds_ts is not None:
+                    parsed_bounds["set_at"] = bounds_ts.isoformat()
+                trigger_bounds = parsed_bounds
+
+        # Priority 2: baseline calibration summary (fallback for older logs).
+        elif event_type in ("baseline_calibration_completed", "baseline_calibration_complete"):
+            event_ts = _event_timestamp(row)
+            if event_ts is not None and baseline_completed_ts is None:
+                baseline_completed_ts = event_ts
+
             score_metric = payload.get("metrics", {}).get("cognitive_load_score", {})
             mean = _to_float(score_metric.get("mean"))
             std = _to_float(score_metric.get("std"))
@@ -142,6 +190,9 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     "lower": p02_5,
                     "upper": p97_5,
                 }
+                bounds_ts = _event_timestamp(row)
+                if bounds_ts is not None:
+                    trigger_bounds["set_at"] = bounds_ts.isoformat()
                 if mean is not None:
                     trigger_bounds["mean"] = mean
                 if std is not None:
@@ -154,8 +205,11 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     "mean": mean,
                     "std": std,
                 }
+                bounds_ts = _event_timestamp(row)
+                if bounds_ts is not None:
+                    trigger_bounds["set_at"] = bounds_ts.isoformat()
 
-        # Priority 2: explicit runtime trigger bounds (only if baseline calibration not available).
+        # Priority 3: threshold-met event payload (fallback for older logs).
         elif trigger_bounds is None and event_type == "feedback_delivery_threshold_met":
             lower = _to_float(payload.get("lower_bound"))
             upper = _to_float(payload.get("upper_bound"))
@@ -166,6 +220,9 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
                     "lower": lower,
                     "upper": upper,
                 }
+                bounds_ts = _event_timestamp(row)
+                if bounds_ts is not None:
+                    trigger_bounds["set_at"] = bounds_ts.isoformat()
                 mean = _to_float(payload.get("baseline_mean"))
                 std = _to_float(payload.get("baseline_std"))
                 if mean is not None:
@@ -213,6 +270,9 @@ def _parse_estimates(csv_path: Path) -> tuple[pd.DataFrame, Optional[dict[str, f
     if trigger_bounds is None:
         # No trigger/baseline events were logged (common in replay); use a neutral default band.
         trigger_bounds = _DEFAULT_TRIGGER_BOUNDS.copy()
+
+    if baseline_completed_ts is not None:
+        trigger_bounds["baseline_completed_at"] = baseline_completed_ts.isoformat()
 
     if tidy.empty:
         return tidy, trigger_bounds, interactions_df
@@ -377,6 +437,8 @@ def plot_estimates(
         upper = _to_float(trigger_bounds.get("upper"))
         threshold = _to_float(trigger_bounds.get("threshold"))
         mean = _to_float(trigger_bounds.get("mean"))
+        set_at_ts = _parse_timestamp(trigger_bounds.get("set_at"))
+        baseline_completed_line_ts = _parse_timestamp(trigger_bounds.get("baseline_completed_at"))
 
         if lower is not None and upper is not None:
             band_label = (
@@ -395,6 +457,26 @@ def plot_estimates(
                 color="#b22222",
                 linestyle=":",
                 linewidth=1.2,
+            )
+
+        if set_at_ts is not None:
+            ax.axvline(
+                set_at_ts,
+                color="#5a5a5a",
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.9,
+                label="Trigger bounds set",
+            )
+
+        if baseline_completed_line_ts is not None:
+            ax.axvline(
+                baseline_completed_line_ts,
+                color="#3f6db3",
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.9,
+                label="Baseline completed",
             )
 
     if feedback_interactions is not None and not feedback_interactions.empty:
