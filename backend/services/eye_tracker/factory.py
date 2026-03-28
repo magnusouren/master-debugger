@@ -4,6 +4,7 @@ Eye Tracker Adapter Factory
 Creates and configures eye tracker adapters based on system configuration.
 """
 import asyncio
+from logging import config
 from pathlib import Path
 import time
 from typing import Optional
@@ -118,6 +119,8 @@ def create_eye_tracker_adapter(
             {"type": "tobii_record"},
             level="INFO"
         )
+    
+        from pathlib import Path
 
         base = Path(config.eye_tracker.filepath)
         timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
@@ -125,7 +128,11 @@ def create_eye_tracker_adapter(
         if base.suffix:
             record_path = base.with_name(f"{base.stem}_{timestamp}_RECORD.tsv")
         else:
+            base.mkdir(parents=True, exist_ok=True)   # ← viktig
             record_path = base / f"{timestamp}_RECORD.tsv"
+
+        # also ensure parent exists if suffix case
+        record_path.parent.mkdir(parents=True, exist_ok=True)
 
         adapter.start_recording(str(record_path))
         
