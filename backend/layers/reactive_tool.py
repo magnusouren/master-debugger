@@ -251,12 +251,19 @@ class ReactiveTool:
                 "duration_seconds": round(duration, 1),
                 "metrics": {
                     k: {
+                        "sample_count": v.sample_count,
                         "mean": round(v.mean, 4),
                         "std": round(v.std, 4),
+                        "min": round(v.min_value, 4),
+                        "max": round(v.max_value, 4),
+                        "range": round(v.max_value - v.min_value, 4),
                         "p02_5": round(v.p02_5, 4) if v.p02_5 is not None else None,
                         "p97_5": round(v.p97_5, 4) if v.p97_5 is not None else None,
+                        "percentile_range": round(v.p97_5 - v.p02_5, 4)
+                        if v.p02_5 is not None and v.p97_5 is not None else None,
                     }
-                           for k, v in metrics.items()},
+                    for k, v in metrics.items()
+                },
             },
             level="INFO"
         )
@@ -373,11 +380,25 @@ class ReactiveTool:
             p97_5=p97_5,
         )
 
+        trigger_width = float(upper - lower)
+        score_min = float(min(scores))
+        score_max = float(max(scores))
+        score_range = float(score_max - score_min)
+
         self._logger.system(
             "feedback_trigger_bounds_calibrated",
-            dict(self._feedback_trigger_bounds),
+            {
+                **dict(self._feedback_trigger_bounds),
+                "trigger_width": trigger_width,
+                "score_min": score_min,
+                "score_max": score_max,
+                "score_range": score_range,
+                "score_p02_5": float(p02_5) if p02_5 is not None else None,
+                "score_p97_5": float(p97_5) if p97_5 is not None else None,
+            },
             level="INFO",
         )
+        
         return dict(self._feedback_trigger_bounds)
 
     @staticmethod
@@ -726,24 +747,21 @@ class ReactiveTool:
             "perceived_difficulty",
             "ipi",
         ]
-        for name in expected_components:
-            if name not in components:
-                components[name] = 0.5
-                missing_metrics.append(name)
+
+        active_component_names = list(components.keys())
+        missing_metrics = [name for name in expected_components if name not in components]
 
         # Record samples if in baseline recording mode
         if self._is_recording_baseline:
             for metric_name, value in raw_values.items():
                 if metric_name in self._baseline_samples:
                     self._baseline_samples[metric_name].append(value)
-        # Strict equal weighting: each of 5 components contributes exactly 0.2
-        score = (
-            0.2 * components["ipa"]
-            + 0.2 * components["fixation_duration"]
-            + 0.2 * components["anticipation"]
-            + 0.2 * components["perceived_difficulty"]
-            + 0.2 * components["ipi"]
-        )
+
+        # Dynamic equal weighting across only available components
+        if not active_component_names:
+            score = 0.5
+        else:
+            score = sum(components[name] for name in active_component_names) / len(active_component_names)
 
         # Log individual metrics with raw values and normalized scores
         self._logger.system(
