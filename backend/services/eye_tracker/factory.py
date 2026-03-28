@@ -4,6 +4,8 @@ Eye Tracker Adapter Factory
 Creates and configures eye tracker adapters based on system configuration.
 """
 import asyncio
+from pathlib import Path
+import time
 from typing import Optional
 
 from backend.services.eye_tracker.base import EyeTrackerAdapter
@@ -104,11 +106,33 @@ def create_eye_tracker_adapter(
             {"type": "tobii"},
             level="INFO"
         )
+
+    elif mode.upper() == "TOBII_RECORD":
+        adapter = TobiiProEyeTrackerAdapter(
+            batch_size=batch_size,
+            flush_interval_ms=flush_interval_ms,
+            loop=loop,
+        )
+        logger.system(
+            "eye_tracker_adapter_created",
+            {"type": "tobii_record"},
+            level="INFO"
+        )
+
+        base = Path(config.eye_tracker.filepath)
+        timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+
+        if base.suffix:
+            record_path = base.with_name(f"{base.stem}_{timestamp}_RECORD.tsv")
+        else:
+            record_path = base / f"{timestamp}_RECORD.tsv"
+
+        adapter.start_recording(str(record_path))
         
     else:
         error_msg = (
             f"Invalid eye tracker mode: {mode}. "
-            f"Valid modes are: SIMULATED, REPLAY, TOBII"
+            f"Valid modes are: SIMULATED, REPLAY, TOBII, TOBII_RECORD"
         )
         logger.system(
             "eye_tracker_adapter_invalid_mode",
