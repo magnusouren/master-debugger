@@ -279,6 +279,15 @@ class RuntimeController:
             event_type=DomainEventType.SYSTEM_STATUS_UPDATED,
             payload=self.get_system_status(),
         ))
+
+    def get_operation_mode(self) -> OperationMode:
+        """
+        Get the current system operation mode.
+        
+        Returns:
+            Current OperationMode.
+        """
+        return self._operation_mode
     
     def get_system_status(self) -> SystemStatusMessage:
         """
