@@ -39,41 +39,48 @@ class ParticipantBaseline:
     def get_zscore(self, metric_name: str, value: float) -> Optional[float]:
         """
         Compute z-score for a value relative to baseline.
-
-        Args:
-            metric_name: Name of the metric (e.g., "ipa", "fixation_duration_ms")
-            value: Current metric value
-
-        Returns:
-            Z-score or None if metric not in baseline or std is 0
         """
         if metric_name not in self.metrics:
             return None
+
         baseline = self.metrics[metric_name]
         if baseline.std <= 0:
-            return 0.0  # No variation in baseline
+            return 0.0
+
         return (value - baseline.mean) / baseline.std
+
+    def _ramp(self, x: float, lo: float, hi: float) -> float:
+        if hi <= lo:
+            return 1.0 if x >= hi else 0.0
+        if x <= lo:
+            return 0.0
+        if x >= hi:
+            return 1.0
+        return (x - lo) / (hi - lo)
 
     def get_normalized_score(self, metric_name: str, value: float) -> Optional[float]:
         """
-        Convert z-score to 0-1 range using sigmoid-like mapping.
+        Normalize a metric to 0-1 using participant baseline.
 
-        Z-scores are mapped: -2 → ~0.12, 0 → 0.5, +2 → ~0.88
+        Preferred method:
+        - percentile ramp from p02_5 to p97_5
 
-        Args:
-            metric_name: Name of the metric
-            value: Current metric value
-
-        Returns:
-            Normalized score (0-1) or None if metric not in baseline
+        Fallback:
+        - z-score ramp from -2 to +2
         """
-        zscore = self.get_zscore(metric_name, value)
-        if zscore is None:
+        if metric_name not in self.metrics:
             return None
-        # Sigmoid mapping: zscore of ±2 maps to ~0.12/0.88
-        # zscore of ±3 maps to ~0.05/0.95
-        import math
-        return 1.0 / (1.0 + math.exp(-zscore))
+
+        baseline = self.metrics[metric_name]
+
+        if baseline.p02_5 is not None and baseline.p97_5 is not None:
+            return self._ramp(value, baseline.p02_5, baseline.p97_5)
+
+        z = self.get_zscore(metric_name, value)
+        if z is None:
+            return None
+
+        return self._ramp(z, -2.0, 2.0)
 
 
 class UserStateType(Enum):
