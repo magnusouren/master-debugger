@@ -59,22 +59,33 @@ class ParticipantBaseline:
         return (x - lo) / (hi - lo)
 
     def get_normalized_score(self, metric_name: str, value: float) -> Optional[float]:
-        """
-        Normalize a metric to 0-1 using participant baseline.
-
-        Preferred method:
-        - percentile ramp from p02_5 to p97_5
-
-        Fallback:
-        - z-score ramp from -2 to +2
-        """
         if metric_name not in self.metrics:
             return None
 
         baseline = self.metrics[metric_name]
 
         if baseline.p02_5 is not None and baseline.p97_5 is not None:
-            return self._ramp(value, baseline.p02_5, baseline.p97_5)
+            lo = float(baseline.p02_5)
+            hi = float(baseline.p97_5)
+
+            # Prevent overly narrow calibration ranges
+            min_range_by_metric = {
+                "ipa": 0.15,
+                "fixation_duration_ms": 100.0,
+                "anticipation_velocity": 1.0,
+                "perceived_difficulty_std": 1.0,
+                "ipi": 0.5,
+                "cognitive_load_score": 0.2,
+            }
+            min_range = min_range_by_metric.get(metric_name, 0.1)
+
+            current_range = hi - lo
+            if current_range < min_range:
+                center = (lo + hi) / 2.0
+                lo = center - (min_range / 2.0)
+                hi = center + (min_range / 2.0)
+
+            return self._ramp(value, lo, hi)
 
         z = self.get_zscore(metric_name, value)
         if z is None:
