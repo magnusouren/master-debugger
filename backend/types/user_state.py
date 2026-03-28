@@ -2,6 +2,7 @@
 Type definitions for user state estimation.
 """
 from dataclasses import dataclass, field
+import math
 from typing import Optional, Dict, Any, List
 from enum import Enum
 
@@ -58,40 +59,83 @@ class ParticipantBaseline:
             return 1.0
         return (x - lo) / (hi - lo)
 
-    def get_normalized_score(self, metric_name: str, value: float) -> Optional[float]:
-        if metric_name not in self.metrics:
-            return None
+def get_normalized_score(self, metric_name: str, value: float) -> Optional[float]:
 
-        baseline = self.metrics[metric_name]
+    if metric_name not in self.metrics:
+        return None
 
-        if baseline.p02_5 is not None and baseline.p97_5 is not None:
-            lo = float(baseline.p02_5)
-            hi = float(baseline.p97_5)
+    baseline = self.metrics[metric_name]
 
-            # Prevent overly narrow calibration ranges
-            min_range_by_metric = {
-                "ipa": 0.15,
-                "fixation_duration_ms": 100.0,
-                "anticipation_velocity": 1.0,
-                "perceived_difficulty_std": 1.0,
-                "ipi": 0.5,
-                "cognitive_load_score": 0.2,
-            }
-            min_range = min_range_by_metric.get(metric_name, 0.1)
+    if baseline.std <= 0:
+        return 0.5
 
-            current_range = hi - lo
-            if current_range < min_range:
-                center = (lo + hi) / 2.0
-                lo = center - (min_range / 2.0)
-                hi = center + (min_range / 2.0)
+    # -------- IPA --------
 
-            return self._ramp(value, lo, hi)
+    if metric_name == "ipa":
 
-        z = self.get_zscore(metric_name, value)
-        if z is None:
-            return None
+        center = baseline.mean
 
-        return self._ramp(z, -2.0, 2.0)
+        # Combine participant variability + global tolerance
+        scale = max(
+            baseline.std * 3.0,
+            0.08   # minimum realistic IPA variation
+        )
+
+        z = (value - center) / scale
+
+        # Allow both lower and higher scores
+        z = max(-4.0, min(4.0, z))
+
+        score = 1.0 / (1.0 + math.exp(-z))
+
+        return float(score)
+
+    # -------- OTHER METRICS --------
+
+    if baseline.p02_5 is not None and baseline.p97_5 is not None:
+
+        lo = float(baseline.p02_5)
+        hi = float(baseline.p97_5)
+
+        min_range_by_metric = {
+            "fixation_duration_ms": 120.0,
+            "anticipation_velocity": 1.5,
+            "perceived_difficulty_std": 1.5,
+            "ipi": 0.6,
+            "cognitive_load_score": 0.25,
+        }
+
+        min_range = min_range_by_metric.get(metric_name, 0.1)
+
+        current_range = hi - lo
+
+        if current_range < min_range:
+            center = (lo + hi) / 2.0
+            lo = center - (min_range / 2.0)
+            hi = center + (min_range / 2.0)
+
+        center = (lo + hi) / 2.0
+        scale = (hi - lo) / 3.0
+
+        if scale <= 0:
+            return 0.5
+
+        z = (value - center) / scale
+
+        z = max(-4.0, min(4.0, z))
+
+        return float(1.0 / (1.0 + math.exp(-z)))
+
+    # -------- FALLBACK --------
+
+    z = self.get_zscore(metric_name, value)
+
+    if z is None:
+        return None
+
+    z = max(-4.0, min(4.0, z))
+
+    return float(1.0 / (1.0 + math.exp(-0.6 * z)))
 
 
 class UserStateType(Enum):
