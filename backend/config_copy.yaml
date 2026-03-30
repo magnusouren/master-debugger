@@ -91,7 +91,7 @@ controller:
 
 # Eye Tracker
 eye_tracker:
-    mode: TOBII_REPLAY # SIMULATED, TOBII or REPLAY
+    mode: TOBII_REPLAY # SIMULATED, REPLAY, TOBII or TOBII_REPLAY
     filepath: logs/record/2026-03-28_21-59-06_RECORD.tsv # Required if mode is REPLAY, path to recorded data file
     device_id: null # null for auto-select, or specific device serial/address
     batch_size: 12 # Number of samples per batch (default 12 for ~120Hz)
