@@ -33,12 +33,13 @@ PREDICTION_HORIZON = 20
 DEFAULT_INPUT_COLUMNS = [
     "pupil_ipa",
     "fixation_mean_duration_ms",
+    "blink_count",
+    "blink_rate_per_min",
+    "fixation_count",
+    "saccade_count",
 ]
 
-DEFAULT_TARGET_COLUMNS = [
-    "pupil_ipa",
-    "fixation_mean_duration_ms",
-]
+DEFAULT_TARGET_COLUMNS = list(DEFAULT_INPUT_COLUMNS)  # Predict same features in the future
 
 DEFAULT_ENABLED_METRICS = [
     "fixation_duration",
