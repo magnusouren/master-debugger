@@ -4,8 +4,8 @@ Reactive Tool
 Input: Sliding window of features
 Output: user_state_score (0–1) + confidence
 
-This layer continuously estimates a scalar user_state_score representing 
-the user's current interaction state (e.g., stress, load, or related 
+This layer continuously estimates a scalar user_state_score representing
+the user's current interaction state (e.g., stress, load, or related
 behavioral effects) based on recent feature windows.
 
 Model progression:
@@ -36,6 +36,7 @@ class ModelType(Enum):
     RULE_BASED = "rule_based"
     ML_CLASSIFIER = "ml_classifier"
     SEQUENCE_MODEL = "sequence_model"
+
 
 METRIC_KEYGROUPS = {
     "pupil_diameter": {
@@ -103,7 +104,11 @@ class ReactiveTool:
     Estimates user state from eye-tracking features.
     """
     BASELINE_SCORE_METRIC = "cognitive_load_score"
-    
+    IPA_FALLBACK_LO = 0.25
+    IPA_FALLBACK_HI = 2.5
+    PROACTIVE_IPA_CONFIDENCE = 0.7
+    BASELINE_WARMUP_SECONDS = 20.0
+
     def __init__(
         self,
         config: Optional[ReactiveToolConfig] = None,
@@ -111,7 +116,7 @@ class ReactiveTool:
     ):
         """
         Initialize the Reactive Tool.
-        
+
         Args:
             config: Configuration for reactive tool parameters.
             logger: Logger instance for recording events.
@@ -138,24 +143,24 @@ class ReactiveTool:
             from backend.services.logger_service import get_logger
             logger = get_logger()
         self._logger = logger
-    
+
     def configure(self, config: ReactiveToolConfig) -> None:
         """
         Update reactive tool configuration.
-        
+
         Args:
             config: New configuration to apply.
         """
         self._config = config
-    
+
     def start(self) -> None:
         """Start state estimation."""
         self._is_running = True
-    
+
     def stop(self) -> None:
         """Stop state estimation."""
         self._is_running = False
-    
+
     def reset(self) -> None:
         """Reset internal state, sliding window, and baseline."""
         self._feature_window.clear()
@@ -168,6 +173,12 @@ class ReactiveTool:
         self._baseline_samples = {}
         self._baseline_feature_windows = []
         self._feedback_trigger_bounds = None
+
+    def _is_past_baseline_warmup(self) -> bool:
+        """Return True if the baseline warmup period has elapsed."""
+        if not self._is_recording_baseline:
+            return False
+        return (time.time() - self._baseline_start_time) >= self.BASELINE_WARMUP_SECONDS
 
     # --- Baseline calibration methods ---
 
@@ -186,12 +197,15 @@ class ReactiveTool:
             "fixation_duration_ms": [],
             "anticipation_velocity": [],
             "perceived_difficulty_std": [],
-            "ipi": [],  # Information Processing Index from crunchwiz
-            self.BASELINE_SCORE_METRIC: [],  # Final score used for delivery triggering
+            "ipi": [],
+            self.BASELINE_SCORE_METRIC: [],
         }
         self._logger.system(
             "baseline_recording_started",
-            {"participant_id": participant_id},
+            {
+                "participant_id": participant_id,
+                "warmup_seconds_skipped": self.BASELINE_WARMUP_SECONDS,
+            },
             level="INFO"
         )
 
@@ -231,7 +245,11 @@ class ReactiveTool:
         if not metrics:
             self._logger.system(
                 "baseline_recording_failed",
-                {"participant_id": participant_id, "reason": "insufficient_data"},
+                {
+                    "participant_id": participant_id,
+                    "reason": "insufficient_data",
+                    "warmup_seconds_skipped": self.BASELINE_WARMUP_SECONDS,
+                },
                 level="ERROR"
             )
             return None
@@ -249,6 +267,10 @@ class ReactiveTool:
             {
                 "participant_id": participant_id,
                 "duration_seconds": round(duration, 1),
+                "effective_sampling_seconds": round(
+                    max(0.0, duration - self.BASELINE_WARMUP_SECONDS), 1
+                ),
+                "warmup_seconds_skipped": self.BASELINE_WARMUP_SECONDS,
                 "metrics": {
                     k: {
                         "mean": round(v.mean, 4),
@@ -256,7 +278,8 @@ class ReactiveTool:
                         "p02_5": round(v.p02_5, 4) if v.p02_5 is not None else None,
                         "p97_5": round(v.p97_5, 4) if v.p97_5 is not None else None,
                     }
-                           for k, v in metrics.items()},
+                    for k, v in metrics.items()
+                },
             },
             level="INFO"
         )
@@ -408,31 +431,36 @@ class ReactiveTool:
     def set_model_type(self, model_type: ModelType) -> None:
         """
         Set the type of model to use for estimation.
-        
+
         Args:
             model_type: The model type to use.
         """
         self._model_type = model_type
-    
+
     def load_model(self, model_path: str) -> bool:
         """
         Load a trained ML model for state estimation.
-        
+
         Args:
             model_path: Path to the model file.
-            
+
         Returns:
             True if model loaded successfully.
         """
         pass  # TODO: Implement model loading
-    
+
     def add_features(self, features: WindowFeatures) -> None:
         """
         Add new window-based features and keep only features
         within the last window_size_seconds (e.g. last 60s).
         """
-        if self._is_recording_baseline and not getattr(features, "is_predicted", False):
-            # Keep observed baseline windows so we can rescore them after baseline is set.
+        if (
+            self._is_recording_baseline
+            and not getattr(features, "is_predicted", False)
+            and self._is_past_baseline_warmup()
+        ):
+            # Keep only post-warmup observed baseline windows
+            # so startup transients do not affect calibration.
             self._baseline_feature_windows.append(features)
 
         self._feature_window.append(features)
@@ -491,7 +519,7 @@ class ReactiveTool:
             scores.append(float(smoothed))
 
         return scores
-    
+
     def estimate(self) -> Optional[UserStateEstimate]:
         """
         Compute current user state score from the sliding window.
@@ -502,7 +530,6 @@ class ReactiveTool:
         windows = list(self._feature_window)
         if len(windows) < 3:
             return None
-    
 
         # --- compute raw score ---
         if self._model_type == ModelType.RULE_BASED:
@@ -520,7 +547,11 @@ class ReactiveTool:
         score = self._smooth_score(raw_score)
 
         # Keep a baseline distribution of the final score used by delivery trigger logic.
-        if self._is_recording_baseline and self.BASELINE_SCORE_METRIC in self._baseline_samples:
+        if (
+            self._is_recording_baseline
+            and self._is_past_baseline_warmup()
+            and self.BASELINE_SCORE_METRIC in self._baseline_samples
+        ):
             self._baseline_samples[self.BASELINE_SCORE_METRIC].append(score)
 
         confidence = self._compute_confidence(windows, score)
@@ -564,11 +595,11 @@ class ReactiveTool:
                     pass
 
         return estimate
-    
+
     def get_current_score(self) -> Optional[UserStateScore]:
         """
         Get the current user state score.
-        
+
         Returns:
             Current score or None if not available.
         """
@@ -579,54 +610,120 @@ class ReactiveTool:
     def get_latest_estimate(self) -> Optional[UserStateEstimate]:
         """Return the latest computed estimate without side effects."""
         return self._current_estimate
-    
+
+    def normalize_ipa_against_baseline(self, ipa_value: float) -> float:
+        """
+        Normalize IPA to score space using the same baseline-aware logic as rule-based scoring.
+        """
+        score = self._normalize_metric(
+            "ipa",
+            float(ipa_value),
+            fallback_lo=self.IPA_FALLBACK_LO,
+            fallback_hi=self.IPA_FALLBACK_HI,
+        )
+        return float(max(0.0, min(1.0, score)))
+
+    def estimate_from_predicted_ipa(
+        self,
+        predicted_ipa: float,
+        timestamp: float,
+        source_window_id: Optional[str] = None,
+        forecast_id: Optional[str] = None,
+        normalize_against_baseline: bool = True,
+    ) -> UserStateEstimate:
+        """
+        Build a proactive IPA-only estimate.
+
+        Observed reactive scoring still uses the multi-metric pipeline in estimate().
+        This path is additive for forecasted IPA-only proactive use.
+        """
+        ipa_raw = float(predicted_ipa)
+
+        if normalize_against_baseline:
+            raw_score = self.normalize_ipa_against_baseline(ipa_raw)
+        else:
+            raw_score = float(max(0.0, min(1.0, ipa_raw)))
+
+        score = self._smooth_score(raw_score)
+
+        result = UserStateScore(
+            score=score,
+            confidence=self.PROACTIVE_IPA_CONFIDENCE,
+            state_type=UserStateType.COGNITIVE_LOAD,
+        )
+
+        estimate = UserStateEstimate(
+            timestamp=float(timestamp),
+            score=result,
+            contributing_features={
+                "ipa_raw": round(ipa_raw, 6),
+                "ipa_score": round(raw_score, 6),
+            },
+            model_version=None,
+            model_type="ipa_forecast",
+            metadata={
+                "raw_score": raw_score,
+                "source_type": "predicted_ipa",
+                "forecast_id": forecast_id,
+                "source_window_id": source_window_id,
+                "using_baseline": self.has_baseline() if normalize_against_baseline else False,
+                "normalize_against_baseline": bool(normalize_against_baseline),
+            },
+            source_window_id=source_window_id,
+            forecast_id=forecast_id,
+            source_type="predicted_ipa",
+        )
+
+        self._current_estimate = estimate
+        return estimate
+
     def get_score_history(self, n_samples: int = 10) -> List[float]:
         """
         Get recent history of scores.
-        
+
         Args:
             n_samples: Number of recent samples to return.
-            
+
         Returns:
             List of recent scores.
         """
         return list(self._score_history)[-n_samples:]
-    
+
     def register_output_callback(
         self, callback: Callable[[UserStateEstimate], None]
     ) -> None:
         """
         Register a callback to receive state estimates.
-        
+
         Args:
             callback: Function to call with estimates.
         """
         if callback not in self._output_callbacks:
             self._output_callbacks.append(callback)
-    
+
     def unregister_output_callback(
         self, callback: Callable[[UserStateEstimate], None]
     ) -> None:
         """
         Unregister a previously registered callback.
-        
+
         Args:
             callback: The callback function to remove.
         """
         if callback in self._output_callbacks:
             self._output_callbacks.remove(callback)
-    
+
     def update_thresholds(self, thresholds: dict) -> None:
         """
         Update rule-based thresholds.
-        
+
         Args:
             thresholds: Dictionary of threshold values.
         """
         self._config.thresholds.update(thresholds)
-    
+
     # --- Internal methods ---
-    
+
     def _estimate_rule_based(self, windows: List[WindowFeatures]) -> float:
         """
         Estimate user state using rule-based heuristics with strict 5 equal-weight metrics.
@@ -663,7 +760,12 @@ class ReactiveTool:
             if ipa_series:
                 mean_ipa = sum(ipa_series) / len(ipa_series)
                 raw_values["ipa"] = mean_ipa
-                score = self._normalize_metric("ipa", mean_ipa, fallback_lo=0.5, fallback_hi=2.5)
+                score = self._normalize_metric(
+                    "ipa",
+                    mean_ipa,
+                    fallback_lo=self.IPA_FALLBACK_LO,
+                    fallback_hi=self.IPA_FALLBACK_HI,
+                )
                 components["ipa"] = score
 
         # --- 2. Fixation Duration (weight 0.2) ---
@@ -674,7 +776,12 @@ class ReactiveTool:
             if dur_series:
                 mean_dur = sum(dur_series) / len(dur_series)
                 raw_values["fixation_duration_ms"] = mean_dur
-                score = self._normalize_metric("fixation_duration_ms", mean_dur, fallback_lo=150.0, fallback_hi=500.0)
+                score = self._normalize_metric(
+                    "fixation_duration_ms",
+                    mean_dur,
+                    fallback_lo=150.0,
+                    fallback_hi=500.0,
+                )
                 components["fixation_duration"] = score
 
         # --- 3. Anticipation - Saccade Velocity (weight 0.2) ---
@@ -685,28 +792,33 @@ class ReactiveTool:
             if vel_series:
                 mean_vel = sum(vel_series) / len(vel_series)
                 raw_values["anticipation_velocity"] = mean_vel
-                score = self._normalize_metric("anticipation_velocity", mean_vel, fallback_lo=1.0, fallback_hi=5.0)
+                score = self._normalize_metric(
+                    "anticipation_velocity",
+                    mean_vel,
+                    fallback_lo=1.0,
+                    fallback_hi=5.0,
+                )
                 components["anticipation"] = score
 
         # --- 4. Perceived Difficulty - Saccade Velocity Variability (weight 0.2) ---
-        # Compute std of mean velocities across windows (aggregated approach)
         if "saccade_amplitude" in enabled:
             vel_series = self._metric_series(
                 windows, METRIC_KEYGROUPS["saccade_amplitude"]["load"]["mean_velocity"]
             )
             if len(vel_series) >= 2:
-                # Compute std of velocities across windows
                 mean_vel = sum(vel_series) / len(vel_series)
                 variance = sum((v - mean_vel) ** 2 for v in vel_series) / len(vel_series)
                 velocity_std = math.sqrt(variance)
                 raw_values["perceived_difficulty_std"] = velocity_std
-                score = self._normalize_metric("perceived_difficulty_std", velocity_std, fallback_lo=0.5, fallback_hi=10.0)
+                score = self._normalize_metric(
+                    "perceived_difficulty_std",
+                    velocity_std,
+                    fallback_lo=0.5,
+                    fallback_hi=10.0,
+                )
                 components["perceived_difficulty"] = score
 
         # --- 5. Information Processing Index (weight 0.2) ---
-        # Uses IPI from signal processing (crunchwiz formula)
-        # IPI = count(short_fix_short_sac) / count(long_fix_short_sac)
-        # Higher IPI = rapid scanning, Lower IPI = deeper processing
         if "ipi" in enabled:
             ipi_series = self._metric_series(
                 windows, METRIC_KEYGROUPS["ipi"]["load"]["value"]
@@ -716,8 +828,17 @@ class ReactiveTool:
                 raw_values["ipi"] = mean_ipi
                 # Lower IPI indicates deeper processing (higher cognitive load)
                 # So we invert: high IPI (scanning) = low load, low IPI (focused) = high load
-                score = 1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0)
+                score = 1.0 - self._normalize_metric(
+                    "ipi",
+                    mean_ipi,
+                    fallback_lo=0.5,
+                    fallback_hi=2.0,
+                )
                 components["ipi"] = score
+
+        if len(components) == 1 and "ipa" in components:
+            # If only IPA is available, use it as the sole metric (still normalized to 0-1)
+            return float(max(0.0, min(1.0, components["ipa"])))
 
         expected_components = [
             "ipa",
@@ -731,11 +852,12 @@ class ReactiveTool:
                 components[name] = 0.5
                 missing_metrics.append(name)
 
-        # Record samples if in baseline recording mode
-        if self._is_recording_baseline:
+        # Record samples if in baseline recording mode, but skip startup warmup
+        if self._is_recording_baseline and self._is_past_baseline_warmup():
             for metric_name, value in raw_values.items():
                 if metric_name in self._baseline_samples:
                     self._baseline_samples[metric_name].append(value)
+
         # Strict equal weighting: each of 5 components contributes exactly 0.2
         score = (
             0.2 * components["ipa"]
@@ -789,42 +911,42 @@ class ReactiveTool:
 
         # Fallback to static ramp
         return self._ramp(value, lo=fallback_lo, hi=fallback_hi)
-    
+
     def _estimate_ml_classifier(
         self, features: List[WindowFeatures]
     ) -> Optional[float]:
         """
         Estimate user state using ML classifier.
-        
+
         Args:
             features: Feature window for estimation.
-            
+
         Returns:
             Computed user state score.
         """
         pass  # TODO: Implement ML-based estimation
-    
+
     def _estimate_sequence_model(
         self, features: List[WindowFeatures]
     ) -> Optional[float]:
         """
         Estimate user state using sequence model.
-        
+
         Args:
             features: Feature window for estimation.
-            
+
         Returns:
             Computed user state score.
         """
         pass  # TODO: Implement sequence model estimation
-    
+
     def _smooth_score(self, raw_score: float) -> float:
         """
         Apply exponential moving average smoothing to score.
-        
+
         Args:
             raw_score: Unsmoothed score value.
-            
+
         Returns:
             Smoothed score value.
         """
@@ -854,11 +976,11 @@ class ReactiveTool:
             self._score_history.popleft()
 
         return float(max(0.0, min(1.0, smoothed)))
-        
+
     def _compute_confidence(self, windows: List[WindowFeatures], score: float) -> float:
         """
         Compute confidence in the current estimate.
-        
+
         Args:
             windows: Recent feature windows.
             score: Current user state score.
@@ -877,7 +999,7 @@ class ReactiveTool:
                 dq["valid_ratio_both"],
                 dq["valid_ratio_left"],
                 dq["valid_ratio_right"],
-        ])
+            ])
         if "pupil_diameter" in enabled:
             ratio_keys.extend([
                 METRIC_KEYGROUPS["pupil_diameter"]["quality"]["valid_ratio"],
@@ -915,7 +1037,7 @@ class ReactiveTool:
 
         conf = 0.5 * dq + 0.3 * qty + 0.2 * stability
         return float(max(0.0, min(1.0, conf)))
-    
+
     def _extract_contributing_features(
         self, features: List[WindowFeatures]
     ) -> dict:
@@ -940,7 +1062,13 @@ class ReactiveTool:
                 mean_ipa = sum(ipa_series) / len(ipa_series)
                 contribs["ipa_raw"] = round(mean_ipa, 4)
                 contribs["ipa_score"] = round(
-                    self._normalize_metric("ipa", mean_ipa, fallback_lo=0.5, fallback_hi=2.5), 3
+                    self._normalize_metric(
+                        "ipa",
+                        mean_ipa,
+                        fallback_lo=self.IPA_FALLBACK_LO,
+                        fallback_hi=self.IPA_FALLBACK_HI,
+                    ),
+                    3,
                 )
 
         # --- 2. Fixation Duration ---
@@ -952,7 +1080,13 @@ class ReactiveTool:
                 mean_dur = sum(dur_series) / len(dur_series)
                 contribs["fixation_duration_ms"] = round(mean_dur, 1)
                 contribs["fixation_duration_score"] = round(
-                    self._normalize_metric("fixation_duration_ms", mean_dur, fallback_lo=150.0, fallback_hi=500.0), 3
+                    self._normalize_metric(
+                        "fixation_duration_ms",
+                        mean_dur,
+                        fallback_lo=150.0,
+                        fallback_hi=500.0,
+                    ),
+                    3,
                 )
 
         # --- 3. Anticipation (Saccade Velocity) ---
@@ -964,7 +1098,13 @@ class ReactiveTool:
                 mean_vel = sum(vel_series) / len(vel_series)
                 contribs["anticipation_velocity"] = round(mean_vel, 4)
                 contribs["anticipation_score"] = round(
-                    self._normalize_metric("anticipation_velocity", mean_vel, fallback_lo=1.0, fallback_hi=5.0), 3
+                    self._normalize_metric(
+                        "anticipation_velocity",
+                        mean_vel,
+                        fallback_lo=1.0,
+                        fallback_hi=5.0,
+                    ),
+                    3,
                 )
 
         # --- 4. Perceived Difficulty (Saccade Velocity Std across windows) ---
@@ -978,7 +1118,13 @@ class ReactiveTool:
                 velocity_std = math.sqrt(variance)
                 contribs["perceived_difficulty_std"] = round(velocity_std, 4)
                 contribs["perceived_difficulty_score"] = round(
-                    self._normalize_metric("perceived_difficulty_std", velocity_std, fallback_lo=0.5, fallback_hi=10.0), 3
+                    self._normalize_metric(
+                        "perceived_difficulty_std",
+                        velocity_std,
+                        fallback_lo=0.5,
+                        fallback_hi=10.0,
+                    ),
+                    3,
                 )
 
         # --- 5. Information Processing Index (from signal processing) ---
@@ -991,7 +1137,13 @@ class ReactiveTool:
                 contribs["ipi_raw"] = round(mean_ipi, 4)
                 # Inverted: low IPI = high load
                 contribs["ipi_score"] = round(
-                    1.0 - self._normalize_metric("ipi", mean_ipi, fallback_lo=0.5, fallback_hi=2.0), 3
+                    1.0 - self._normalize_metric(
+                        "ipi",
+                        mean_ipi,
+                        fallback_lo=0.5,
+                        fallback_hi=2.0,
+                    ),
+                    3
                 )
 
         return contribs
@@ -1000,13 +1152,12 @@ class ReactiveTool:
     # Utilities - AI GENERATED CODE
     # ----------------------------
 
-
     def _enabled(self, windows: List[WindowFeatures]) -> List[str]:
         """
         Get list of enabled metrics from the latest window.
         Args:
             windows: List of recent feature windows.
-        
+
         Returns:
             List of enabled metric names.
         """
@@ -1020,11 +1171,10 @@ class ReactiveTool:
         Args:
             windows: List of recent feature windows.
             key: Metric key to extract.
-        
+
         Returns:
             List of metric values.
         """
-
         out: List[float] = []
         for wf in windows:
             if not wf.features or key not in wf.features:
@@ -1053,7 +1203,6 @@ class ReactiveTool:
         if x >= hi:
             return 1.0
         return float((x - lo) / (hi - lo))
-
 
     def _avg_valid_ratio(self, windows: List["WindowFeatures"]) -> float:
         vals = []

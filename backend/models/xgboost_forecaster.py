@@ -18,12 +18,12 @@ except ImportError:
 
 DEFAULT_INPUT_COLUMNS = [
     "pupil_ipa",
-    "fixation_mean_duration_ms",
+    # "fixation_mean_duration_ms",
 ]
 
 DEFAULT_TARGET_COLUMNS = [
     "pupil_ipa",
-    "fixation_mean_duration_ms",
+    # "fixation_mean_duration_ms",
 ]
 
 

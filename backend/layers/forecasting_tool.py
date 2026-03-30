@@ -216,9 +216,33 @@ class ForecastingTool:
         self._feature_history.append(features)
 
     def _trim_history(self, latest_window_end: float) -> None:
-        cutoff_time = latest_window_end - self._config.history_window_seconds
+        # Keep time-based retention, but never below model-required history windows.
+        min_seconds = float(self._config.history_window_seconds)
+        required_windows = self._compute_required_history()
+
+        if required_windows > 1 and len(self._feature_history) >= 2:
+            step_seconds = self._estimate_window_step_seconds()
+            if step_seconds > 0.0:
+                required_seconds = (required_windows - 1) * step_seconds
+                min_seconds = max(min_seconds, required_seconds)
+
+        cutoff_time = latest_window_end - min_seconds
         while self._feature_history and self._feature_history[0].window_end < cutoff_time:
             self._feature_history.popleft()
+
+    def _estimate_window_step_seconds(self) -> float:
+        if len(self._feature_history) < 2:
+            return 0.0
+
+        latest = self._feature_history[-1]
+        prev = self._feature_history[-2]
+
+        step = float(latest.window_end - prev.window_end)
+        if step > 0.0:
+            return step
+
+        duration = float(latest.window_end - latest.window_start)
+        return duration if duration > 0.0 else 0.0
 
     def _prepare_input_sequence(self) -> Optional[List[WindowFeatures]]:
         required_history = self._compute_required_history()

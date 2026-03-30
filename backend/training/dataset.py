@@ -33,13 +33,13 @@ PREDICTION_HORIZON = 20
 DEFAULT_INPUT_COLUMNS = [
     "pupil_ipa",
     "fixation_mean_duration_ms",
+    "blink_rate_per_min",
+    "saccade_count",
 ]
 
 DEFAULT_TARGET_COLUMNS = [
-    "pupil_ipa",
-    "fixation_mean_duration_ms",
+    "pupil_ipa"
 ]
-
 DEFAULT_ENABLED_METRICS = [
     "fixation_duration",
     "saccade_amplitude",
