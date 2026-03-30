@@ -4,12 +4,16 @@ Eye Tracker Adapter Factory
 Creates and configures eye tracker adapters based on system configuration.
 """
 import asyncio
+from logging import config
+from pathlib import Path
+import time
 from typing import Optional
 
 from backend.services.eye_tracker.base import EyeTrackerAdapter
 from backend.services.eye_tracker.replay_adapter import ReplayEyeTrackerAdapter
 from backend.services.eye_tracker.simulated_adapter import SimulatedEyeTrackerAdapter
 from backend.services.eye_tracker.tobii_pro_adapter import TobiiProEyeTrackerAdapter
+from backend.services.eye_tracker.tobii_replay_adapter import TobiiReplayAdapter
 from backend.types.config import SystemConfig
 from backend.services.logger_service import get_logger
 
@@ -104,11 +108,49 @@ def create_eye_tracker_adapter(
             {"type": "tobii"},
             level="INFO"
         )
-        
+
+    elif mode.upper() == "TOBII_RECORD":
+        adapter = TobiiProEyeTrackerAdapter(
+            batch_size=batch_size,
+            flush_interval_ms=flush_interval_ms,
+            loop=loop,
+        )
+        logger.system(
+            "eye_tracker_adapter_created",
+            {"type": "tobii_record"},
+            level="INFO"
+        )
+    
+        from pathlib import Path
+
+        base = Path(config.eye_tracker.filepath)
+        timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+
+        if base.suffix:
+            record_path = base.with_name(f"{base.stem}_{timestamp}_RECORD.tsv")
+        else:
+            base.mkdir(parents=True, exist_ok=True)   # ← viktig
+            record_path = base / f"{timestamp}_RECORD.tsv"
+
+        # also ensure parent exists if suffix case
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+
+        adapter.start_recording(str(record_path))
+
+    elif mode.upper() == "TOBII_REPLAY":
+
+        adapter = TobiiReplayAdapter(
+            file_path=config.eye_tracker.filepath,
+            batch_size=batch_size,
+            flush_interval_ms=flush_interval_ms,
+            fast_forward=config.eye_tracker.fast_forward,
+            loop=loop
+        )
+            
     else:
         error_msg = (
             f"Invalid eye tracker mode: {mode}. "
-            f"Valid modes are: SIMULATED, REPLAY, TOBII"
+            f"Valid modes are: SIMULATED, REPLAY, TOBII, TOBII_RECORD"
         )
         logger.system(
             "eye_tracker_adapter_invalid_mode",

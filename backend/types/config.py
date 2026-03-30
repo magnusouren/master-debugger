@@ -258,6 +258,9 @@ class EyeTrackerConfig:
     # Simulated mode settings
     simulated_sampling_rate_hz: float = 120.0
 
+    fast_forward: bool = False  # For replay mode, whether to fast-forward through data
+    use_system_timestamps: bool = False  # For replay mode, whether to use system
+
 
 @dataclass
 class ControllerConfig:
