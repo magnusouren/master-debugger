@@ -205,6 +205,9 @@ class TobiiReplayAdapter(EyeTrackerAdapter):
 
                     last_flush = now
 
+                    if self._fast_forward:
+                        await asyncio.sleep(0)
+
             if self._buffer and self._samples_callback:
 
                 self._samples_callback(self._buffer.copy())

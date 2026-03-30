@@ -186,6 +186,9 @@ class ReplayEyeTrackerAdapter(EyeTrackerAdapter):
                     self._samples_callback(batch)
                     last_flush_time = current_time
 
+                    if self._fast_forward:
+                        await asyncio.sleep(0)
+
             if self._buffer and self._samples_callback:
                 self._samples_callback(self._buffer.copy())
                 self._buffer.clear()

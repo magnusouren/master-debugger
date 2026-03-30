@@ -405,6 +405,10 @@ class ReactiveTool:
         """Check if baseline recording is currently active."""
         return self._is_recording_baseline
 
+    def get_recorded_baseline_window_count(self) -> int:
+        """Return how many observed windows have been recorded for baseline."""
+        return len(self._baseline_feature_windows)
+
     def set_model_type(self, model_type: ModelType) -> None:
         """
         Set the type of model to use for estimation.

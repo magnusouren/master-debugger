@@ -33,8 +33,9 @@ def build_config(replay_file: Path, config_path: str) -> SystemConfig:
 
     cfg.forecasting.min_confidence_threshold = 0.0
 
-    # Keep replay paced so calibration has real data at the beginning.
-    cfg.eye_tracker.fast_forward = False
+    # Calibration is window-driven now, so replay can run as fast as the
+    # pipeline can consume it.
+    cfg.eye_tracker.fast_forward = True
 
     return cfg
 
@@ -61,7 +62,7 @@ async def run_single(
 
         if isinstance(rc._eye_tracker_adapter, TobiiReplayAdapter):
 
-            rc._eye_tracker_adapter._fast_forward = False
+            rc._eye_tracker_adapter._fast_forward = True
 
             rc._eye_tracker_adapter._batch_size = 500
 
@@ -78,10 +79,11 @@ async def run_single(
             participant_id
         )
 
-        # Wait for automatic baseline calibration (5s settling + configured duration),
+        # Wait until automatic baseline calibration has consumed enough windows,
         # then switch to proactive mode for the remaining replay.
-        calibration_wait_seconds = 5.0 + max(0.0, cfg.controller.calibration_duration_seconds)
-        await asyncio.sleep(calibration_wait_seconds)
+        baseline_ready = await rc.wait_for_baseline_calibration()
+        if not baseline_ready:
+            print(f"[WARN] Baseline calibration did not complete cleanly for {replay_file.name}")
         if rc.get_operation_mode() != OperationMode.PROACTIVE:
             rc.set_operation_mode(OperationMode.PROACTIVE)
 
@@ -93,8 +95,7 @@ async def run_single(
 
             await adapter._stream_task
 
-        # Give runtime time to process last windows.
-        await asyncio.sleep(2.0)
+        await rc.wait_for_background_tasks()
 
         await rc.end_experiment()
 

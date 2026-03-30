@@ -14,6 +14,7 @@ Responsibilities:
 - Logging and experiment control
 """
 import contextlib
+import math
 from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime, timezone
 import asyncio
@@ -25,7 +26,7 @@ from backend.layers.reactive_tool import ReactiveTool
 from backend.layers.feedback_layer import FeedbackLayer
 from backend.services.logger_service import get_logger
 from backend.services.eye_tracker.factory import create_eye_tracker_adapter
-from backend.services.eye_tracker.base import EyeTrackerAdapter
+from backend.services.eye_tracker.base import EyeTrackerAdapter, AdapterState
 from backend.types.code_context import CodeContext
 from backend.types.config import OperationMode, SystemConfig
 from backend.types.eye_tracking import PredictedFeatures, WindowFeatures, GazeSample
@@ -131,6 +132,10 @@ class RuntimeController:
         
         # main loop
         self._main_loop_task: Optional[asyncio.Task] = None
+        self._baseline_calibration_task: Optional[asyncio.Task] = None
+        self._observed_window_count: int = 0
+        self._observed_window_event: asyncio.Event = asyncio.Event()
+        self._eye_tracker_stream_started_event: asyncio.Event = asyncio.Event()
 
         # Log initialization complete
         self._logger.system(
@@ -189,12 +194,19 @@ class RuntimeController:
         if self._eye_tracker_adapter:
             with contextlib.suppress(Exception):
                 await self.disconnect_eye_tracker()
+        self._eye_tracker_stream_started_event.clear()
 
         # Cancel feedback generation task if running
         if self._feedback_generation_task and not self._feedback_generation_task.done():
             self._feedback_generation_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._feedback_generation_task
+
+        if self._baseline_calibration_task and not self._baseline_calibration_task.done():
+            self._baseline_calibration_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._baseline_calibration_task
+        self._baseline_calibration_task = None
 
         if self._main_loop_task:
             self._main_loop_task.cancel()
@@ -370,6 +382,7 @@ class RuntimeController:
                 level="ERROR"
             )
             self._eye_tracker_connected = False
+            self._eye_tracker_stream_started_event.clear()
             
             # Publish status update
             self._publish(DomainEvent(
@@ -395,6 +408,7 @@ class RuntimeController:
             self._signal_processing.stop()
             
             self._eye_tracker_connected = False
+            self._eye_tracker_stream_started_event.clear()
             
             self._logger.system(
                 "eye_tracker_disconnected",
@@ -645,6 +659,61 @@ class RuntimeController:
         if self._experiment_start_time is None:
             return None
         return max(0.0, timestamp - self._experiment_start_time)
+
+    def _get_feature_output_rate_hz(self) -> float:
+        configured_hz = float(getattr(self._config.signal_processing, "output_frequency_hz", 0.0) or 0.0)
+        if configured_hz > 0:
+            return configured_hz
+
+        advance_seconds = (
+            float(self._config.signal_processing.window_length_seconds)
+            * (1.0 - float(self._config.signal_processing.window_overlap_ratio))
+        )
+        if advance_seconds > 0:
+            return 1.0 / advance_seconds
+
+        return 1.0
+
+    def _seconds_to_window_target(self, duration_seconds: float) -> int:
+        if duration_seconds <= 0:
+            return 0
+        return max(1, int(math.ceil(duration_seconds * self._get_feature_output_rate_hz())))
+
+    def _is_eye_tracker_streaming(self) -> bool:
+        if self._eye_tracker_adapter is None:
+            return False
+        return self._eye_tracker_adapter.get_state() == AdapterState.STREAMING
+
+    async def _wait_for_observed_window_target(self, target_count: int) -> bool:
+        """
+        Wait until the observed feature-window counter reaches a target.
+
+        Returns:
+            True if the target was reached, False if the experiment stopped or
+            the eye-tracker stream ended before enough windows arrived.
+        """
+        while self._experiment_is_active:
+            current_count = self._observed_window_count
+            if current_count >= target_count:
+                return True
+
+            if not self._eye_tracker_stream_started_event.is_set():
+                await self._eye_tracker_stream_started_event.wait()
+                continue
+
+            if not self._is_eye_tracker_streaming():
+                return False
+
+            self._observed_window_event.clear()
+            if self._observed_window_count >= target_count:
+                return True
+
+            if not self._is_eye_tracker_streaming():
+                return False
+
+            await self._observed_window_event.wait()
+
+        return False
     
     # --- Feedback Control ---
     
@@ -991,39 +1060,63 @@ class RuntimeController:
         """
         Automatic baseline calibration sequence.
 
-        Waits 5 seconds, then records baseline for the amount of seconds specified.
+        Waits for enough observed feature windows to arrive, then records
+        baseline until the configured window target has been collected.
         """
+        original_cooldown = self._config.controller.feedback_cooldown_seconds
         try:
-            # Wait 5 seconds for things to settle
+            settle_seconds = max(0.0, float(self._config.controller.calibration_settle_seconds))
+            settle_window_target = self._seconds_to_window_target(settle_seconds)
+            recording_window_target = self._seconds_to_window_target(duration_seconds)
+            feature_rate_hz = self._get_feature_output_rate_hz()
+
             self._logger.system(
                 "baseline_calibration_waiting",
                 {
-                    "wait_seconds": 5, 
+                    "wait_seconds": settle_seconds,
+                    "wait_window_target": settle_window_target,
+                    "feature_output_rate_hz": feature_rate_hz,
                     "participant_id": self._participant_id,
                     "experiment_id": self._experiment_id,
                 },
                 level="INFO"
             )
-            original_cooldown = self._config.controller.feedback_cooldown_seconds
-            self.set_feedback_cooldown(duration_seconds + original_cooldown)
+            self.set_feedback_cooldown(settle_seconds + duration_seconds + original_cooldown)
 
-            await asyncio.sleep(5)
-
-            # Check if experiment is still active
             if not self._experiment_is_active:
                 return
+
+            if settle_window_target > 0:
+                settle_reached = await self._wait_for_observed_window_target(
+                    self._observed_window_count + settle_window_target
+                )
+                if not settle_reached:
+                    self._logger.system(
+                        "baseline_calibration_failed",
+                        {
+                            "reason": "stream_ended_before_settle_target",
+                            "participant_id": self._participant_id,
+                            "experiment_id": self._experiment_id,
+                            "wait_window_target": settle_window_target,
+                            "observed_windows": self._observed_window_count,
+                        },
+                        level="ERROR",
+                    )
+                    self._status = SystemStatus.ERROR
+                    return
 
             # Start baseline recording
             self._status = SystemStatus.CALIBRATING
             self._reactive_tool.start_baseline_recording(self._participant_id)
 
-            # Record for the specified duration
             self._logger.system(
                 "baseline_calibration_recording",
                 {
-                    "duration_seconds": duration_seconds, 
+                    "duration_seconds": duration_seconds,
+                    "recording_window_target": recording_window_target,
+                    "feature_output_rate_hz": feature_rate_hz,
                     "participant_id": self._participant_id,
-                    "experiment_id": self._experiment_id,   
+                    "experiment_id": self._experiment_id,
                 },
                 level="INFO"
             )
@@ -1031,19 +1124,38 @@ class RuntimeController:
             self._logger.experiment(
                 "baseline_calibration_recording",
                 {
-                    "duration_seconds": duration_seconds, 
+                    "duration_seconds": duration_seconds,
+                    "recording_window_target": recording_window_target,
+                    "feature_output_rate_hz": feature_rate_hz,
                 },
                 level="INFO"
             )
-            await asyncio.sleep(duration_seconds)
 
-            # Check if experiment is still active
+            recording_reached = True
+            if recording_window_target > 0:
+                recording_reached = await self._wait_for_observed_window_target(
+                    self._observed_window_count + recording_window_target
+                )
+
             if not self._experiment_is_active:
                 return
 
             # Stop baseline recording
             baseline = self._reactive_tool.stop_baseline_recording(self._participant_id)
             calibrated_bounds = None
+
+            if not recording_reached:
+                self._logger.system(
+                    "baseline_calibration_recording_ended_early",
+                    {
+                        "reason": "stream_ended_before_window_target",
+                        "recording_window_target": recording_window_target,
+                        "recorded_windows": self._reactive_tool.get_recorded_baseline_window_count(),
+                        "participant_id": self._participant_id,
+                        "experiment_id": self._experiment_id,
+                    },
+                    level="WARNING",
+                )
 
             if baseline:
                 self._reactive_observer.set_baseline(baseline)
@@ -1133,7 +1245,9 @@ class RuntimeController:
                 {"participant_id": self._participant_id, "experiment_id": self._experiment_id},
                 level="INFO"
             )
-            self._status = SystemStatus.ERROR
+            if self._experiment_is_active:
+                self._status = SystemStatus.ERROR
+            raise
 
         except Exception as e:
             self._logger.system(
@@ -1142,6 +1256,10 @@ class RuntimeController:
                 level="ERROR"
             )
             self._status = SystemStatus.ERROR
+        finally:
+            current_cooldown = self._config.controller.feedback_cooldown_seconds
+            if self._experiment_is_active and current_cooldown != original_cooldown:
+                self.set_feedback_cooldown(original_cooldown)
 
     def start_baseline_recording(self, participant_id: str) -> None:
         """
@@ -1178,6 +1296,37 @@ class RuntimeController:
     def has_baseline(self) -> bool:
         """Check if a valid baseline is loaded."""
         return self._reactive_tool.has_baseline()
+
+    async def wait_for_baseline_calibration(self) -> bool:
+        """
+        Wait for the automatic baseline calibration task, if one is active.
+
+        Returns:
+            True when calibration finished without task errors. False when the
+            experiment ended before calibration could complete.
+        """
+        task = self._baseline_calibration_task
+        if task is None:
+            return True
+
+        if not task.done():
+            await task
+
+        return (
+            not task.cancelled()
+            and self._experiment_is_active
+            and self._status != SystemStatus.ERROR
+        )
+
+    async def wait_for_background_tasks(self) -> None:
+        """Wait for controller-owned async background tasks to settle."""
+        if self._baseline_calibration_task and not self._baseline_calibration_task.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._baseline_calibration_task
+
+        if self._feedback_generation_task and not self._feedback_generation_task.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._feedback_generation_task
 
     # --- Data Flow Callbacks ---
     
@@ -1227,6 +1376,9 @@ class RuntimeController:
         Args:
             features: Computed window features.
         """
+        self._observed_window_count += 1
+        self._observed_window_event.set()
+
         features.window_id = features.window_id or self._next_window_id()
         features.is_predicted = False
         features.forecast_id = None
@@ -1421,10 +1573,7 @@ class RuntimeController:
 
         self._logger.set_start_time()
 
-        # Start streaming from eye tracker if not already started
-        if self._eye_tracker_adapter and self._eye_tracker_adapter.is_connected():
-            await self._eye_tracker_adapter.start_streaming()
-        else:
+        if not self._eye_tracker_adapter or not self._eye_tracker_adapter.is_connected():
             self._logger.system(
                 "eye_tracker_not_connected_on_experiment_start",
                 {
@@ -1442,6 +1591,9 @@ class RuntimeController:
         self._id_prefix = self._session_id or self._id_prefix
         self._window_counter = 0
         self._estimate_counter = 0
+        self._observed_window_count = 0
+        self._observed_window_event.clear()
+        self._eye_tracker_stream_started_event.clear()
         self._experiment_start_time = datetime.now(timezone.utc).timestamp()
 
         # start processing layers if not already running
@@ -1455,10 +1607,24 @@ class RuntimeController:
         self._reactive_tool.start()
         self._reactive_observer.start()
 
+        if self._baseline_calibration_task and not self._baseline_calibration_task.done():
+            self._baseline_calibration_task.cancel()
+
         # Schedule automatic baseline recording unless explicitly disabled
-        # Wait 5 seconds, then record baseline calibration for the amount of seconds specified in config
         if self._config.controller.calibration_duration_seconds > 0:
-            asyncio.create_task(self._run_baseline_calibration(self._config.controller.calibration_duration_seconds))
+            self._baseline_calibration_task = asyncio.create_task(
+                self._run_baseline_calibration(self._config.controller.calibration_duration_seconds)
+            )
+        else:
+            self._baseline_calibration_task = None
+
+        # Let the calibration task arm its event-based waiters before any
+        # fast-forward replay task starts pushing data through the pipeline.
+        if self._baseline_calibration_task is not None:
+            await asyncio.sleep(0)
+
+        await self._eye_tracker_adapter.start_streaming()
+        self._eye_tracker_stream_started_event.set()
 
         self._logger.system(
             "experiment_started",
@@ -1527,6 +1693,13 @@ class RuntimeController:
         
         # Mark experiment as inactive before exporting data to avoid logging new entries during export
         self._experiment_is_active = False
+        self._eye_tracker_stream_started_event.clear()
+
+        if self._baseline_calibration_task and not self._baseline_calibration_task.done():
+            self._baseline_calibration_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._baseline_calibration_task
+        self._baseline_calibration_task = None
 
         self.export_experiment_data()
         self.export_system_logs()

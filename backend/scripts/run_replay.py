@@ -56,7 +56,7 @@ async def run_single(replay_file: Path, config_path: str, output_dir: Path) -> P
         if adapter and getattr(adapter, "_streaming_task", None):
             await adapter._streaming_task
 
-        await asyncio.sleep(2.0)
+        await rc.wait_for_background_tasks()
 
         await rc.end_experiment()
     finally:

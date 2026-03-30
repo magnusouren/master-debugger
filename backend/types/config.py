@@ -273,6 +273,8 @@ class ControllerConfig:
     min_score_for_feedback: float = 0.6  # Fallback if baseline score stats are unavailable
 
     # Calibration
+    # Wall-clock equivalent used to derive event-driven window thresholds.
+    calibration_settle_seconds: float = 5.0
     calibration_duration_seconds: float = 60
 
     # WebSocket settings
