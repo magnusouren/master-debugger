@@ -107,7 +107,7 @@ class ReactiveTool:
     IPA_FALLBACK_LO = 0.25
     IPA_FALLBACK_HI = 2.5
     PROACTIVE_IPA_CONFIDENCE = 0.7
-    BASELINE_WARMUP_SECONDS = 20.0
+    BASELINE_WARMUP_SECONDS = 30.0
 
     def __init__(
         self,
@@ -847,25 +847,27 @@ class ReactiveTool:
             "perceived_difficulty",
             "ipi",
         ]
+
+        available = []
+        missing_metrics = []
+
         for name in expected_components:
-            if name not in components:
-                components[name] = 0.5
+            if name in components:
+                available.append(name)
+            else:
                 missing_metrics.append(name)
 
-        # Record samples if in baseline recording mode, but skip startup warmup
         if self._is_recording_baseline and self._is_past_baseline_warmup():
             for metric_name, value in raw_values.items():
-                if metric_name in self._baseline_samples:
-                    self._baseline_samples[metric_name].append(value)
+                if metric_name in self._baseline_samples and value is not None:
+                    self._baseline_samples[metric_name].append(float(value))
 
-        # Strict equal weighting: each of 5 components contributes exactly 0.2
-        score = (
-            0.2 * components["ipa"]
-            + 0.2 * components["fixation_duration"]
-            + 0.2 * components["anticipation"]
-            + 0.2 * components["perceived_difficulty"]
-            + 0.2 * components["ipi"]
-        )
+        if not available:
+            return 0.5
+
+        weight = 1.0 / len(available)
+
+        score = sum(weight * components[name] for name in available)
 
         # Log individual metrics with raw values and normalized scores
         self._logger.system(

@@ -60,44 +60,18 @@ class ParticipantBaseline:
         return (x - lo) / (hi - lo)
 
     def get_normalized_score(self, metric_name: str, value: float) -> Optional[float]:
-
         if metric_name not in self.metrics:
             return None
 
         baseline = self.metrics[metric_name]
 
-        if baseline.std <= 0:
-            return 0.5
-
-        # -------- IPA --------
-
-        if metric_name == "ipa":
-
-            center = baseline.mean
-
-            # Combine participant variability + global tolerance
-            scale = max(
-                baseline.std * 3.0,
-                0.08   # minimum realistic IPA variation
-            )
-
-            z = (value - center) / scale
-
-            # Allow both lower and higher scores
-            z = max(-4.0, min(4.0, z))
-
-            score = 1.0 / (1.0 + math.exp(-z))
-
-            return float(score)
-
-        # -------- OTHER METRICS --------
-
+        # Prefer percentile-based normalization for all metrics
         if baseline.p02_5 is not None and baseline.p97_5 is not None:
-
             lo = float(baseline.p02_5)
             hi = float(baseline.p97_5)
 
             min_range_by_metric = {
+                "ipa": 0.12,
                 "fixation_duration_ms": 120.0,
                 "anticipation_velocity": 1.5,
                 "perceived_difficulty_std": 1.5,
@@ -108,7 +82,6 @@ class ParticipantBaseline:
             min_range = min_range_by_metric.get(metric_name, 0.1)
 
             current_range = hi - lo
-
             if current_range < min_range:
                 center = (lo + hi) / 2.0
                 lo = center - (min_range / 2.0)
@@ -121,22 +94,16 @@ class ParticipantBaseline:
                 return 0.5
 
             z = (value - center) / scale
-
             z = max(-4.0, min(4.0, z))
-
             return float(1.0 / (1.0 + math.exp(-z)))
 
-        # -------- FALLBACK --------
+        # fallback to mean/std if percentiles are unavailable
+        if baseline.std <= 0:
+            return 0.5
 
-        z = self.get_zscore(metric_name, value)
-
-        if z is None:
-            return None
-
+        z = (value - baseline.mean) / max(baseline.std, 1e-6)
         z = max(-4.0, min(4.0, z))
-
         return float(1.0 / (1.0 + math.exp(-0.6 * z)))
-
 
 class UserStateType(Enum):
     """Types of user states that can be estimated."""

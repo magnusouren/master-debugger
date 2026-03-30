@@ -246,6 +246,7 @@ def save_model(
         "feature_names": feature_names,
         "metrics": metrics,
         "xgboost_params": model.get_params(),
+        "target_type": "delta"
     }
 
     metadata_path = output_dir / f"{model_name}_metadata.json"

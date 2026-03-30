@@ -368,21 +368,96 @@ class ForecastingTool:
     # Internal: feature flattening / model output parsing
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def _safe_window_stat(values: np.ndarray, fn: Callable[[np.ndarray], float]) -> float:
+        if values.size == 0:
+            return 0.0
+        return float(fn(values))
+
+    @staticmethod
+    def _safe_window_slope(values: np.ndarray) -> float:
+        if values.size < 2:
+            return 0.0
+
+        x = np.arange(values.size, dtype=np.float32)
+        x_mean = float(np.mean(x))
+        y_mean = float(np.mean(values))
+        denom = float(np.sum((x - x_mean) ** 2))
+        if denom == 0.0:
+            return 0.0
+
+        numer = float(np.sum((x - x_mean) * (values - y_mean)))
+        return numer / denom
+
+    def _build_summary_features(
+        self,
+        history_matrix: np.ndarray,
+        input_columns: List[str],
+    ) -> List[float]:
+        summary_values: List[float] = []
+
+        for col_idx, _col_name in enumerate(input_columns):
+            series = history_matrix[:, col_idx]
+
+            last_3 = series[-3:]
+            last_5 = series[-5:]
+            last_10 = series[-10:]
+            prev_5 = series[-10:-5] if series.shape[0] >= 10 else np.array([], dtype=series.dtype)
+
+            feature_values = [
+                float(series[-1]),
+                self._safe_window_stat(last_3, np.mean),
+                self._safe_window_stat(last_5, np.mean),
+                self._safe_window_stat(last_10, np.mean),
+                self._safe_window_stat(last_5, np.std),
+                self._safe_window_stat(last_10, np.std),
+                self._safe_window_stat(last_10, np.min),
+                self._safe_window_stat(last_10, np.max),
+                (
+                    self._safe_window_stat(last_10, np.max)
+                    - self._safe_window_stat(last_10, np.min)
+                ) if last_10.size > 0 else 0.0,
+                float(series[-1] - series[-2]) if series.shape[0] >= 2 else 0.0,
+                (
+                    self._safe_window_stat(last_5, np.mean)
+                    - self._safe_window_stat(prev_5, np.mean)
+                ) if prev_5.size > 0 else 0.0,
+                self._safe_window_slope(last_5),
+                self._safe_window_slope(last_10),
+            ]
+
+            summary_values.extend(float(v) for v in feature_values)
+
+        return summary_values
+
     def _flatten_windows(
         self,
         windows: List[WindowFeatures],
         input_columns: List[str],
     ) -> Tuple[List[float], List[str]]:
-        flat_features: List[float] = []
+        history_rows: List[List[float]] = []
         missing_inputs: List[str] = []
 
         for window in windows:
             feature_dict = window.features or {}
+            row_values: List[float] = []
             for col in input_columns:
                 val = feature_dict.get(col)
                 if val is None:
                     missing_inputs.append(col)
-                flat_features.append(self._forecaster._safe_float(val))
+                row_values.append(self._forecaster._safe_float(val))
+            history_rows.append(row_values)
+
+        history_matrix = np.asarray(history_rows, dtype=np.float32)
+        flat_features = history_matrix.flatten().tolist()
+
+        metadata = getattr(self._forecaster, "_metadata", {}) or {}
+        expected_feature_count = int(
+            metadata.get("n_features", len(metadata.get("feature_names", [])) or len(flat_features))
+        )
+
+        if expected_feature_count > len(flat_features):
+            flat_features.extend(self._build_summary_features(history_matrix, input_columns))
 
         return flat_features, missing_inputs
 
@@ -424,16 +499,29 @@ class ForecastingTool:
         windows: List[WindowFeatures],
         input_columns: List[str],
     ) -> Tuple[List[float], List[str]]:
-        flat_features: List[float] = []
+        history_rows: List[List[float]] = []
         missing_inputs: List[str] = []
 
         for window in windows:
             feature_dict = window.features or {}
+            row_values: List[float] = []
             for col in input_columns:
                 val = feature_dict.get(col)
                 if val is None:
                     missing_inputs.append(col)
-                flat_features.append(self._forecaster._safe_float(val))
+                row_values.append(self._forecaster._safe_float(val))
+            history_rows.append(row_values)
+
+        history_matrix = np.asarray(history_rows, dtype=np.float32)
+        flat_features = history_matrix.flatten().tolist()
+
+        metadata = getattr(self._forecaster, "_metadata", {}) or {}
+        expected_feature_count = int(
+            metadata.get("n_features", len(metadata.get("feature_names", [])) or len(flat_features))
+        )
+
+        if expected_feature_count > len(flat_features):
+            flat_features.extend(self._build_summary_features(history_matrix, input_columns))
 
         return flat_features, missing_inputs
 
@@ -511,12 +599,26 @@ class ForecastingTool:
         self,
         pred_row: np.ndarray,
         target_columns: List[str],
+        latest_window: WindowFeatures,
     ) -> dict:
-        return {
-            col: float(pred_row[idx])
-            for idx, col in enumerate(target_columns)
-        }
+        metadata = getattr(self._forecaster, "_metadata", {}) or {}
+        target_type = str(metadata.get("target_type", "absolute")).lower()
 
+        latest_features = latest_window.features or {}
+        predicted: dict = {}
+
+        for idx, col in enumerate(target_columns):
+            raw_pred = float(pred_row[idx])
+
+            if target_type == "delta":
+                current_value = self._forecaster._safe_float(latest_features.get(col))
+                predicted_value = current_value + raw_pred
+            else:
+                predicted_value = raw_pred
+
+            predicted[col] = float(predicted_value)
+
+        return predicted
     # -------------------------------------------------------------------------
     # Internal: prediction object construction
     # -------------------------------------------------------------------------
@@ -614,9 +716,12 @@ class ForecastingTool:
         if pred_row is None:
             return None
 
+        latest_window = recent_windows[-1]
+
         predicted_components = self._build_predicted_components(
             pred_row=pred_row,
             target_columns=target_columns,
+            latest_window=latest_window,
         )
 
         latest_window = recent_windows[-1]

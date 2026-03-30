@@ -3,6 +3,7 @@ Dataset preparation for XGBoost forecasting.
 
 Creates sequence-to-one training samples with:
 - X: Flattened history of WindowFeatures from the last N windows
+     + engineered summary features computed from that history
 - y: One future WindowFeatures row at a fixed horizon
 
 This is intended for forecasting future WindowFeatures directly:
@@ -24,9 +25,7 @@ import pandas as pd
 
 from backend.types import TrainingConfig, WindowFeatures
 
-# Defaults aligned with preprocess/runtime:
-# 60 seconds history at 2 Hz = 120 windows
-# 30 seconds ahead at 2 Hz = 60 windows
+# Defaults aligned with preprocess/runtime
 HISTORY_WINDOW_SIZE = 60
 PREDICTION_HORIZON = 20
 
@@ -37,9 +36,8 @@ DEFAULT_INPUT_COLUMNS = [
     "saccade_count",
 ]
 
-DEFAULT_TARGET_COLUMNS = [
-    "pupil_ipa"
-]
+DEFAULT_TARGET_COLUMNS = list(DEFAULT_INPUT_COLUMNS)  # Predict same features by default
+
 DEFAULT_ENABLED_METRICS = [
     "fixation_duration",
     "saccade_amplitude",
@@ -48,41 +46,6 @@ DEFAULT_ENABLED_METRICS = [
     "data_quality",
     "ipi",
 ]
-
-# # These columns are expected to be present in emip_features.parquet
-# # produced by preprocess.py + SignalProcessingLayer.
-# DEFAULT_INPUT_COLUMNS = [
-#     "pupil_ipa",
-#     "fixation_mean_duration_ms",
-#     "saccade_mean_velocity",
-#     "saccade_velocity_std",
-#     "ipi_value",
-#     "blink_rate_per_min",
-#     "dq_valid_ratio_any",
-#     "dq_valid_ratio_both",
-#     "dq_valid_ratio_left",
-#     "dq_valid_ratio_right",
-#     "pupil_valid_ratio",
-#     "fixation_count",
-#     "saccade_count",
-# ]
-
-# # Predict one future WindowFeatures row directly.
-# DEFAULT_TARGET_COLUMNS = [
-#     "pupil_ipa",
-#     "fixation_mean_duration_ms",
-#     "saccade_mean_velocity",
-#     "saccade_velocity_std",
-#     "ipi_value",
-#     "blink_rate_per_min",
-#     "dq_valid_ratio_any",
-#     "dq_valid_ratio_both",
-#     "dq_valid_ratio_left",
-#     "dq_valid_ratio_right",
-#     "pupil_valid_ratio",
-#     "fixation_count",
-#     "saccade_count",
-# ]
 
 
 def load_processed_data(data_path: Optional[Path] = None) -> pd.DataFrame:
@@ -195,6 +158,125 @@ def row_to_window_features(
     )
 
 
+def _safe_mean(arr: np.ndarray) -> float:
+    return float(np.mean(arr)) if arr.size > 0 else 0.0
+
+
+def _safe_std(arr: np.ndarray) -> float:
+    return float(np.std(arr)) if arr.size > 0 else 0.0
+
+
+def _safe_min(arr: np.ndarray) -> float:
+    return float(np.min(arr)) if arr.size > 0 else 0.0
+
+
+def _safe_max(arr: np.ndarray) -> float:
+    return float(np.max(arr)) if arr.size > 0 else 0.0
+
+
+def _safe_range(arr: np.ndarray) -> float:
+    if arr.size == 0:
+        return 0.0
+    return float(np.max(arr) - np.min(arr))
+
+
+def _safe_slope(arr: np.ndarray) -> float:
+    """
+    Linear slope over equally spaced time steps.
+    """
+    if arr.size < 2:
+        return 0.0
+
+    x = np.arange(arr.size, dtype=np.float32)
+    x_mean = float(np.mean(x))
+    y_mean = float(np.mean(arr))
+
+    denom = float(np.sum((x - x_mean) ** 2))
+    if denom == 0.0:
+        return 0.0
+
+    numer = float(np.sum((x - x_mean) * (arr - y_mean)))
+    return numer / denom
+
+
+def _build_summary_features(
+    history_matrix: np.ndarray,
+    input_columns: List[str],
+) -> Tuple[List[float], List[str]]:
+    """
+    Build engineered summary features from the history window.
+
+    Args:
+        history_matrix: shape (history_size, n_features)
+        input_columns: feature names for each column in history_matrix
+
+    Returns:
+        values, names
+    """
+    values: List[float] = []
+    names: List[str] = []
+
+    for col_idx, col_name in enumerate(input_columns):
+        series = history_matrix[:, col_idx]
+
+        last_1 = series[-1:]
+        last_3 = series[-3:]
+        last_5 = series[-5:]
+        last_10 = series[-10:]
+        prev_5 = series[-10:-5] if series.shape[0] >= 10 else np.array([], dtype=series.dtype)
+
+        feature_map = {
+            f"{col_name}__last": float(series[-1]),
+            f"{col_name}__mean_last_3": _safe_mean(last_3),
+            f"{col_name}__mean_last_5": _safe_mean(last_5),
+            f"{col_name}__mean_last_10": _safe_mean(last_10),
+            f"{col_name}__std_last_5": _safe_std(last_5),
+            f"{col_name}__std_last_10": _safe_std(last_10),
+            f"{col_name}__min_last_10": _safe_min(last_10),
+            f"{col_name}__max_last_10": _safe_max(last_10),
+            f"{col_name}__range_last_10": _safe_range(last_10),
+            f"{col_name}__diff_last_1": float(series[-1] - series[-2]) if series.shape[0] >= 2 else 0.0,
+            f"{col_name}__diff_mean_5_vs_prev_5": (
+                _safe_mean(last_5) - _safe_mean(prev_5)
+                if prev_5.size > 0
+                else 0.0
+            ),
+            f"{col_name}__slope_last_5": _safe_slope(last_5),
+            f"{col_name}__slope_last_10": _safe_slope(last_10),
+        }
+
+        for name, value in feature_map.items():
+            names.append(name)
+            values.append(float(value))
+
+    return values, names
+
+
+def _build_input_vector(
+    history_rows: pd.DataFrame,
+    input_columns: List[str],
+) -> Optional[List[float]]:
+    """
+    Build the final input vector:
+    - flattened raw history
+    - engineered summary features
+    """
+    history_values: List[List[float]] = []
+
+    for _, row in history_rows.iterrows():
+        row_values = _extract_row_values(row, input_columns)
+        if row_values is None:
+            return None
+        history_values.append(row_values)
+
+    history_matrix = np.asarray(history_values, dtype=np.float32)
+    flattened_history = history_matrix.flatten().tolist()
+
+    summary_values, _ = _build_summary_features(history_matrix, input_columns)
+
+    return flattened_history + summary_values
+
+
 def create_sequences(
     df: pd.DataFrame,
     history_size: int = HISTORY_WINDOW_SIZE,
@@ -206,7 +288,7 @@ def create_sequences(
     Create sequence-to-one forecasting samples.
 
     Each sample is:
-    - X: history_size past windows
+    - X: history_size past windows + summary features from that history
     - y: one future window at horizon_steps ahead
 
     Args:
@@ -217,7 +299,7 @@ def create_sequences(
         target_columns: Columns to predict from the target row
 
     Returns:
-        X: shape (N, history_size * len(input_columns))
+        X: shape (N, history_features)
         y: shape (N, len(target_columns))
         participant_ids: participant id for each sample
     """
@@ -233,7 +315,6 @@ def create_sequences(
     for (pid, trial), group in df.groupby(["participant_id", "trial"]):
         group = group.sort_values("window_start").reset_index(drop=True)
 
-        # Need enough rows for history plus future target row
         min_required = history_size + horizon_steps
         if len(group) < min_required:
             continue
@@ -243,29 +324,28 @@ def create_sequences(
         for i in range(n_samples):
             history_rows = group.iloc[i:i + history_size]
 
-            # last row in history = "now"
-            # target row = one specific future row horizon_steps ahead
             target_idx = i + history_size - 1 + horizon_steps
+            current_idx = i + history_size - 1
+
+            current_row = group.iloc[current_idx]
             target_row = group.iloc[target_idx]
 
-            target_vector = _extract_row_values(target_row, target_columns)
-            if target_vector is None:
+            current_vector = _extract_row_values(current_row, target_columns)
+            future_vector = _extract_row_values(target_row, target_columns)
+
+            if current_vector is None or future_vector is None:
                 continue
 
-            flattened_history: List[float] = []
-            valid_history = True
+            target_vector = [
+                future_val - current_val
+                for current_val, future_val in zip(current_vector, future_vector)
+            ]
 
-            for _, row in history_rows.iterrows():
-                row_values = _extract_row_values(row, input_columns)
-                if row_values is None:
-                    valid_history = False
-                    break
-                flattened_history.extend(row_values)
-
-            if not valid_history:
+            input_vector = _build_input_vector(history_rows, input_columns)
+            if input_vector is None:
                 continue
 
-            X_list.append(flattened_history)
+            X_list.append(input_vector)
             y_list.append(target_vector)
             participant_ids.append(str(pid))
 
@@ -274,6 +354,31 @@ def create_sequences(
         np.array(y_list, dtype=np.float32),
         participant_ids,
     )
+
+
+def get_feature_names(
+    history_size: int = HISTORY_WINDOW_SIZE,
+    input_columns: Optional[List[str]] = None,
+) -> List[str]:
+    """
+    Get names for flattened input features + summary features.
+    """
+    if input_columns is None:
+        input_columns = list(DEFAULT_INPUT_COLUMNS)
+
+    names: List[str] = []
+
+    # Raw flattened history
+    for t in range(history_size):
+        for col in input_columns:
+            names.append(f"t-{history_size - t - 1}_{col}")
+
+    # Summary features
+    dummy_history = np.zeros((max(history_size, 10), len(input_columns)), dtype=np.float32)
+    _, summary_names = _build_summary_features(dummy_history, input_columns)
+    names.extend(summary_names)
+
+    return names
 
 
 def split_by_participant(
@@ -352,23 +457,6 @@ def split_by_participant(
         "val": (X[val_mask], y[val_mask]),
         "test": (X[test_mask], y[test_mask]),
     }
-
-
-def get_feature_names(
-    history_size: int = HISTORY_WINDOW_SIZE,
-    input_columns: Optional[List[str]] = None,
-) -> List[str]:
-    """
-    Get names for flattened input features.
-    """
-    if input_columns is None:
-        input_columns = list(DEFAULT_INPUT_COLUMNS)
-
-    names: List[str] = []
-    for t in range(history_size):
-        for col in input_columns:
-            names.append(f"t-{history_size - t - 1}_{col}")
-    return names
 
 
 def prepare_dataset(
