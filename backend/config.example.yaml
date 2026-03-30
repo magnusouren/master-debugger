@@ -24,30 +24,30 @@ signal_processing:
 
 # Forecasting Tool (proactive mode only)
 forecasting:
-  enabled: false
-  prediction_horizon_seconds: 30.0
-  update_rate_hz: 5.0
-  model_path: null  # Path to trained model, e.g., models/trained/latest.json
-  model_type: xgboost  # xgboost, lstm
-  history_window_seconds: 60.0  # Must match training.history_window_size (120 × 0.5s)
-  min_confidence_threshold: 0.5
+    enabled: false
+    prediction_horizon_seconds: 30.0
+    update_rate_hz: 5.0
+    model_path: null # Path to trained model, e.g., models/trained/latest.json
+    model_type: xgboost # xgboost, lstm
+    history_window_seconds: 60.0 # Must match training.history_window_size (120 × 0.5s)
+    min_confidence_threshold: 0.5
 
 # Training Configuration (for offline model training)
 training:
-  data_path: null  # Path to processed features parquet file
-  # With 1s windows at 50% overlap, windows arrive every 0.5s
-  # history_window_size=120 means 120 × 0.5s = 60 seconds of history
-  history_window_size: 120  # Number of past windows as input
-  prediction_horizon: 60    # Windows to look ahead (~30 seconds)
-  train_ratio: 0.7
-  val_ratio: 0.15
-  test_ratio: 0.15
-  # XGBoost hyperparameters
-  n_estimators: 500
-  max_depth: 8              # Current tuned value (5-contributor input)
-  learning_rate: 0.03       # Current tuned value
-  early_stopping_rounds: 30
-  random_state: 42
+    data_path: null # Path to processed features parquet file
+    # With 1s windows at 50% overlap, windows arrive every 0.5s
+    # history_window_size=120 means 120 × 0.5s = 60 seconds of history
+    history_window_size: 120 # Number of past windows as input
+    prediction_horizon: 60 # Windows to look ahead (~30 seconds)
+    train_ratio: 0.7
+    val_ratio: 0.15
+    test_ratio: 0.15
+    # XGBoost hyperparameters
+    n_estimators: 500
+    max_depth: 8 # Current tuned value (5-contributor input)
+    learning_rate: 0.03 # Current tuned value
+    early_stopping_rounds: 30
+    random_state: 42
 
 # Reactive Tool
 reactive_tool:
@@ -92,7 +92,7 @@ controller:
 
 # Eye Tracker
 eye_tracker:
-    mode: SIMULATED # SIMULATED or TOBII
+    mode: SIMULATED # SIMULATED, REPLAY, TOBII or TOBII_REPLAY
     device_id: null # null for auto-select, or specific device serial/address
     batch_size: 12 # Number of samples per batch (default 12 for ~120Hz)
     flush_interval_ms: 16 # Max time between flushes in milliseconds

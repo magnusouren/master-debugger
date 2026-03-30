@@ -5,6 +5,7 @@ Provides integration with Tobii Pro SDK for real eye tracker hardware.
 Uses lazy imports to avoid hard dependency on the SDK.
 """
 import asyncio
+import csv
 import time
 import threading
 from typing import Callable, List, Optional, Dict, Any
@@ -12,6 +13,25 @@ from typing import Callable, List, Optional, Dict, Any
 from backend.services.eye_tracker.base import EyeTrackerAdapter, AdapterState
 from backend.types.eye_tracking import GazeSample
 from backend.services.logger_service import get_logger
+
+
+REPLAY_TSV_HEADER = [
+    "device_timestamp_us",
+    "system_timestamp_s",
+
+    "left_x_norm",
+    "left_y_norm",
+    "right_x_norm",
+    "right_y_norm",
+
+    "left_pupil_mm",
+    "right_pupil_mm",
+
+    "left_valid",
+    "right_valid",
+
+    "frame"
+]
 
 
 class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
@@ -57,6 +77,15 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
         
         self._buffer: List[GazeSample] = []
         self._buffer_lock = threading.Lock()
+
+        self._record_enabled = False
+        self._record_file = None
+        self._record_writer = None
+        self._record_lock = threading.Lock()
+        self._frame_counter = 0
+        self._trial_id = 1
+        self._screen_width = 1920
+        self._screen_height = 1080
         
         self._flush_task: Optional[asyncio.Task] = None
         self._subscribed = False
@@ -182,6 +211,8 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
         """Disconnect from Tobii Pro eye tracker."""
         if self._state == AdapterState.STREAMING:
             await self.stop_streaming()
+
+        self.stop_recording()
         
         self._device = None
         self._device_info = {}
@@ -210,6 +241,47 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
     def set_error_callback(self, callback: Callable[[Exception], None]) -> None:
         """Set callback for errors."""
         self._error_callback = callback
+
+    def start_recording(self, file_path: str, trial_id: int = 1) -> None:
+        """Start writing replay-compatible TSV rows during batch flush."""
+        with self._record_lock:
+            if self._record_file:
+                try:
+                    self._record_file.flush()
+                except Exception:
+                    pass
+                try:
+                    self._record_file.close()
+                except Exception:
+                    pass
+
+            self._record_file = open(file_path, "w", encoding="utf-8", newline="")
+            self._record_writer = csv.writer(self._record_file, delimiter="\t", lineterminator="\n")
+            self._record_writer.writerow(REPLAY_TSV_HEADER)
+            self._record_file.flush()
+            self._record_enabled = True
+            self._frame_counter = 0
+            self._trial_id = trial_id
+
+    def stop_recording(self) -> None:
+        """Stop recording and close file safely."""
+        with self._record_lock:
+            self._record_enabled = False
+            self._frame_counter = 0
+            self._trial_id = 1
+
+            if self._record_file:
+                try:
+                    self._record_file.flush()
+                except Exception:
+                    pass
+                try:
+                    self._record_file.close()
+                except Exception:
+                    pass
+
+            self._record_file = None
+            self._record_writer = None
     
     async def start_streaming(self) -> None:
         """Start streaming gaze data from Tobii eye tracker."""
@@ -286,11 +358,7 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
                 )
         
         # Flush remaining samples
-        with self._buffer_lock:
-            if self._buffer and self._samples_callback:
-                batch = self._buffer.copy()
-                self._buffer.clear()
-                self._loop.call_soon_threadsafe(self._samples_callback, batch)
+        self._flush_buffer()
         
         if self._state == AdapterState.STREAMING:
             self._state = AdapterState.CONNECTED
@@ -324,7 +392,7 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
             
             # Flush if batch is full
             if should_flush:
-                self._flush_buffer()
+                self._loop.call_soon_threadsafe(self._flush_buffer)
                 
         except Exception as e:
             self._logger.system(
@@ -352,7 +420,7 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
         device_ts = gaze_data.get("device_time_stamp")
         if device_ts is not None:
             # Convert from microseconds to seconds
-            timestamp = device_ts / 1_000_000.0
+            timestamp = max(device_ts / 1_000_000.0, 0.000001)
         else:
             timestamp = time.time()
         
@@ -382,14 +450,59 @@ class TobiiProEyeTrackerAdapter(EyeTrackerAdapter):
     def _flush_buffer(self) -> None:
         """Flush buffered samples to callback (thread-safe)."""
         with self._buffer_lock:
-            if not self._buffer or not self._samples_callback:
+            if not self._buffer:
                 return
             
             batch = self._buffer.copy()
             self._buffer.clear()
+
+        self._record_batch(batch)
         
         # Forward to callback in asyncio loop
-        self._loop.call_soon_threadsafe(self._samples_callback, batch)
+        if self._samples_callback:
+            self._loop.call_soon_threadsafe(self._samples_callback, batch)
+
+    def _record_batch(self, batch: List[GazeSample]) -> None:
+        """Write deterministic replay TSV (runtime GazeSample format)."""
+        with self._record_lock:
+            if not self._record_enabled or not self._record_writer:
+                return
+
+            for sample in batch:
+
+                raw_data = sample.raw_data or {}
+
+                device_ts = raw_data.get("device_time_stamp")
+
+                if isinstance(device_ts, (int, float)):
+                    device_timestamp_us = int(device_ts)
+                else:
+                    device_timestamp_us = int(sample.timestamp * 1_000_000)
+
+                self._frame_counter += 1
+
+                self._record_writer.writerow([
+                    device_timestamp_us,
+                    sample.timestamp,
+
+                    sample.left_eye_x if sample.left_eye_x is not None else "",
+                    sample.left_eye_y if sample.left_eye_y is not None else "",
+                    sample.right_eye_x if sample.right_eye_x is not None else "",
+                    sample.right_eye_y if sample.right_eye_y is not None else "",
+
+                    sample.left_pupil_diameter if sample.left_pupil_diameter is not None else "",
+                    sample.right_pupil_diameter if sample.right_pupil_diameter is not None else "",
+
+                    1 if sample.left_eye_valid else 0,
+                    1 if sample.right_eye_valid else 0,
+
+                    self._frame_counter
+                ])
+
+            try:
+                self._record_file.flush()
+            except Exception:
+                pass
     
     async def _periodic_flush(self) -> None:
         """
