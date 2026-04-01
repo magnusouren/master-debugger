@@ -1047,6 +1047,7 @@ class RuntimeController:
 
             if baseline:
                 self._reactive_observer.set_baseline(baseline)
+                self._forecasting.set_baseline(baseline)
                 # Two-step calibration: baseline must be active before scoring
                 # baseline windows for feedback trigger bounds.
                 calibrated_bounds = self._reactive_tool.calibrate_feedback_trigger_bounds_from_baseline_windows()
@@ -1167,6 +1168,7 @@ class RuntimeController:
         baseline = self._reactive_tool.stop_baseline_recording(participant_id)
         if baseline:
             self._reactive_observer.set_baseline(baseline)
+            self._forecasting.set_baseline(baseline)
             self._reactive_tool.calibrate_feedback_trigger_bounds_from_baseline_windows()
         return baseline
 
@@ -1174,6 +1176,7 @@ class RuntimeController:
         """Clear the current baseline (revert to static thresholds)."""
         self._reactive_tool.clear_baseline()
         self._reactive_observer.clear_baseline()
+        self._forecasting.clear_baseline()
 
     def has_baseline(self) -> bool:
         """Check if a valid baseline is loaded."""

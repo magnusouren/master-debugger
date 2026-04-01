@@ -217,6 +217,8 @@ def save_model(
     feature_names: List[str],
     target_columns: List[str],
     input_columns: List[str],
+    normalization_mode: Optional[str],
+    participant_normalizers: Optional[Dict[str, Any]],
     output_dir: Path,
     config: TrainingConfig,
 ) -> Path:
@@ -246,7 +248,9 @@ def save_model(
         "feature_names": feature_names,
         "metrics": metrics,
         "xgboost_params": model.get_params(),
-        "target_type": "delta"
+        "target_type": "delta",
+        "normalization_mode": normalization_mode,
+        "participant_normalizers": participant_normalizers,
     }
 
     metadata_path = output_dir / f"{model_name}_metadata.json"
@@ -332,6 +336,8 @@ def main() -> None:
         feature_names=dataset["feature_names"],
         target_columns=dataset["target_columns"],
         input_columns=dataset["input_columns"],
+        normalization_mode=dataset.get("normalization_mode"),
+        participant_normalizers=dataset.get("participant_normalizers_serialized"),
         output_dir=output_dir,
         config=config,
     )

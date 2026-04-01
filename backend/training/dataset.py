@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -46,6 +47,14 @@ DEFAULT_ENABLED_METRICS = [
     "data_quality",
     "ipi",
 ]
+
+
+@dataclass
+class ColumnNormStats:
+    """Per-participant z-score statistics for one feature column."""
+    mean: float
+    std: float
+    sample_count: int
 
 
 def load_processed_data(data_path: Optional[Path] = None) -> pd.DataFrame:
@@ -128,6 +137,99 @@ def _extract_row_values(row: pd.Series, columns: List[str]) -> Optional[List[flo
         values.append(val)
 
     return values
+
+
+def fit_participant_normalizers(
+    df: pd.DataFrame,
+    columns: List[str],
+    participant_column: str = "participant_id",
+) -> Dict[str, Dict[str, ColumnNormStats]]:
+    """
+    Fit simple per-participant z-score statistics for the requested columns.
+
+    Missing / non-finite values are ignored. Zero or invalid std falls back to 1.0.
+    """
+    normalizers: Dict[str, Dict[str, ColumnNormStats]] = {}
+
+    for participant_id, group in df.groupby(participant_column):
+        participant_key = str(participant_id)
+        participant_stats: Dict[str, ColumnNormStats] = {}
+
+        for col in columns:
+            numeric = pd.to_numeric(group[col], errors="coerce")
+            valid = numeric.replace([np.inf, -np.inf], np.nan).dropna()
+
+            if valid.empty:
+                participant_stats[col] = ColumnNormStats(mean=0.0, std=1.0, sample_count=0)
+                continue
+
+            mean_val = float(valid.mean())
+            std_val = float(valid.std(ddof=0))
+            if not np.isfinite(std_val) or std_val <= 0.0:
+                std_val = 1.0
+
+            participant_stats[col] = ColumnNormStats(
+                mean=mean_val,
+                std=std_val,
+                sample_count=int(valid.shape[0]),
+            )
+
+        normalizers[participant_key] = participant_stats
+
+    return normalizers
+
+
+def apply_participant_normalization(
+    df: pd.DataFrame,
+    participant_normalizers: Dict[str, Dict[str, ColumnNormStats]],
+    columns: List[str],
+    participant_column: str = "participant_id",
+) -> pd.DataFrame:
+    """
+    Apply per-participant z-score normalization to the requested columns only.
+
+    Missing values remain missing.
+    """
+    normalized_df = df.copy()
+
+    # Normalize only model-space columns, but make sure they can hold z-scored
+    # floating-point values before we assign back into the dataframe.
+    for col in columns:
+        normalized_df[col] = pd.to_numeric(normalized_df[col], errors="coerce").astype("float64")
+
+    for participant_id, participant_stats in participant_normalizers.items():
+        participant_mask = normalized_df[participant_column].astype(str) == participant_id
+        if not participant_mask.any():
+            continue
+
+        for col in columns:
+            stats = participant_stats.get(col)
+            if stats is None:
+                continue
+
+            numeric = pd.to_numeric(normalized_df.loc[participant_mask, col], errors="coerce")
+            normalized_df.loc[participant_mask, col] = (numeric - stats.mean) / stats.std
+
+    return normalized_df
+
+
+def serialize_participant_normalizers(
+    participant_normalizers: Dict[str, Dict[str, ColumnNormStats]],
+) -> Dict[str, Dict[str, Dict[str, float | int]]]:
+    """Convert fitted participant normalizers to plain metadata-safe dictionaries."""
+    serialized: Dict[str, Dict[str, Dict[str, float | int]]] = {}
+
+    for participant_id, participant_stats in participant_normalizers.items():
+        serialized[participant_id] = {
+            col: {
+                "mean": float(stats.mean),
+                "std": float(stats.std),
+                "sample_count": int(stats.sample_count),
+            }
+            for col, stats in participant_stats.items()
+        }
+
+    return serialized
 
 
 def row_to_window_features(
@@ -488,6 +590,17 @@ def prepare_dataset(
     _validate_columns_exist(df, input_columns, "input")
     _validate_columns_exist(df, target_columns, "target")
 
+    normalization_columns = sorted(set(input_columns + target_columns))
+    participant_normalizers = fit_participant_normalizers(
+        df=df,
+        columns=normalization_columns,
+    )
+    normalized_df = apply_participant_normalization(
+        df=df,
+        participant_normalizers=participant_normalizers,
+        columns=normalization_columns,
+    )
+
     history_size = int(getattr(config, "history_window_size", HISTORY_WINDOW_SIZE))
     horizon_steps = int(getattr(config, "prediction_horizon", PREDICTION_HORIZON))
 
@@ -502,7 +615,7 @@ def prepare_dataset(
         f"(history={history_size}, horizon_steps={horizon_steps})..."
     )
     X, y, participant_ids = create_sequences(
-        df=df,
+        df=normalized_df,
         history_size=history_size,
         horizon_steps=horizon_steps,
         input_columns=input_columns,
@@ -528,6 +641,10 @@ def prepare_dataset(
         "feature_names": get_feature_names(history_size, input_columns=input_columns),
         "input_columns": input_columns,
         "target_columns": target_columns,
+        "normalization_mode": "participant_zscore",
+        "target_type": "delta",
+        "participant_normalizers": participant_normalizers,
+        "participant_normalizers_serialized": serialize_participant_normalizers(participant_normalizers),
         "config": config,
     }
 

@@ -20,6 +20,7 @@ from backend.types import (
     WindowFeatures,
     PredictedFeatures,
     ForecastingConfig,
+    ParticipantBaseline,
 )
 from backend.models.xgboost_forecaster import XGBoostForecaster
 from backend.models.forecast_feature_schema import TARGET_COLUMNS
@@ -44,6 +45,7 @@ class ForecastingTool:
         self._config = config or ForecastingConfig()
         self._feature_history: deque[WindowFeatures] = deque()
         self._forecaster: Optional[XGBoostForecaster] = None
+        self._baseline: Optional[ParticipantBaseline] = None
         self._output_callbacks: List[Callable[[PredictedFeatures], None]] = []
 
         self._is_enabled: bool = False
@@ -121,6 +123,14 @@ class ForecastingTool:
     def unload_model(self) -> None:
         self._forecaster = None
         self._logger.system("forecasting_tool_model_unloaded", {})
+
+    def set_baseline(self, baseline: ParticipantBaseline) -> None:
+        """Attach a participant baseline for optional runtime normalization."""
+        self._baseline = baseline
+
+    def clear_baseline(self) -> None:
+        """Clear any participant baseline used for runtime normalization."""
+        self._baseline = None
 
     def add_features(self, features: WindowFeatures) -> None:
         self._append_to_history(features)
@@ -203,6 +213,7 @@ class ForecastingTool:
 
     def reset(self) -> None:
         self._feature_history.clear()
+        self._baseline = None
         self._last_prediction_time = 0.0
         self._last_warmup_status = None
         self._forecast_counter = 0
@@ -317,6 +328,55 @@ class ForecastingTool:
 
     def _has_loaded_model(self) -> bool:
         return self._forecaster is not None and self._forecaster.is_loaded()
+
+    def _uses_normalized_model_space(self) -> bool:
+        if not self._has_loaded_model():
+            return False
+
+        metadata = getattr(self._forecaster, "_metadata", {}) or {}
+        return str(metadata.get("normalization_mode", "")).lower() == "participant_zscore"
+
+    @staticmethod
+    def _column_to_baseline_metric(column: str) -> Optional[str]:
+        mapping = {
+            "pupil_ipa": "ipa",
+            "fixation_mean_duration_ms": "fixation_duration_ms",
+            "blink_rate_per_min": None,
+            "saccade_count": None,
+        }
+        return mapping.get(column)
+
+    def _normalize_runtime_value(self, column: str, value: Any) -> float:
+        raw_value = self._forecaster._safe_float(value)
+
+        if not self._uses_normalized_model_space() or self._baseline is None:
+            return raw_value
+
+        metric_name = self._column_to_baseline_metric(column)
+        if metric_name is None or metric_name not in self._baseline.metrics:
+            return raw_value
+
+        zscore = self._baseline.get_zscore(metric_name, raw_value)
+        if zscore is None or not np.isfinite(zscore):
+            return raw_value
+
+        return float(zscore)
+
+    def _denormalize_runtime_value(self, column: str, value: Any) -> float:
+        model_value = self._forecaster._safe_float(value)
+
+        if not self._uses_normalized_model_space() or self._baseline is None:
+            return model_value
+
+        metric_name = self._column_to_baseline_metric(column)
+        if metric_name is None:
+            return model_value
+
+        metric = self._baseline.metrics.get(metric_name)
+        if metric is None:
+            return model_value
+
+        return float(metric.mean + (model_value * metric.std))
 
     # -------------------------------------------------------------------------
     # Internal: schema resolution
@@ -445,7 +505,7 @@ class ForecastingTool:
                 val = feature_dict.get(col)
                 if val is None:
                     missing_inputs.append(col)
-                row_values.append(self._forecaster._safe_float(val))
+                row_values.append(self._normalize_runtime_value(col, val))
             history_rows.append(row_values)
 
         history_matrix = np.asarray(history_rows, dtype=np.float32)
@@ -509,7 +569,7 @@ class ForecastingTool:
                 val = feature_dict.get(col)
                 if val is None:
                     missing_inputs.append(col)
-                row_values.append(self._forecaster._safe_float(val))
+                row_values.append(self._normalize_runtime_value(col, val))
             history_rows.append(row_values)
 
         history_matrix = np.asarray(history_rows, dtype=np.float32)
@@ -610,11 +670,19 @@ class ForecastingTool:
         for idx, col in enumerate(target_columns):
             raw_pred = float(pred_row[idx])
 
-            if target_type == "delta":
-                current_value = self._forecaster._safe_float(latest_features.get(col))
-                predicted_value = current_value + raw_pred
+            if self._uses_normalized_model_space():
+                current_model_value = self._normalize_runtime_value(col, latest_features.get(col))
+                if target_type == "delta":
+                    predicted_model_value = current_model_value + raw_pred
+                else:
+                    predicted_model_value = raw_pred
+                predicted_value = self._denormalize_runtime_value(col, predicted_model_value)
             else:
-                predicted_value = raw_pred
+                if target_type == "delta":
+                    current_value = self._forecaster._safe_float(latest_features.get(col))
+                    predicted_value = current_value + raw_pred
+                else:
+                    predicted_value = raw_pred
 
             predicted[col] = float(predicted_value)
 
