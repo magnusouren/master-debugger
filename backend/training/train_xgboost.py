@@ -83,10 +83,15 @@ def evaluate_model(
     Evaluate model on test set.
 
     Returns overall metrics plus per-target metrics.
+    Also logs normalized error metrics so RMSE can be interpreted
+    relative to the target distribution.
     """
     print("\n--- Evaluation on Test Set ---")
 
     y_pred = model.predict(X_test)
+
+    if y_pred.ndim == 1:
+        y_pred = y_pred.reshape(-1, 1)
 
     # Overall regression metrics across all outputs
     mse = mean_squared_error(y_test, y_pred)
@@ -94,9 +99,24 @@ def evaluate_model(
     mae = float(mean_absolute_error(y_test, y_pred))
     r2 = float(r2_score(y_test, y_pred, multioutput="uniform_average"))
 
-    print(f"Overall RMSE: {rmse:.4f}")
-    print(f"Overall MAE:  {mae:.4f}")
-    print(f"Overall R²:   {r2:.4f}")
+    # Global descriptive stats over all targets combined
+    overall_std = float(np.std(y_test))
+    overall_min = float(np.min(y_test))
+    overall_max = float(np.max(y_test))
+    overall_range = float(overall_max - overall_min)
+
+    overall_nrmse_by_std = float(rmse / overall_std) if overall_std > 0 else None
+    overall_nrmse_by_range = float(rmse / overall_range) if overall_range > 0 else None
+
+    print(f"Overall RMSE:          {rmse:.4f}")
+    print(f"Overall MAE:           {mae:.4f}")
+    print(f"Overall R²:            {r2:.4f}")
+    print(f"Overall target std:    {overall_std:.4f}")
+    print(f"Overall target range:  {overall_range:.4f}")
+    if overall_nrmse_by_std is not None:
+        print(f"Overall RMSE / std:    {overall_nrmse_by_std:.4f}")
+    if overall_nrmse_by_range is not None:
+        print(f"Overall RMSE / range:  {overall_nrmse_by_range:.4f}")
 
     # Per-target metrics
     per_target: Dict[str, Dict[str, float]] = {}
@@ -110,17 +130,43 @@ def evaluate_model(
         col_mae = float(mean_absolute_error(yt, yp))
         col_r2 = float(r2_score(yt, yp))
 
+        col_mean = float(np.mean(yt))
+        col_std = float(np.std(yt))
+        col_min = float(np.min(yt))
+        col_max = float(np.max(yt))
+        col_range = float(col_max - col_min)
+
+        col_nrmse_by_std = float(col_rmse / col_std) if col_std > 0 else None
+        col_nrmse_by_range = float(col_rmse / col_range) if col_range > 0 else None
+
         per_target[col] = {
             "rmse": col_rmse,
             "mae": col_mae,
             "r2": col_r2,
+            "mean": col_mean,
+            "std": col_std,
+            "min": col_min,
+            "max": col_max,
+            "range": col_range,
+            "nrmse_by_std": col_nrmse_by_std,
+            "nrmse_by_range": col_nrmse_by_range,
         }
 
         print(
             f"  {col:<24} "
             f"RMSE={col_rmse:>8.4f} "
             f"MAE={col_mae:>8.4f} "
-            f"R²={col_r2:>8.4f}"
+            f"R²={col_r2:>8.4f} "
+            f"std={col_std:>8.4f} "
+            f"RMSE/std={col_nrmse_by_std:>8.4f}"
+            if col_nrmse_by_std is not None
+            else
+            f"  {col:<24} "
+            f"RMSE={col_rmse:>8.4f} "
+            f"MAE={col_mae:>8.4f} "
+            f"R²={col_r2:>8.4f} "
+            f"std={col_std:>8.4f} "
+            f"RMSE/std={'None':>8}"
         )
 
     return {
@@ -128,6 +174,12 @@ def evaluate_model(
             "rmse": rmse,
             "mae": mae,
             "r2": r2,
+            "std": overall_std,
+            "min": overall_min,
+            "max": overall_max,
+            "range": overall_range,
+            "nrmse_by_std": overall_nrmse_by_std,
+            "nrmse_by_range": overall_nrmse_by_range,
         },
         "per_target": per_target,
     }
@@ -165,6 +217,8 @@ def save_model(
     feature_names: List[str],
     target_columns: List[str],
     input_columns: List[str],
+    normalization_mode: Optional[str],
+    participant_normalizers: Optional[Dict[str, Any]],
     output_dir: Path,
     config: TrainingConfig,
 ) -> Path:
@@ -194,6 +248,8 @@ def save_model(
         "feature_names": feature_names,
         "metrics": metrics,
         "xgboost_params": model.get_params(),
+        "target_type": "delta",
+        "normalization_mode": normalization_mode,
     }
 
     metadata_path = output_dir / f"{model_name}_metadata.json"
@@ -279,6 +335,8 @@ def main() -> None:
         feature_names=dataset["feature_names"],
         target_columns=dataset["target_columns"],
         input_columns=dataset["input_columns"],
+        normalization_mode=dataset.get("normalization_mode"),
+        participant_normalizers=dataset.get("participant_normalizers_serialized"),
         output_dir=output_dir,
         config=config,
     )

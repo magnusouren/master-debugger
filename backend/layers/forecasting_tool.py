@@ -20,6 +20,7 @@ from backend.types import (
     WindowFeatures,
     PredictedFeatures,
     ForecastingConfig,
+    ParticipantBaseline,
 )
 from backend.models.xgboost_forecaster import XGBoostForecaster
 from backend.models.forecast_feature_schema import TARGET_COLUMNS
@@ -44,6 +45,7 @@ class ForecastingTool:
         self._config = config or ForecastingConfig()
         self._feature_history: deque[WindowFeatures] = deque()
         self._forecaster: Optional[XGBoostForecaster] = None
+        self._baseline: Optional[ParticipantBaseline] = None
         self._output_callbacks: List[Callable[[PredictedFeatures], None]] = []
 
         self._is_enabled: bool = False
@@ -121,6 +123,14 @@ class ForecastingTool:
     def unload_model(self) -> None:
         self._forecaster = None
         self._logger.system("forecasting_tool_model_unloaded", {})
+
+    def set_baseline(self, baseline: ParticipantBaseline) -> None:
+        """Attach a participant baseline for optional runtime normalization."""
+        self._baseline = baseline
+
+    def clear_baseline(self) -> None:
+        """Clear any participant baseline used for runtime normalization."""
+        self._baseline = None
 
     def add_features(self, features: WindowFeatures) -> None:
         self._append_to_history(features)
@@ -203,6 +213,7 @@ class ForecastingTool:
 
     def reset(self) -> None:
         self._feature_history.clear()
+        self._baseline = None
         self._last_prediction_time = 0.0
         self._last_warmup_status = None
         self._forecast_counter = 0
@@ -216,9 +227,33 @@ class ForecastingTool:
         self._feature_history.append(features)
 
     def _trim_history(self, latest_window_end: float) -> None:
-        cutoff_time = latest_window_end - self._config.history_window_seconds
+        # Keep time-based retention, but never below model-required history windows.
+        min_seconds = float(self._config.history_window_seconds)
+        required_windows = self._compute_required_history()
+
+        if required_windows > 1 and len(self._feature_history) >= 2:
+            step_seconds = self._estimate_window_step_seconds()
+            if step_seconds > 0.0:
+                required_seconds = (required_windows - 1) * step_seconds
+                min_seconds = max(min_seconds, required_seconds)
+
+        cutoff_time = latest_window_end - min_seconds
         while self._feature_history and self._feature_history[0].window_end < cutoff_time:
             self._feature_history.popleft()
+
+    def _estimate_window_step_seconds(self) -> float:
+        if len(self._feature_history) < 2:
+            return 0.0
+
+        latest = self._feature_history[-1]
+        prev = self._feature_history[-2]
+
+        step = float(latest.window_end - prev.window_end)
+        if step > 0.0:
+            return step
+
+        duration = float(latest.window_end - latest.window_start)
+        return duration if duration > 0.0 else 0.0
 
     def _prepare_input_sequence(self) -> Optional[List[WindowFeatures]]:
         required_history = self._compute_required_history()
@@ -294,6 +329,55 @@ class ForecastingTool:
     def _has_loaded_model(self) -> bool:
         return self._forecaster is not None and self._forecaster.is_loaded()
 
+    def _uses_normalized_model_space(self) -> bool:
+        if not self._has_loaded_model():
+            return False
+
+        metadata = getattr(self._forecaster, "_metadata", {}) or {}
+        return str(metadata.get("normalization_mode", "")).lower() == "participant_zscore"
+
+    @staticmethod
+    def _column_to_baseline_metric(column: str) -> Optional[str]:
+        mapping = {
+            "pupil_ipa": "ipa",
+            "fixation_mean_duration_ms": "fixation_duration_ms",
+            "blink_rate_per_min": None,
+            "saccade_count": None,
+        }
+        return mapping.get(column)
+
+    def _normalize_runtime_value(self, column: str, value: Any) -> float:
+        raw_value = self._forecaster._safe_float(value)
+
+        if not self._uses_normalized_model_space() or self._baseline is None:
+            return raw_value
+
+        metric_name = self._column_to_baseline_metric(column)
+        if metric_name is None or metric_name not in self._baseline.metrics:
+            return raw_value
+
+        zscore = self._baseline.get_zscore(metric_name, raw_value)
+        if zscore is None or not np.isfinite(zscore):
+            return raw_value
+
+        return float(zscore)
+
+    def _denormalize_runtime_value(self, column: str, value: Any) -> float:
+        model_value = self._forecaster._safe_float(value)
+
+        if not self._uses_normalized_model_space() or self._baseline is None:
+            return model_value
+
+        metric_name = self._column_to_baseline_metric(column)
+        if metric_name is None:
+            return model_value
+
+        metric = self._baseline.metrics.get(metric_name)
+        if metric is None:
+            return model_value
+
+        return float(metric.mean + (model_value * metric.std))
+
     # -------------------------------------------------------------------------
     # Internal: schema resolution
     # -------------------------------------------------------------------------
@@ -344,23 +428,67 @@ class ForecastingTool:
     # Internal: feature flattening / model output parsing
     # -------------------------------------------------------------------------
 
-    def _flatten_windows(
+    @staticmethod
+    def _safe_window_stat(values: np.ndarray, fn: Callable[[np.ndarray], float]) -> float:
+        if values.size == 0:
+            return 0.0
+        return float(fn(values))
+
+    @staticmethod
+    def _safe_window_slope(values: np.ndarray) -> float:
+        if values.size < 2:
+            return 0.0
+
+        x = np.arange(values.size, dtype=np.float32)
+        x_mean = float(np.mean(x))
+        y_mean = float(np.mean(values))
+        denom = float(np.sum((x - x_mean) ** 2))
+        if denom == 0.0:
+            return 0.0
+
+        numer = float(np.sum((x - x_mean) * (values - y_mean)))
+        return numer / denom
+
+    def _build_summary_features(
         self,
-        windows: List[WindowFeatures],
+        history_matrix: np.ndarray,
         input_columns: List[str],
-    ) -> Tuple[List[float], List[str]]:
-        flat_features: List[float] = []
-        missing_inputs: List[str] = []
+    ) -> List[float]:
+        summary_values: List[float] = []
 
-        for window in windows:
-            feature_dict = window.features or {}
-            for col in input_columns:
-                val = feature_dict.get(col)
-                if val is None:
-                    missing_inputs.append(col)
-                flat_features.append(self._forecaster._safe_float(val))
+        for col_idx, _col_name in enumerate(input_columns):
+            series = history_matrix[:, col_idx]
 
-        return flat_features, missing_inputs
+            last_3 = series[-3:]
+            last_5 = series[-5:]
+            last_10 = series[-10:]
+            prev_5 = series[-10:-5] if series.shape[0] >= 10 else np.array([], dtype=series.dtype)
+
+            feature_values = [
+                float(series[-1]),
+                self._safe_window_stat(last_3, np.mean),
+                self._safe_window_stat(last_5, np.mean),
+                self._safe_window_stat(last_10, np.mean),
+                self._safe_window_stat(last_5, np.std),
+                self._safe_window_stat(last_10, np.std),
+                self._safe_window_stat(last_10, np.min),
+                self._safe_window_stat(last_10, np.max),
+                (
+                    self._safe_window_stat(last_10, np.max)
+                    - self._safe_window_stat(last_10, np.min)
+                ) if last_10.size > 0 else 0.0,
+                float(series[-1] - series[-2]) if series.shape[0] >= 2 else 0.0,
+                (
+                    self._safe_window_stat(last_5, np.mean)
+                    - self._safe_window_stat(prev_5, np.mean)
+                ) if prev_5.size > 0 else 0.0,
+                self._safe_window_slope(last_5),
+                self._safe_window_slope(last_10),
+            ]
+
+            summary_values.extend(float(v) for v in feature_values)
+
+        return summary_values
 
     def _predict_raw_array(
         self,
@@ -400,16 +528,29 @@ class ForecastingTool:
         windows: List[WindowFeatures],
         input_columns: List[str],
     ) -> Tuple[List[float], List[str]]:
-        flat_features: List[float] = []
+        history_rows: List[List[float]] = []
         missing_inputs: List[str] = []
 
         for window in windows:
             feature_dict = window.features or {}
+            row_values: List[float] = []
             for col in input_columns:
                 val = feature_dict.get(col)
                 if val is None:
                     missing_inputs.append(col)
-                flat_features.append(self._forecaster._safe_float(val))
+                row_values.append(self._normalize_runtime_value(col, val))
+            history_rows.append(row_values)
+
+        history_matrix = np.asarray(history_rows, dtype=np.float32)
+        flat_features = history_matrix.flatten().tolist()
+
+        metadata = getattr(self._forecaster, "_metadata", {}) or {}
+        expected_feature_count = int(
+            metadata.get("n_features", len(metadata.get("feature_names", [])) or len(flat_features))
+        )
+
+        if expected_feature_count > len(flat_features):
+            flat_features.extend(self._build_summary_features(history_matrix, input_columns))
 
         return flat_features, missing_inputs
 
@@ -487,12 +628,34 @@ class ForecastingTool:
         self,
         pred_row: np.ndarray,
         target_columns: List[str],
+        latest_window: WindowFeatures,
     ) -> dict:
-        return {
-            col: float(pred_row[idx])
-            for idx, col in enumerate(target_columns)
-        }
+        metadata = getattr(self._forecaster, "_metadata", {}) or {}
+        target_type = str(metadata.get("target_type", "absolute")).lower()
 
+        latest_features = latest_window.features or {}
+        predicted: dict = {}
+
+        for idx, col in enumerate(target_columns):
+            raw_pred = float(pred_row[idx])
+
+            if self._uses_normalized_model_space():
+                current_model_value = self._normalize_runtime_value(col, latest_features.get(col))
+                if target_type == "delta":
+                    predicted_model_value = current_model_value + raw_pred
+                else:
+                    predicted_model_value = raw_pred
+                predicted_value = self._denormalize_runtime_value(col, predicted_model_value)
+            else:
+                if target_type == "delta":
+                    current_value = self._forecaster._safe_float(latest_features.get(col))
+                    predicted_value = current_value + raw_pred
+                else:
+                    predicted_value = raw_pred
+
+            predicted[col] = float(predicted_value)
+
+        return predicted
     # -------------------------------------------------------------------------
     # Internal: prediction object construction
     # -------------------------------------------------------------------------
@@ -590,9 +753,12 @@ class ForecastingTool:
         if pred_row is None:
             return None
 
+        latest_window = recent_windows[-1]
+
         predicted_components = self._build_predicted_components(
             pred_row=pred_row,
             target_columns=target_columns,
+            latest_window=latest_window,
         )
 
         latest_window = recent_windows[-1]
