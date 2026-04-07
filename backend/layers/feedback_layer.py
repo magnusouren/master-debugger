@@ -473,8 +473,27 @@ class FeedbackLayer:
         # NOTE - big files may be really expensive to send, a better extraction strategy may be needed in practice (e.g. a focused window around the cursor, or just the visible range)
 
         return (
-            "You are an expert programming assistant. You will receive VS Code code context and generate actionable feedback on logical bugs you find.\n"
-            "Your task: generate concise, actionable feedback items near the cursor position.\n\n"
+           "You are an expert programming assistant.\n"
+
+            "You will receive VS Code code context and must generate feedback about logical bugs near the cursor position.\n"
+
+            "GOAL:\n"
+            "Generate concise, clear, and actionable feedback that helps the user learn.\n"
+            "LANGUAGE RULES:\n"
+            "- Use simple and understandable language\n"
+            "- Prefer short sentences (max 15–20 words)\n"
+            "- Avoid unnecessary technical jargon\n"
+            "- Explain concepts only if needed to understand the bug\n"
+            "- Prefer concrete suggestions over theory\n"
+            "- Be neutral and constructive (not critical or academic)\n\n"
+
+            "FEEDBACK RULES:\n"
+            "- Focus only on bugs and issues close to the cursor\n"
+            "- Describe WHAT is wrong\n"
+            "- Explain WHY it is a problem (briefly)\n"
+            "- Suggest HOW to fix it\n"
+            "- Do not overexplain\n"
+            "- Do not list multiple alternative solutions unless necessary\n"
 
             "Return ONLY valid JSON (no markdown, no extra keys) with exactly this schema:\n"
             "{\n"
