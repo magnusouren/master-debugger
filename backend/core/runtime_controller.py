@@ -270,6 +270,8 @@ class RuntimeController:
 
         )
 
+        self.reset_feedback_cooldown() 
+
         # Reconfigure layers as needed using the updated configuration
         if self._config is not None:
             self.configure(self._config)
@@ -962,6 +964,17 @@ class RuntimeController:
 
         remaining = max(0.0, cooldown - elapsed)
         return remaining
+    
+    def reset_feedback_cooldown(self) -> None:
+        """
+        Reset the feedback cooldown timer to start from now.
+        """
+        self._last_feedback_time = asyncio.get_event_loop().time()
+        self._logger.system(
+            "feedback_cooldown_reset",
+            {"timestamp": self._last_feedback_time},
+            level="DEBUG",
+        )
 
     def set_feedback_cooldown(self, cooldown_seconds: float) -> None:
         """
