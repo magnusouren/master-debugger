@@ -250,7 +250,6 @@ def save_model(
         "xgboost_params": model.get_params(),
         "target_type": "delta",
         "normalization_mode": normalization_mode,
-        "participant_normalizers": participant_normalizers,
     }
 
     metadata_path = output_dir / f"{model_name}_metadata.json"

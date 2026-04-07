@@ -18,12 +18,16 @@ except ImportError:
 
 DEFAULT_INPUT_COLUMNS = [
     "pupil_ipa",
-    # "fixation_mean_duration_ms",
+    "fixation_mean_duration_ms",
+    "blink_rate_per_min",
+    "saccade_count"
 ]
 
 DEFAULT_TARGET_COLUMNS = [
     "pupil_ipa",
-    # "fixation_mean_duration_ms",
+    "fixation_mean_duration_ms",
+    "blink_rate_per_min",
+    "saccade_count"
 ]
 
 
