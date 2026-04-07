@@ -1,6 +1,7 @@
 {
-  "version": "20260401_113227",
+  "version": "20260401_123651",
   "model_type": "xgboost_regressor",
+  "model_task": "regression",
   "task": "sequence_to_one_windowfeatures_forecasting",
   "history_window_size": 30,
   "prediction_horizon": 60,
@@ -296,6 +297,7 @@
     "validate_parameters": null,
     "verbosity": null
   },
+  "target_mode": "regression_delta",
   "target_type": "delta",
   "normalization_mode": "participant_zscore",
   "participant_normalizers": {
@@ -5051,5 +5053,9 @@
         "sample_count": 399
       }
     }
-  }
+  },
+  "classification_threshold": 0.6,
+  "classification_label_mode": "future_target_score_mean",
+  "decision_threshold": 0.5,
+  "class_balance": null
 }

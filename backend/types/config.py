@@ -168,6 +168,7 @@ class ForecastingConfig:
 
     # Confidence threshold
     min_confidence_threshold: float = 0.5
+    trigger_probability_threshold: float = 0.5
 
 
 @dataclass
@@ -181,6 +182,13 @@ class TrainingConfig:
     # history_window_size=120 means 120 × 0.5s = 60 seconds of history
     history_window_size: int = 60  
     prediction_horizon: int = 20   
+
+    # Training task / label settings
+    model_task: str = "regression"
+    target_mode: str = "regression_delta"
+    classification_threshold: float = 0.6
+    classification_label_mode: str = "future_target_score_mean"
+    decision_threshold: float = 0.5
 
     # Split ratios
     train_ratio: float = 0.7

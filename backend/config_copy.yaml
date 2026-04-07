@@ -28,6 +28,7 @@ forecasting:
     model_type: xgboost
     history_window_seconds: 30.0
     min_confidence_threshold: 0.5
+    trigger_probability_threshold: 0.5 # Used by binary classification models
 
 # Training Configuration (for offline model training)
 training:
@@ -37,6 +38,11 @@ training:
     # history_window_size=120 means 120 × 0.5s = 60 seconds of history
     history_window_size: 60 # Number of past windows as input
     prediction_horizon: 20 # Windows to look ahead (~30 seconds)
+    model_task: regression # regression or binary_classification
+    target_mode: regression_delta # regression_delta or binary_feedback_trigger
+    classification_threshold: 0.6 # Future-score threshold used to build binary labels
+    classification_label_mode: future_target_score_mean # future_target_score_mean or future_target_score_max
+    decision_threshold: 0.5 # Runtime/train decision cutoff for binary classification
     train_ratio: 0.7
     val_ratio: 0.15
     test_ratio: 0.15

@@ -28,7 +28,12 @@ from backend.services.eye_tracker.factory import create_eye_tracker_adapter
 from backend.services.eye_tracker.base import EyeTrackerAdapter
 from backend.types.code_context import CodeContext
 from backend.types.config import OperationMode, SystemConfig
-from backend.types.eye_tracking import PredictedFeatures, WindowFeatures, GazeSample
+from backend.types.eye_tracking import (
+    PredictedFeatures,
+    FeedbackTriggerPrediction,
+    WindowFeatures,
+    GazeSample,
+)
 from backend.types.feedback import FeedbackInteraction, FeedbackResponse
 from backend.types.messages import SystemStatus, SystemStatusMessage
 from backend.types.domain_events import DomainEvent, DomainEventType
@@ -1301,12 +1306,15 @@ class RuntimeController:
                     level="INFO",
                 )
     
-    def _on_predicted_features(self, predicted: PredictedFeatures) -> None:
+    def _on_predicted_features(
+        self,
+        predicted: PredictedFeatures | FeedbackTriggerPrediction,
+    ) -> None:
         """
-        Handle predicted features from Forecasting Tool.
+        Handle forecasting output from Forecasting Tool.
         
         Args:
-            predicted: Predicted features.
+            predicted: Predicted features or classification trigger decision.
         """
 
         # Nothing to do in reactive mode
@@ -1319,6 +1327,29 @@ class RuntimeController:
 
         # Don't mix forecasted windows into baseline computation.
         if self._reactive_tool.is_recording_baseline():
+            return
+
+        if isinstance(predicted, FeedbackTriggerPrediction):
+            self._logger.experiment(
+                "forecast_feedback_trigger_prediction_logged",
+                {
+                    "forecast_id": predicted.forecast_id,
+                    "window_id": predicted.window_id,
+                    "prediction_timestamp": predicted.prediction_timestamp,
+                    "target_window_start": predicted.target_window_start,
+                    "target_window_end": predicted.target_window_end,
+                    "prediction_horizon_seconds": predicted.horizon_seconds,
+                    "trigger_feedback": predicted.trigger_feedback,
+                    "probability": predicted.probability,
+                    "confidence": predicted.confidence,
+                    "source_window_id": predicted.source_window_id,
+                    "metadata": predicted.metadata,
+                },
+                level="INFO",
+            )
+
+            if predicted.trigger_feedback:
+                self._try_deliver_feedback(force=False)
             return
 
         if not predicted.window_id:

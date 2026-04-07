@@ -4,6 +4,7 @@ from .eye_tracking import (
     GazeSample,
     WindowFeatures,
     PredictedFeatures,
+    FeedbackTriggerPrediction,
 )
 from .user_state import (
     UserStateScore,
@@ -54,6 +55,7 @@ __all__ = [
     "GazeSample",
     "WindowFeatures",
     "PredictedFeatures",
+    "FeedbackTriggerPrediction",
     # User state types
     "UserStateScore",
     "UserStateEstimate",

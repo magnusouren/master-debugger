@@ -12,7 +12,7 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -22,13 +22,24 @@ except ImportError:
     print("XGBoost not installed. Run: pip install xgboost")
     raise SystemExit(1)
 
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    confusion_matrix,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    r2_score,
+    recall_score,
+    roc_auc_score,
+)
 
 from backend.types import SystemConfig, TrainingConfig
 from backend.training.dataset import prepare_dataset
 
 
-def train_model(
+def train_regression_model(
     X_train: np.ndarray,
     y_train: np.ndarray,
     X_val: np.ndarray,
@@ -39,6 +50,7 @@ def train_model(
     """
     Train XGBoost regressor with early stopping.
     """
+    _ = feature_names
     print("\n--- Training XGBoost ---")
 
     model = xgb.XGBRegressor(
@@ -73,7 +85,92 @@ def train_model(
     return model
 
 
-def evaluate_model(
+def train_classification_model(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    feature_names: List[str],
+    config: TrainingConfig,
+) -> xgb.XGBClassifier:
+    """
+    Train XGBoost binary classifier with early stopping.
+    """
+    _ = feature_names
+    print("\n--- Training XGBoost Classifier ---")
+
+    y_train_1d = np.asarray(y_train).reshape(-1).astype(np.int32)
+    y_val_1d = np.asarray(y_val).reshape(-1).astype(np.int32)
+
+    positive_count = int(np.sum(y_train_1d == 1))
+    negative_count = int(np.sum(y_train_1d == 0))
+    scale_pos_weight = float(negative_count / positive_count) if positive_count > 0 else 1.0
+
+    model = xgb.XGBClassifier(
+        objective="binary:logistic",
+        eval_metric="logloss",
+        n_estimators=config.n_estimators,
+        max_depth=config.max_depth,
+        learning_rate=config.learning_rate,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        min_child_weight=3,
+        reg_alpha=0.1,
+        reg_lambda=1.0,
+        random_state=config.random_state,
+        n_jobs=-1,
+        early_stopping_rounds=config.early_stopping_rounds,
+        scale_pos_weight=scale_pos_weight,
+    )
+
+    model.fit(
+        X_train,
+        y_train_1d,
+        eval_set=[(X_val, y_val_1d)],
+        verbose=False,
+    )
+
+    best_iteration = getattr(model, "best_iteration", None)
+    best_score = getattr(model, "best_score", None)
+
+    if best_iteration is not None:
+        print(f"\nBest iteration: {best_iteration}")
+    if best_score is not None:
+        print(f"Best validation score: {best_score:.4f}")
+
+    return model
+
+
+def train_model(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    feature_names: List[str],
+    config: TrainingConfig,
+    model_task: str,
+) -> Any:
+    if model_task == "binary_classification":
+        return train_classification_model(
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            feature_names=feature_names,
+            config=config,
+        )
+
+    return train_regression_model(
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+        feature_names=feature_names,
+        config=config,
+    )
+
+
+def evaluate_regression_model(
     model: xgb.XGBRegressor,
     X_test: np.ndarray,
     y_test: np.ndarray,
@@ -93,13 +190,11 @@ def evaluate_model(
     if y_pred.ndim == 1:
         y_pred = y_pred.reshape(-1, 1)
 
-    # Overall regression metrics across all outputs
     mse = mean_squared_error(y_test, y_pred)
     rmse = float(np.sqrt(mse))
     mae = float(mean_absolute_error(y_test, y_pred))
     r2 = float(r2_score(y_test, y_pred, multioutput="uniform_average"))
 
-    # Global descriptive stats over all targets combined
     overall_std = float(np.std(y_test))
     overall_min = float(np.min(y_test))
     overall_max = float(np.max(y_test))
@@ -118,7 +213,6 @@ def evaluate_model(
     if overall_nrmse_by_range is not None:
         print(f"Overall RMSE / range:  {overall_nrmse_by_range:.4f}")
 
-    # Per-target metrics
     per_target: Dict[str, Dict[str, float]] = {}
     print("\nPer-target metrics:")
     for idx, col in enumerate(target_columns):
@@ -185,8 +279,96 @@ def evaluate_model(
     }
 
 
+def evaluate_classification_model(
+    model: xgb.XGBClassifier,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    decision_threshold: float,
+) -> Dict[str, Any]:
+    """
+    Evaluate binary classifier on the test split.
+    """
+    print("\n--- Classification Evaluation on Test Set ---")
+
+    y_true = np.asarray(y_test).reshape(-1).astype(np.int32)
+    y_prob = np.asarray(model.predict_proba(X_test))[:, 1]
+    y_pred = (y_prob >= float(decision_threshold)).astype(np.int32)
+
+    positive_ratio = float(np.mean(y_true == 1)) if y_true.size > 0 else 0.0
+    majority_accuracy = float(max(positive_ratio, 1.0 - positive_ratio)) if y_true.size > 0 else 0.0
+
+    accuracy = float(accuracy_score(y_true, y_pred))
+    precision = float(precision_score(y_true, y_pred, zero_division=0))
+    recall = float(recall_score(y_true, y_pred, zero_division=0))
+    f1 = float(f1_score(y_true, y_pred, zero_division=0))
+
+    try:
+        roc_auc = float(roc_auc_score(y_true, y_prob))
+    except ValueError:
+        roc_auc = None
+
+    try:
+        pr_auc = float(average_precision_score(y_true, y_prob))
+    except ValueError:
+        pr_auc = None
+
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+
+    print(f"Accuracy:              {accuracy:.4f}")
+    print(f"Precision:             {precision:.4f}")
+    print(f"Recall:                {recall:.4f}")
+    print(f"F1:                    {f1:.4f}")
+    print(f"Positive class ratio:  {positive_ratio:.4f}")
+    print(f"Majority accuracy:     {majority_accuracy:.4f}")
+    if roc_auc is not None:
+        print(f"ROC AUC:               {roc_auc:.4f}")
+    if pr_auc is not None:
+        print(f"PR AUC:                {pr_auc:.4f}")
+    print(f"Decision threshold:    {decision_threshold:.4f}")
+    print(f"Confusion matrix:      {cm.tolist()}")
+
+    return {
+        "overall": {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "roc_auc": roc_auc,
+            "pr_auc": pr_auc,
+            "positive_class_ratio": positive_ratio,
+            "majority_class_accuracy": majority_accuracy,
+            "decision_threshold": float(decision_threshold),
+        },
+        "confusion_matrix": cm.tolist(),
+    }
+
+
+def evaluate_model(
+    model: Any,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    target_columns: List[str],
+    model_task: str,
+    decision_threshold: float,
+) -> Dict[str, Any]:
+    if model_task == "binary_classification":
+        return evaluate_classification_model(
+            model=model,
+            X_test=X_test,
+            y_test=y_test,
+            decision_threshold=decision_threshold,
+        )
+
+    return evaluate_regression_model(
+        model=model,
+        X_test=X_test,
+        y_test=y_test,
+        target_columns=target_columns,
+    )
+
+
 def get_feature_importance(
-    model: xgb.XGBRegressor,
+    model: Any,
     feature_names: List[str],
     top_n: int = 20,
 ) -> Dict[str, float]:
@@ -212,13 +394,20 @@ def get_feature_importance(
 
 
 def save_model(
-    model: xgb.XGBRegressor,
+    model: Any,
     metrics: Dict[str, Any],
     feature_names: List[str],
     target_columns: List[str],
     input_columns: List[str],
     normalization_mode: Optional[str],
     participant_normalizers: Optional[Dict[str, Any]],
+    model_task: str,
+    target_mode: str,
+    target_type: str,
+    classification_threshold: Optional[float],
+    classification_label_mode: Optional[str],
+    decision_threshold: float,
+    class_balance: Optional[Dict[str, Any]],
     output_dir: Path,
     config: TrainingConfig,
 ) -> Path:
@@ -230,7 +419,8 @@ def save_model(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     version = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_name = f"xgb_forecaster_{version}"
+    model_stem = "xgb_classifier" if model_task == "binary_classification" else "xgb_forecaster"
+    model_name = f"{model_stem}_{version}"
 
     model_path = output_dir / f"{model_name}.json"
     model.save_model(str(model_path))
@@ -238,7 +428,8 @@ def save_model(
 
     metadata = {
         "version": version,
-        "model_type": "xgboost_regressor",
+        "model_type": "xgboost_classifier" if model_task == "binary_classification" else "xgboost_regressor",
+        "model_task": model_task,
         "task": "sequence_to_one_windowfeatures_forecasting",
         "history_window_size": config.history_window_size,
         "prediction_horizon": config.prediction_horizon,
@@ -248,9 +439,14 @@ def save_model(
         "feature_names": feature_names,
         "metrics": metrics,
         "xgboost_params": model.get_params(),
-        "target_type": "delta",
+        "target_mode": target_mode,
+        "target_type": target_type,
         "normalization_mode": normalization_mode,
         "participant_normalizers": participant_normalizers,
+        "classification_threshold": classification_threshold,
+        "classification_label_mode": classification_label_mode,
+        "decision_threshold": decision_threshold,
+        "class_balance": class_balance,
     }
 
     metadata_path = output_dir / f"{model_name}_metadata.json"
@@ -308,6 +504,8 @@ def main() -> None:
     split_dir = Path(args.split_dir) if args.split_dir else None
 
     dataset = prepare_dataset(config=config, split_dir=split_dir)
+    model_task = str(dataset.get("model_task", "regression") or "regression").lower()
+    decision_threshold = float(getattr(config, "decision_threshold", 0.5))
 
     model = train_model(
         dataset["X_train"],
@@ -316,6 +514,7 @@ def main() -> None:
         dataset["y_val"],
         dataset["feature_names"],
         config=config,
+        model_task=model_task,
     )
 
     metrics = evaluate_model(
@@ -323,6 +522,8 @@ def main() -> None:
         dataset["X_test"],
         dataset["y_test"],
         dataset["target_columns"],
+        model_task=model_task,
+        decision_threshold=decision_threshold,
     )
 
     get_feature_importance(model, dataset["feature_names"])
@@ -338,6 +539,13 @@ def main() -> None:
         input_columns=dataset["input_columns"],
         normalization_mode=dataset.get("normalization_mode"),
         participant_normalizers=dataset.get("participant_normalizers_serialized"),
+        model_task=model_task,
+        target_mode=dataset.get("target_mode", "regression_delta"),
+        target_type=dataset.get("target_type", "delta"),
+        classification_threshold=dataset.get("classification_threshold"),
+        classification_label_mode=dataset.get("classification_label_mode"),
+        decision_threshold=decision_threshold,
+        class_balance=dataset.get("class_balance"),
         output_dir=output_dir,
         config=config,
     )

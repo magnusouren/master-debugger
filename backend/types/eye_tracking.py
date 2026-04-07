@@ -91,3 +91,21 @@ class PredictedFeatures:
             valid_sample_ratio=max(0.0, min(1.0, float(self.confidence))),
             enabled_metrics=self.enabled_metrics.copy(),
         )
+
+
+@dataclass
+class FeedbackTriggerPrediction:
+    """
+    Binary proactive trigger decision emitted by classification-mode forecasting.
+    """
+    prediction_timestamp: float
+    target_window_start: float
+    target_window_end: float
+    horizon_seconds: float
+    trigger_feedback: bool
+    probability: float
+    confidence: float
+    forecast_id: Optional[str] = None
+    source_window_id: Optional[str] = None
+    window_id: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)

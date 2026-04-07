@@ -110,6 +110,27 @@ def _get_target_columns(config: Optional[TrainingConfig] = None) -> List[str]:
     return list(DEFAULT_TARGET_COLUMNS)
 
 
+def _resolve_model_task(config: Optional[TrainingConfig] = None) -> str:
+    if config is None:
+        return "regression"
+    return str(getattr(config, "model_task", "regression") or "regression").lower()
+
+
+def _resolve_target_mode(config: Optional[TrainingConfig] = None) -> str:
+    if config is None:
+        return "regression_delta"
+
+    model_task = _resolve_model_task(config)
+    target_mode = getattr(config, "target_mode", None)
+    if model_task == "binary_classification" and target_mode in (None, "", "regression_delta"):
+        return "binary_feedback_trigger"
+
+    if target_mode:
+        return str(target_mode).lower()
+
+    return "regression_delta"
+
+
 def _validate_columns_exist(df: pd.DataFrame, columns: List[str], label: str) -> None:
     """
     Raise a clear error if expected columns are missing from the dataframe.
@@ -137,6 +158,46 @@ def _extract_row_values(row: pd.Series, columns: List[str]) -> Optional[List[flo
         values.append(val)
 
     return values
+
+
+def _normalized_value_to_unit_score(value: float) -> float:
+    """
+    Map a normalized value into a bounded score space.
+
+    This mirrors the baseline fallback normalization shape used in runtime:
+    higher normalized values map to higher cognitive-load scores.
+    """
+    clipped = max(-4.0, min(4.0, float(value)))
+    return float(1.0 / (1.0 + np.exp(-0.6 * clipped)))
+
+
+def _compute_future_feedback_score(
+    future_row: pd.Series,
+    target_columns: List[str],
+    label_mode: str,
+) -> Optional[float]:
+    """
+    Compute a lightweight future trigger score from normalized future targets.
+
+    This is intentionally simple and explainable: it only uses the future target
+    row already selected for the sample and aggregates per-column bounded scores.
+    """
+    scores: List[float] = []
+
+    for col in target_columns:
+        value = _to_float(future_row.get(col))
+        if value is None:
+            continue
+        scores.append(_normalized_value_to_unit_score(value))
+
+    if not scores:
+        return None
+
+    mode = str(label_mode or "future_target_score_mean").lower()
+    if mode == "future_target_score_max":
+        return float(max(scores))
+
+    return float(sum(scores) / len(scores))
 
 
 def fit_participant_normalizers(
@@ -385,6 +446,9 @@ def create_sequences(
     horizon_steps: int = PREDICTION_HORIZON,
     input_columns: Optional[List[str]] = None,
     target_columns: Optional[List[str]] = None,
+    target_mode: str = "regression_delta",
+    classification_threshold: float = 0.6,
+    classification_label_mode: str = "future_target_score_mean",
 ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
     Create sequence-to-one forecasting samples.
@@ -411,7 +475,7 @@ def create_sequences(
         target_columns = list(DEFAULT_TARGET_COLUMNS)
 
     X_list: List[List[float]] = []
-    y_list: List[List[float]] = []
+    y_list: List[Any] = []
     participant_ids: List[str] = []
 
     for (pid, trial), group in df.groupby(["participant_id", "trial"]):
@@ -432,30 +496,43 @@ def create_sequences(
             current_row = group.iloc[current_idx]
             target_row = group.iloc[target_idx]
 
-            current_vector = _extract_row_values(current_row, target_columns)
-            future_vector = _extract_row_values(target_row, target_columns)
-
-            if current_vector is None or future_vector is None:
-                continue
-
-            target_vector = [
-                future_val - current_val
-                for current_val, future_val in zip(current_vector, future_vector)
-            ]
-
             input_vector = _build_input_vector(history_rows, input_columns)
             if input_vector is None:
                 continue
 
+            if target_mode == "binary_feedback_trigger":
+                future_score = _compute_future_feedback_score(
+                    future_row=target_row,
+                    target_columns=target_columns,
+                    label_mode=classification_label_mode,
+                )
+                if future_score is None:
+                    continue
+                target_value = int(future_score >= float(classification_threshold))
+                y_list.append(target_value)
+            else:
+                current_vector = _extract_row_values(current_row, target_columns)
+                future_vector = _extract_row_values(target_row, target_columns)
+
+                if current_vector is None or future_vector is None:
+                    continue
+
+                target_vector = [
+                    future_val - current_val
+                    for current_val, future_val in zip(current_vector, future_vector)
+                ]
+                y_list.append(target_vector)
+
             X_list.append(input_vector)
-            y_list.append(target_vector)
             participant_ids.append(str(pid))
 
-    return (
-        np.array(X_list, dtype=np.float32),
-        np.array(y_list, dtype=np.float32),
-        participant_ids,
-    )
+    X = np.array(X_list, dtype=np.float32)
+    if target_mode == "binary_feedback_trigger":
+        y = np.array(y_list, dtype=np.int32)
+    else:
+        y = np.array(y_list, dtype=np.float32)
+
+    return X, y, participant_ids
 
 
 def get_feature_names(
@@ -561,6 +638,30 @@ def split_by_participant(
     }
 
 
+def _binary_class_balance(y: np.ndarray) -> Dict[str, float | int]:
+    arr = np.asarray(y).reshape(-1)
+    total = int(arr.size)
+    positives = int(np.sum(arr == 1))
+    negatives = int(np.sum(arr == 0))
+    ratio = float(positives / total) if total > 0 else 0.0
+    return {
+        "total": total,
+        "positives": positives,
+        "negatives": negatives,
+        "positive_ratio": ratio,
+    }
+
+
+def _print_binary_split_balance(split_name: str, y: np.ndarray) -> Dict[str, float | int]:
+    stats = _binary_class_balance(y)
+    print(
+        f"  {split_name:<5} positives={stats['positives']:<6} "
+        f"negatives={stats['negatives']:<6} "
+        f"positive_ratio={stats['positive_ratio']:.4f}"
+    )
+    return stats
+
+
 def prepare_dataset(
     config: Optional[TrainingConfig] = None,
     data_path: Optional[Path] = None,
@@ -582,6 +683,12 @@ def prepare_dataset(
 
     input_columns = _get_input_columns(config)
     target_columns = _get_target_columns(config)
+    model_task = _resolve_model_task(config)
+    target_mode = _resolve_target_mode(config)
+    classification_threshold = float(getattr(config, "classification_threshold", 0.6))
+    classification_label_mode = str(
+        getattr(config, "classification_label_mode", "future_target_score_mean")
+    )
 
     print("Loading processed data...")
     df = load_processed_data(effective_data_path)
@@ -620,6 +727,9 @@ def prepare_dataset(
         horizon_steps=horizon_steps,
         input_columns=input_columns,
         target_columns=target_columns,
+        target_mode=target_mode,
+        classification_threshold=classification_threshold,
+        classification_label_mode=classification_label_mode,
     )
     print(f"Created {len(X)} samples")
 
@@ -631,6 +741,15 @@ def prepare_dataset(
     print(f"  Val:   {len(splits['val'][0])} samples")
     print(f"  Test:  {len(splits['test'][0])} samples")
 
+    class_balance: Optional[Dict[str, Dict[str, float | int]]] = None
+    if target_mode == "binary_feedback_trigger":
+        print("\nBinary target distribution:")
+        class_balance = {
+            "train": _print_binary_split_balance("train", splits["train"][1]),
+            "val": _print_binary_split_balance("val", splits["val"][1]),
+            "test": _print_binary_split_balance("test", splits["test"][1]),
+        }
+
     return {
         "X_train": splits["train"][0],
         "y_train": splits["train"][1],
@@ -641,8 +760,13 @@ def prepare_dataset(
         "feature_names": get_feature_names(history_size, input_columns=input_columns),
         "input_columns": input_columns,
         "target_columns": target_columns,
+        "model_task": model_task,
+        "target_mode": target_mode,
         "normalization_mode": "participant_zscore",
-        "target_type": "delta",
+        "target_type": "delta" if target_mode == "regression_delta" else "binary_label",
+        "classification_threshold": classification_threshold,
+        "classification_label_mode": classification_label_mode,
+        "class_balance": class_balance,
         "participant_normalizers": participant_normalizers,
         "participant_normalizers_serialized": serialize_participant_normalizers(participant_normalizers),
         "config": config,
@@ -654,15 +778,19 @@ if __name__ == "__main__":
     dataset = prepare_dataset(config=training_config)
 
     print(f"\nFeatures per sample: {dataset['X_train'].shape[1]}")
-    print(f"Targets per sample:  {dataset['y_train'].shape[1]}")
+    if dataset["target_mode"] == "binary_feedback_trigger":
+        print("Targets per sample:  1")
+        _print_binary_split_balance("train", dataset["y_train"])
+    else:
+        print(f"Targets per sample:  {dataset['y_train'].shape[1]}")
 
-    print("\nTarget statistics (train split):")
-    for idx, col in enumerate(dataset["target_columns"]):
-        series = dataset["y_train"][:, idx]
-        print(
-            f"  {col:<24} "
-            f"mean={series.mean():>8.4f} "
-            f"std={series.std():>8.4f} "
-            f"min={series.min():>8.4f} "
-            f"max={series.max():>8.4f}"
-        )
+        print("\nTarget statistics (train split):")
+        for idx, col in enumerate(dataset["target_columns"]):
+            series = dataset["y_train"][:, idx]
+            print(
+                f"  {col:<24} "
+                f"mean={series.mean():>8.4f} "
+                f"std={series.std():>8.4f} "
+                f"min={series.min():>8.4f} "
+                f"max={series.max():>8.4f}"
+            )

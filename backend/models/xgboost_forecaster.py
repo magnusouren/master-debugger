@@ -36,12 +36,14 @@ class XGBoostForecaster:
         if not XGBOOST_AVAILABLE:
             raise ImportError("XGBoost is required. Install with: pip install xgboost")
 
-        self._model: Optional[xgb.XGBRegressor] = None
+        self._model: Optional[Any] = None
         self._metadata: Dict[str, Any] = {}
         self._history_size: int = 5
         self._feature_names: List[str] = []
         self._input_columns: List[str] = list(DEFAULT_INPUT_COLUMNS)
         self._target_columns: List[str] = list(DEFAULT_TARGET_COLUMNS)
+        self._model_task: str = "regression"
+        self._decision_threshold: float = 0.5
 
         if model_path is not None:
             self.load_model(model_path)
@@ -61,11 +63,11 @@ class XGBoostForecaster:
 
         model_path = self._resolve_json_pointer(model_path)
 
-        self._model = xgb.XGBRegressor()
-        self._model.load_model(str(model_path))
-
         metadata_path = self._resolve_metadata_path(model_path)
         self._load_metadata(metadata_path)
+
+        self._model = self._instantiate_model()
+        self._model.load_model(str(model_path))
 
         print(f"Loaded model: {model_path}")
         return True
@@ -79,6 +81,12 @@ class XGBoostForecaster:
 
     def _load_metadata(self, metadata_path: Path) -> None:
         self._metadata = {}
+        self._history_size = 5
+        self._feature_names = []
+        self._input_columns = list(DEFAULT_INPUT_COLUMNS)
+        self._target_columns = list(DEFAULT_TARGET_COLUMNS)
+        self._model_task = "regression"
+        self._decision_threshold = 0.5
 
         if not metadata_path.exists():
             return
@@ -94,6 +102,13 @@ class XGBoostForecaster:
         self._feature_names = list(self._metadata.get("feature_names", []))
         self._input_columns = list(self._metadata.get("input_columns", DEFAULT_INPUT_COLUMNS))
         self._target_columns = list(self._metadata.get("target_columns", DEFAULT_TARGET_COLUMNS))
+        self._model_task = str(self._metadata.get("model_task", "regression") or "regression").lower()
+        self._decision_threshold = float(self._metadata.get("decision_threshold", 0.5))
+
+    def _instantiate_model(self) -> Any:
+        if self._model_task == "binary_classification":
+            return xgb.XGBClassifier()
+        return xgb.XGBRegressor()
 
     def _resolve_json_pointer(self, path: Path) -> Path:
         try:
@@ -120,6 +135,14 @@ class XGBoostForecaster:
     @property
     def feature_names(self) -> List[str]:
         return list(self._feature_names)
+
+    @property
+    def model_task(self) -> str:
+        return self._model_task
+
+    @property
+    def decision_threshold(self) -> float:
+        return self._decision_threshold
 
     @property
     def input_columns(self) -> List[str]:
@@ -215,6 +238,33 @@ class XGBoostForecaster:
 
         return np.asarray(prediction)
 
+    def predict_probability(self, flat_features: List[float]) -> float:
+        if self._model is None:
+            raise ValueError("Model not loaded")
+        if self._model_task != "binary_classification":
+            raise ValueError("Probability inference is only available for classification models")
+
+        X = np.array([flat_features], dtype=np.float32)
+
+        try:
+            probabilities = np.asarray(self._model.predict_proba(X))
+        except ValueError as e:
+            expected_features = getattr(
+                self._model,
+                "n_features_in_",
+                len(self._input_columns) * self._history_size,
+            )
+            raise ValueError(
+                "Feature shape mismatch during classification inference: "
+                f"expected_features={expected_features}, got_features={X.shape[1]}, "
+                f"history_size={self._history_size}, input_columns={self._input_columns}"
+            ) from e
+
+        if probabilities.ndim != 2 or probabilities.shape[0] < 1 or probabilities.shape[1] < 2:
+            raise ValueError(f"Unexpected predict_proba shape: {list(probabilities.shape)}")
+
+        return float(probabilities[0, 1])
+
     def _extract_prediction_row(self, pred_arr: np.ndarray) -> Optional[np.ndarray]:
         if pred_arr.ndim == 2 and pred_arr.shape[0] >= 1:
             pred_row = pred_arr[0]
@@ -272,10 +322,14 @@ class XGBoostForecaster:
         return {
             "loaded": self.is_loaded(),
             "version": self._metadata.get("version"),
+            "model_task": self._model_task,
+            "target_mode": self._metadata.get("target_mode"),
+            "normalization_mode": self._metadata.get("normalization_mode"),
             "history_window_size": self._history_size,
             "prediction_horizon": self._metadata.get("prediction_horizon"),
             "input_columns": self._input_columns,
             "target_columns": self._target_columns,
+            "decision_threshold": self._decision_threshold,
             "metrics": self._metadata.get("metrics", {}),
         }
 

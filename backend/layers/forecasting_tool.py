@@ -19,6 +19,7 @@ from backend.services.logger_service import LoggerService
 from backend.types import (
     WindowFeatures,
     PredictedFeatures,
+    FeedbackTriggerPrediction,
     ForecastingConfig,
     ParticipantBaseline,
 )
@@ -30,6 +31,8 @@ DEFAULT_INPUT_COLUMNS = [
     "pupil_ipa",
     "fixation_mean_duration_ms",
 ]
+
+ForecastingOutput = PredictedFeatures | FeedbackTriggerPrediction
 
 
 class ForecastingTool:
@@ -46,7 +49,7 @@ class ForecastingTool:
         self._feature_history: deque[WindowFeatures] = deque()
         self._forecaster: Optional[XGBoostForecaster] = None
         self._baseline: Optional[ParticipantBaseline] = None
-        self._output_callbacks: List[Callable[[PredictedFeatures], None]] = []
+        self._output_callbacks: List[Callable[[ForecastingOutput], None]] = []
 
         self._is_enabled: bool = False
         self._last_prediction_time: float = 0.0
@@ -149,6 +152,10 @@ class ForecastingTool:
         if prediction.confidence < self._config.min_confidence_threshold:
             return
 
+        if isinstance(prediction, FeedbackTriggerPrediction):
+            if not prediction.trigger_feedback:
+                return
+
         for callback in list(self._output_callbacks):
             try:
                 callback(prediction)
@@ -159,7 +166,7 @@ class ForecastingTool:
                     level="ERROR",
                 )
 
-    def predict(self) -> Optional[PredictedFeatures]:
+    def predict(self) -> Optional[ForecastingOutput]:
         if not self._config.prediction_horizon_seconds:
             self._logger.system(
                 "forecasting_tool_no_horizon_configured",
@@ -170,7 +177,7 @@ class ForecastingTool:
 
         return self.predict_at_horizon(self._config.prediction_horizon_seconds)
 
-    def predict_at_horizon(self, horizon_seconds: float) -> Optional[PredictedFeatures]:
+    def predict_at_horizon(self, horizon_seconds: float) -> Optional[ForecastingOutput]:
         started_at = time.perf_counter()
         forecast_id = self._next_forecast_id()
 
@@ -186,8 +193,13 @@ class ForecastingTool:
 
         if prediction is not None:
             elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+            event_name = (
+                "forecasting_tool_classification_latency"
+                if isinstance(prediction, FeedbackTriggerPrediction)
+                else "forecasting_tool_prediction_latency"
+            )
             self._logger.system(
-                "forecasting_tool_prediction_latency",
+                event_name,
                 {
                     "latency_ms": round(elapsed_ms, 3),
                     "history_windows": len(input_sequence),
@@ -200,13 +212,13 @@ class ForecastingTool:
 
     def register_output_callback(
         self,
-        callback: Callable[[PredictedFeatures], None],
+        callback: Callable[[ForecastingOutput], None],
     ) -> None:
         self._output_callbacks.append(callback)
 
     def unregister_output_callback(
         self,
-        callback: Callable[[PredictedFeatures], None],
+        callback: Callable[[ForecastingOutput], None],
     ) -> None:
         if callback in self._output_callbacks:
             self._output_callbacks.remove(callback)
@@ -329,12 +341,27 @@ class ForecastingTool:
     def _has_loaded_model(self) -> bool:
         return self._forecaster is not None and self._forecaster.is_loaded()
 
+    def _model_task(self) -> str:
+        if not self._has_loaded_model():
+            return "regression"
+        return str(getattr(self._forecaster, "model_task", "regression") or "regression").lower()
+
     def _uses_normalized_model_space(self) -> bool:
         if not self._has_loaded_model():
             return False
 
         metadata = getattr(self._forecaster, "_metadata", {}) or {}
         return str(metadata.get("normalization_mode", "")).lower() == "participant_zscore"
+
+    def _classification_trigger_threshold(self) -> float:
+        if not self._has_loaded_model():
+            return float(self._config.trigger_probability_threshold)
+
+        metadata = getattr(self._forecaster, "_metadata", {}) or {}
+        if "decision_threshold" in metadata:
+            return float(metadata.get("decision_threshold", 0.5))
+
+        return float(self._config.trigger_probability_threshold)
 
     @staticmethod
     def _column_to_baseline_metric(column: str) -> Optional[str]:
@@ -550,6 +577,35 @@ class ForecastingTool:
             )
             return None
 
+    def _predict_classification_probability(
+        self,
+        flat_features: List[float],
+        recent_windows: List[WindowFeatures],
+        input_columns: List[str],
+        target_columns: List[str],
+        model_history_size: int,
+        full_history_size: int,
+    ) -> Optional[float]:
+        try:
+            return float(self._forecaster.predict_probability(flat_features))
+        except Exception as e:
+            last_window = recent_windows[-1]
+            self._logger.system(
+                "forecasting_tool_inference_error",
+                {
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "history_windows": full_history_size,
+                    "model_history_size": model_history_size,
+                    "input_columns": input_columns,
+                    "target_columns": target_columns,
+                    "flat_feature_count": len(flat_features),
+                    "last_window_keys": sorted(list((last_window.features or {}).keys())),
+                },
+                level="ERROR",
+            )
+            return None
+
     # -------------------------------------------------------------------------
     # Internal: feature flattening / model output parsing
     # -------------------------------------------------------------------------
@@ -730,6 +786,36 @@ class ForecastingTool:
         setattr(predicted, "valid_sample_ratio", latest_window.valid_sample_ratio)
         return predicted
 
+    def _build_feedback_trigger_prediction(
+        self,
+        latest_window: WindowFeatures,
+        forecast_id: str,
+        horizon_seconds: float,
+        probability: float,
+        confidence: float,
+        threshold: float,
+    ) -> FeedbackTriggerPrediction:
+        window_duration = latest_window.window_end - latest_window.window_start
+        trigger_feedback = bool(probability >= threshold)
+
+        return FeedbackTriggerPrediction(
+            prediction_timestamp=latest_window.window_end,
+            target_window_start=latest_window.window_end + horizon_seconds,
+            target_window_end=latest_window.window_end + horizon_seconds + window_duration,
+            horizon_seconds=horizon_seconds,
+            trigger_feedback=trigger_feedback,
+            probability=float(probability),
+            confidence=float(confidence),
+            forecast_id=forecast_id,
+            source_window_id=latest_window.window_id,
+            window_id=self._next_pred_window_id(forecast_id),
+            metadata={
+                "decision_threshold": float(threshold),
+                "model_task": self._model_task(),
+                "source_window_id": latest_window.window_id,
+            },
+        )
+
     # -------------------------------------------------------------------------
     # Internal: core inference
     # -------------------------------------------------------------------------
@@ -739,7 +825,7 @@ class ForecastingTool:
         input_sequence: List[WindowFeatures],
         forecast_id: str,
         horizon_seconds: float,
-    ) -> Optional[PredictedFeatures]:
+    ) -> Optional[ForecastingOutput]:
         if not self._has_loaded_model():
             self._logger.system(
                 "forecasting_tool_no_model",
@@ -759,12 +845,86 @@ class ForecastingTool:
         if recent_windows is None:
             return None
 
+        latest_window = recent_windows[-1]
         flat_features, missing_inputs = self._flatten_windows(
             windows=recent_windows,
             input_columns=input_columns,
         )
 
+        expected_input_count = len(recent_windows) * len(input_columns)
+        confidence = self._estimate_prediction_confidence(
+            missing_inputs=missing_inputs,
+            expected_input_count=expected_input_count,
+        )
+
         infer_started_at = time.perf_counter()
+        if self._model_task() == "binary_classification":
+            probability = self._predict_classification_probability(
+                flat_features=flat_features,
+                recent_windows=recent_windows,
+                input_columns=input_columns,
+                target_columns=target_columns,
+                model_history_size=model_history_size,
+                full_history_size=len(input_sequence),
+            )
+            if probability is None:
+                return None
+
+            threshold = self._classification_trigger_threshold()
+            prediction = self._build_feedback_trigger_prediction(
+                latest_window=latest_window,
+                forecast_id=forecast_id,
+                horizon_seconds=horizon_seconds,
+                probability=probability,
+                confidence=confidence,
+                threshold=threshold,
+            )
+
+            infer_elapsed_ms = (time.perf_counter() - infer_started_at) * 1000.0
+            self._logger.system(
+                "forecasting_tool_classification_prediction",
+                {
+                    "forecast_id": forecast_id,
+                    "probability": round(prediction.probability, 6),
+                    "confidence": round(prediction.confidence, 6),
+                    "decision_threshold": round(threshold, 6),
+                    "trigger_feedback": prediction.trigger_feedback,
+                    "source_window_id": latest_window.window_id,
+                },
+                level="DEBUG",
+            )
+            self._logger.system(
+                "forecasting_tool_classification_decision",
+                {
+                    "forecast_id": forecast_id,
+                    "trigger_feedback": prediction.trigger_feedback,
+                    "probability": round(prediction.probability, 6),
+                    "decision_threshold": round(threshold, 6),
+                },
+                level="INFO",
+            )
+            if not prediction.trigger_feedback:
+                self._logger.system(
+                    "forecasting_tool_classification_skipped_low_probability",
+                    {
+                        "forecast_id": forecast_id,
+                        "probability": round(prediction.probability, 6),
+                        "decision_threshold": round(threshold, 6),
+                    },
+                    level="DEBUG",
+                )
+
+            self._logger.system(
+                "forecasting_tool_inference_timing",
+                {
+                    "inference_ms": round(infer_elapsed_ms, 3),
+                    "confidence": round(prediction.confidence, 3),
+                    "target_columns": target_columns,
+                },
+                level="DEBUG",
+            )
+            return prediction
+
         pred_arr = self._predict_raw_array(
             flat_features=flat_features,
             recent_windows=recent_windows,
@@ -784,19 +944,10 @@ class ForecastingTool:
         if pred_row is None:
             return None
 
-        latest_window = recent_windows[-1]
-
         predicted_components = self._build_predicted_components(
             pred_row=pred_row,
             target_columns=target_columns,
             latest_window=latest_window,
-        )
-
-        latest_window = recent_windows[-1]
-        expected_input_count = len(recent_windows) * len(input_columns)
-        confidence = self._estimate_prediction_confidence(
-            missing_inputs=missing_inputs,
-            expected_input_count=expected_input_count,
         )
 
         predicted_features = self._build_predicted_features(
