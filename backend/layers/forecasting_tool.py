@@ -490,37 +490,6 @@ class ForecastingTool:
 
         return summary_values
 
-    def _flatten_windows(
-        self,
-        windows: List[WindowFeatures],
-        input_columns: List[str],
-    ) -> Tuple[List[float], List[str]]:
-        history_rows: List[List[float]] = []
-        missing_inputs: List[str] = []
-
-        for window in windows:
-            feature_dict = window.features or {}
-            row_values: List[float] = []
-            for col in input_columns:
-                val = feature_dict.get(col)
-                if val is None:
-                    missing_inputs.append(col)
-                row_values.append(self._normalize_runtime_value(col, val))
-            history_rows.append(row_values)
-
-        history_matrix = np.asarray(history_rows, dtype=np.float32)
-        flat_features = history_matrix.flatten().tolist()
-
-        metadata = getattr(self._forecaster, "_metadata", {}) or {}
-        expected_feature_count = int(
-            metadata.get("n_features", len(metadata.get("feature_names", [])) or len(flat_features))
-        )
-
-        if expected_feature_count > len(flat_features):
-            flat_features.extend(self._build_summary_features(history_matrix, input_columns))
-
-        return flat_features, missing_inputs
-
     def _predict_raw_array(
         self,
         flat_features: List[float],
