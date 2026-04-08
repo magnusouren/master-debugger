@@ -82,6 +82,7 @@ class RuntimeController:
         self._last_feedback_time: float = 0.0
         self._current_user_state: Optional[UserStateEstimate] = None
         self._current_code_context: Optional[CodeContext] = None
+        self._latest_observed_window: Optional[WindowFeatures] = None
         
         # Feedback pipeline state
         self._context_version: int = 0
@@ -1246,6 +1247,7 @@ class RuntimeController:
         features.window_id = features.window_id or self._next_window_id()
         features.is_predicted = False
         features.forecast_id = None
+        self._latest_observed_window = features
 
         feature_window_size = features.window_end - features.window_start
         self._logger.features(
@@ -1357,7 +1359,59 @@ class RuntimeController:
 
         # Unified path:
         # Signal -> Forecasting(predicted component values) -> Reactive(score + baseline)
-        self._reactive_tool.add_features(predicted.to_window_features())
+        predicted_window = predicted.to_window_features()
+        self._hydrate_predicted_window_features(predicted_window)
+        self._reactive_tool.add_features(predicted_window)
+
+    def _hydrate_predicted_window_features(self, predicted_window: WindowFeatures) -> None:
+        """
+        Backfill missing score-driving features on predicted windows.
+
+        Current forecasting models may not output all rule-based scoring inputs
+        (e.g. anticipation/perceived difficulty/IPI). When those values are
+        missing, proactive scores can collapse relative to observed scoring.
+
+        This is the intended hybrid mode: forecast a compact subset (typically
+        IPA + fixation) and borrow the remaining contributors from the latest
+        observed window.
+        """
+        if self._latest_observed_window is None:
+            return
+
+        predicted_features = predicted_window.features or {}
+        observed_features = self._latest_observed_window.features or {}
+
+        # Keep this list aligned with ReactiveTool rule-based inputs.
+        backfill_keys = [
+            "saccade_mean_velocity",
+            "saccade_velocity_std",
+            "ipi_value",
+            "dq_valid_ratio_any",
+            "dq_sample_count",
+        ]
+
+        filled_keys: List[str] = []
+        for key in backfill_keys:
+            if predicted_features.get(key) is not None:
+                continue
+            observed_value = observed_features.get(key)
+            if observed_value is None:
+                continue
+            predicted_features[key] = observed_value
+            filled_keys.append(key)
+
+        predicted_window.features = predicted_features
+
+        if filled_keys:
+            self._logger.system(
+                "predicted_window_features_backfilled",
+                {
+                    "window_id": predicted_window.window_id,
+                    "forecast_id": predicted_window.forecast_id,
+                    "filled_keys": filled_keys,
+                },
+                level="DEBUG",
+            )
     
     def _on_user_state_estimate(self, estimate: UserStateEstimate) -> None:
         """
