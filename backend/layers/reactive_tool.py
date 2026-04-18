@@ -1214,11 +1214,16 @@ class ReactiveTool:
 
             # Get sample count for weighting
             n = feats.get("dq_sample_count", 0) or 0
-            if n <= 0:
-                continue
-
-            # Choose which ratio you consider "valid" in the system
             ratio = feats.get("dq_valid_ratio_any", None)
+
+            # Predicted windows often do not contain dq_* keys.
+            # Fall back to window-level valid_sample_ratio so metadata
+            # and confidence diagnostics remain meaningful.
+            if ratio is None:
+                ratio = getattr(wf, "valid_sample_ratio", None)
+
+            if n <= 0 and ratio is None:
+                continue
 
             # Some metrics can be None → skip
             if ratio is None:
